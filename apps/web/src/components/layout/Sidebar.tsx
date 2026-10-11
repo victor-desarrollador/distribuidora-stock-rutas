@@ -14,6 +14,7 @@ import {
   Warehouse,
   LogOut,
   UserCircle,
+  Settings,
 } from "lucide-react";
 
 import { useAuth } from "../../AuthContext";
@@ -29,6 +30,7 @@ const menu = [
   { nombre: "Rendición", icono: ClipboardCheck, ruta: "/rendicion" },
   { nombre: "Retornos", icono: Warehouse, ruta: "/retornos" },
   { nombre: "Cuentas corrientes", icono: Wallet, ruta: "/cuentas" },
+  { nombre: "Configuración", icono: Settings, ruta: "/configuracion-demo" },
 ];
 
 export default function Sidebar() {

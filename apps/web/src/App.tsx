@@ -27,6 +27,7 @@ import Rendicion from "./pages/Rendicion";
 import Retornos from "./pages/Retornos";
 import CuentasCorrientes from "./pages/CuentasCorrientes";
 import Login from "./pages/Login";
+import ConfiguracionDemo from "./pages/ConfiguracionDemo";
 
 const admin: RolUsuario[] = ["administrador"];
 
@@ -177,6 +178,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/configuracion-demo" element={<ConfiguracionDemo />} />
           <Route path="/*" element={<RutasPrivadas />} />
         </Routes>
       </BrowserRouter>
