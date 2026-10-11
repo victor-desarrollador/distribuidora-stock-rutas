@@ -14,6 +14,7 @@ import Camiones from "./pages/Camiones";
 import Jornadas from "./pages/Jornadas";
 import Autoventa from "./pages/Autoventa";
 import Movimientos from "./pages/Movimientos";
+import Rendicion from "./pages/Rendicion";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/jornadas" element={<Jornadas />} />
           <Route path="/ventas" element={<Autoventa />} />
           <Route path="/movimientos" element={<Movimientos />} />
+          <Route path="/rendicion" element={<Rendicion />} />
           <Route path="*" element={<Dashboard />} />
         </Routes>
       </AppLayout>

@@ -23,6 +23,7 @@ const menu = [
   { nombre: "Ventas", icono: ShoppingCart, ruta: "/ventas" },
   { nombre: "Cuentas corrientes", icono: Wallet, ruta: "/cuentas" },
   { nombre: "Reportes", icono: BarChart3, ruta: "/reportes" },
+  { nombre: "Rendición", icono: BarChart3, ruta: "/rendicion" }
 ];
 
 export default function Sidebar() {

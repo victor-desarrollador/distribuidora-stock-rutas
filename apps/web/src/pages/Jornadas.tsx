@@ -58,17 +58,20 @@ export default function Jornadas() {
     const reservado: Record<number, number> = {};
 
     for (const jornada of jornadas) {
-      if (
-        jornada.estado !== "preparacion" &&
-        jornada.estado !== "abierta"
-      ) continue;
-
-      for (const item of jornada.items) {
-        reservado[item.productoId] =
-          (reservado[item.productoId] ?? 0) +
-          item.cantidad;
-      }
-    }
+  // En esta demo todavía no existen transferencias
+  // de retorno al depósito.
+  //
+  // Conservamos la reserva de TODAS las cargas,
+  // incluso las de jornadas cerradas.
+  //
+  // Así evitamos reutilizar mercadería que ya
+  // fue vendida o que aún no se reintegró.
+  for (const item of jornada.items) {
+    reservado[item.productoId] =
+      (reservado[item.productoId] ?? 0) +
+      item.cantidad;
+  }
+}
 
     return reservado;
   }, [jornadas]);
