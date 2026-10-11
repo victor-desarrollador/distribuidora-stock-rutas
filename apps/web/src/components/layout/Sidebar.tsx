@@ -8,6 +8,8 @@ import {
   ShoppingCart,
   Wallet,
   BarChart3,
+  ClipboardList,
+  RefreshCw,
 } from "lucide-react";
 
 const menu = [
@@ -15,11 +17,12 @@ const menu = [
   { nombre: "Productos", icono: Package, ruta: "/productos" },
   { nombre: "Clientes", icono: Users, ruta: "/clientes" },
   { nombre: "Camiones", icono: Truck, ruta: "/camiones" },
+  { nombre: "Jornadas", icono: ClipboardList, ruta: "/jornadas" },
+  { nombre: "Autoventa", icono: ShoppingCart, ruta: "/autoventa" },
+  { nombre: "Movimientos", icono: RefreshCw, ruta: "/movimientos" },
   { nombre: "Ventas", icono: ShoppingCart, ruta: "/ventas" },
   { nombre: "Cuentas corrientes", icono: Wallet, ruta: "/cuentas" },
   { nombre: "Reportes", icono: BarChart3, ruta: "/reportes" },
-  { nombre: "Jornadas", icono: BarChart3, ruta: "/jornadas" },
-  { nombre: "Autoventa", icono: ShoppingCart, ruta: "/autoventa"},
 ];
 
 export default function Sidebar() {

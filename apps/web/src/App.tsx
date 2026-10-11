@@ -13,6 +13,7 @@ import Clientes from "./pages/Clientes";
 import Camiones from "./pages/Camiones";
 import Jornadas from "./pages/Jornadas";
 import Autoventa from "./pages/Autoventa";
+import Movimientos from "./pages/Movimientos";
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/camiones" element={<Camiones />} />
           <Route path="/jornadas" element={<Jornadas />} />
           <Route path="/ventas" element={<Autoventa />} />
+          <Route path="/movimientos" element={<Movimientos />} />
           <Route path="*" element={<Dashboard />} />
         </Routes>
       </AppLayout>

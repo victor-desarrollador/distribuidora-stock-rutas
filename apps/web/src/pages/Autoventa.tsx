@@ -16,7 +16,23 @@ import { useClientes } from "../hooks/useClientes";
 import { useCamiones } from "../hooks/useCamiones";
 import { useVentas } from "../hooks/useVentas";
 
-import type { Venta, MedioPago } from "../data/mockVentas";
+import {
+  useMovimientos,
+  leerMovimientos,
+} from "../hooks/useMovimientos";
+
+import {
+  salidasPorMovimiento,
+} from "../data/mockMovimientos";
+
+import type {
+  Venta,
+  MedioPago,
+} from "../data/mockVentas";
+
+// --------------------------------------------------
+// FUNCIONES AUXILIARES
+// --------------------------------------------------
 
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
@@ -31,12 +47,21 @@ const unidades = {
   kg: "kg",
 };
 
+// --------------------------------------------------
+// COMPONENTE PRINCIPAL
+// --------------------------------------------------
+
 export default function Autoventa() {
+  // Datos de los módulos existentes.
   const { jornadas } = useJornadas();
   const { clientes } = useClientes();
   const { camiones } = useCamiones();
   const { ventas, registrarVenta } = useVentas();
 
+  // Movimientos: mermas, devoluciones y cambios.
+  const { movimientos } = useMovimientos();
+
+  // Formulario de venta.
   const [jornadaId, setJornadaId] = useState("");
   const [clienteId, setClienteId] = useState("");
 
@@ -50,7 +75,11 @@ export default function Autoventa() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  // Una venta solo se realiza sobre una jornada abierta.
+  // --------------------------------------------------
+  // JORNADAS Y CLIENTES
+  // --------------------------------------------------
+
+  // Solo se puede vender en jornadas abiertas.
   const jornadasAbiertas = jornadas.filter(
     (jornada) => jornada.estado === "abierta"
   );
@@ -67,24 +96,47 @@ export default function Autoventa() {
     (c) => c.id === Number(clienteId) && c.activo
   );
 
-  // Mercadería vendida por jornada y producto.
-  const cantidadesVendidas = useMemo(() => {
-    const cantidadesPorProducto: Record<number, number> = {};
+  // --------------------------------------------------
+  // CÁLCULO DEL STOCK DEL CAMIÓN
+  // --------------------------------------------------
 
+  // Sumamos todas las salidas de mercadería vendible:
+  // 1. Ventas.
+  // 2. Mermas.
+  // 3. Productos entregados en cambios.
+  //
+  // Las devoluciones NO aumentan el stock vendible:
+  // quedan registradas en cuarentena.
+
+  const cantidadesDescontadas = useMemo(() => {
+    const resultado: Record<number, number> = {};
+
+    // Descontar productos vendidos.
     for (const venta of ventas) {
       if (venta.jornadaId !== jornadaId) continue;
 
       for (const item of venta.items) {
-        cantidadesPorProducto[item.productoId] =
-          (cantidadesPorProducto[item.productoId] ?? 0) +
+        resultado[item.productoId] =
+          (resultado[item.productoId] ?? 0) +
           item.cantidad;
       }
     }
 
-    return cantidadesPorProducto;
-  }, [ventas, jornadaId]);
+    // Descontar mermas y reemplazos entregados.
+    for (const movimiento of movimientos) {
+      if (movimiento.jornadaId !== jornadaId) continue;
 
-  // Calculamos existencias restantes del camión.
+      for (const item of salidasPorMovimiento(movimiento)) {
+        resultado[item.productoId] =
+          (resultado[item.productoId] ?? 0) +
+          item.cantidad;
+      }
+    }
+
+    return resultado;
+  }, [ventas, movimientos, jornadaId]);
+
+  // Mercadería disponible en el camión.
   const productosCamion = useMemo(() => {
     if (!jornada) return [];
 
@@ -93,12 +145,15 @@ export default function Autoventa() {
       disponible: Math.max(
         0,
         item.cantidad -
-          (cantidadesVendidas[item.productoId] ?? 0)
+          (cantidadesDescontadas[item.productoId] ?? 0)
       ),
     }));
-  }, [jornada, cantidadesVendidas]);
+  }, [jornada, cantidadesDescontadas]);
 
-  // Preparar el detalle de la venta.
+  // --------------------------------------------------
+  // ARMAR EL DETALLE DE VENTA
+  // --------------------------------------------------
+
   const itemsVenta = useMemo(() => {
     return productosCamion
       .filter(
@@ -113,23 +168,32 @@ export default function Autoventa() {
           unidadMedida: item.unidadMedida,
           cantidad,
           precioUnitario: item.precioReferencia,
-          subtotal: Math.round(
-            cantidad * item.precioReferencia * 100
-          ) / 100,
+          subtotal:
+            Math.round(
+              cantidad * item.precioReferencia * 100
+            ) / 100,
         };
       });
   }, [productosCamion, cantidades]);
 
-  const total = Math.round(
-    itemsVenta.reduce(
-      (acumulado, item) => acumulado + item.subtotal,
-      0
-    ) * 100
-  ) / 100;
+  // Importe total de la venta.
+  const total =
+    Math.round(
+      itemsVenta.reduce(
+        (acumulado, item) =>
+          acumulado + item.subtotal,
+        0
+      ) * 100
+    ) / 100;
 
+  // Historial de ventas de la jornada seleccionada.
   const ventasJornada = ventas
     .filter((venta) => venta.jornadaId === jornadaId)
     .sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+  // --------------------------------------------------
+  // CAMBIAR DE JORNADA
+  // --------------------------------------------------
 
   function seleccionarJornada(id: string) {
     setJornadaId(id);
@@ -139,6 +203,10 @@ export default function Autoventa() {
     setMensaje("");
     setError("");
   }
+
+  // --------------------------------------------------
+  // CAMBIAR CANTIDAD DE UN PRODUCTO
+  // --------------------------------------------------
 
   function cambiarCantidad(
     productoId: number,
@@ -150,13 +218,16 @@ export default function Autoventa() {
 
     if (!producto) return;
 
-    // Nunca permitir cantidades negativas ni superiores al stock.
+    if (!Number.isFinite(nuevaCantidad)) return;
+
+    // Evitar valores negativos o superiores al stock.
     const cantidad = Math.max(
       0,
       Math.min(nuevaCantidad, producto.disponible)
     );
 
-    // Piezas y unidades enteras. Kg admiten decimales.
+    // Los kg admiten hasta 3 decimales.
+    // Las unidades y piezas se manejan como enteros.
     const cantidadFinal =
       producto.unidadMedida === "kg"
         ? Math.round(cantidad * 1000) / 1000
@@ -167,6 +238,10 @@ export default function Autoventa() {
       [productoId]: cantidadFinal,
     }));
   }
+
+  // --------------------------------------------------
+  // REGISTRAR LA VENTA
+  // --------------------------------------------------
 
   function guardarVenta() {
     setError("");
@@ -191,10 +266,13 @@ export default function Autoventa() {
       medioPago === "cuenta_corriente" &&
       cliente.condicionPago !== "cuenta_corriente"
     ) {
-      setError("Este cliente no tiene cuenta corriente habilitada.");
+      setError(
+        "Este cliente no tiene cuenta corriente habilitada."
+      );
       return;
     }
 
+    // Crear la venta con los precios y cantidades actuales.
     const venta: Venta = {
       id: crypto.randomUUID(),
       jornadaId: jornada.id,
@@ -207,42 +285,103 @@ export default function Autoventa() {
       total,
     };
 
-    const resultado = registrarVenta(venta, (ventasActuales) => {
-      // Revalidación al momento de guardar.
-      for (const item of itemsVenta) {
-        const cargado = jornada.items.find(
-          (producto) => producto.productoId === item.productoId
-        );
+    // ------------------------------------------------
+    // REVALIDACIÓN DEL STOCK
+    // ------------------------------------------------
 
-        if (!cargado) {
-          return `El producto ${item.nombreProducto} no está cargado.`;
+    const resultado = registrarVenta(
+      venta,
+      (ventasActuales) => {
+        // Leemos los movimientos más recientes de la demo.
+        const movimientosActuales = leerMovimientos();
+
+        for (const item of itemsVenta) {
+          // Cantidad que salió cargada en el camión.
+          const cargado = jornada.items.find(
+            (producto) =>
+              producto.productoId === item.productoId
+          );
+
+          if (!cargado) {
+            return (
+              `El producto ${item.nombreProducto} ` +
+              "no está cargado en el camión."
+            );
+          }
+
+          // Cantidad ya vendida en esta jornada.
+          const vendido = ventasActuales
+            .filter(
+              (v) => v.jornadaId === jornada.id
+            )
+            .flatMap((v) => v.items)
+            .filter(
+              (p) => p.productoId === item.productoId
+            )
+            .reduce(
+              (suma, p) => suma + p.cantidad,
+              0
+            );
+
+          // Cantidad retirada por mermas y reemplazos.
+          const retirado = movimientosActuales
+            .filter(
+              (m) => m.jornadaId === jornada.id
+            )
+            .flatMap(salidasPorMovimiento)
+            .filter(
+              (p) => p.productoId === item.productoId
+            )
+            .reduce(
+              (suma, p) => suma + p.cantidad,
+              0
+            );
+
+          // Cantidad que realmente queda disponible.
+          const restante = Math.max(
+            0,
+            cargado.cantidad - vendido - retirado
+          );
+
+          // Validar cantidades y unidad de medida.
+          const cantidadValida =
+            Number.isFinite(item.cantidad) &&
+            item.cantidad > 0 &&
+            (
+              item.unidadMedida === "kg"
+                ? Math.abs(
+                    item.cantidad * 1000 -
+                    Math.round(item.cantidad * 1000)
+                  ) < 0.000001
+                : Number.isInteger(item.cantidad)
+            );
+
+          if (!cantidadValida) {
+            return (
+              `Cantidad inválida de ` +
+              item.nombreProducto
+            );
+          }
+
+          if (item.cantidad > restante + 0.000001) {
+            return (
+              `Stock insuficiente de ` +
+              item.nombreProducto
+            );
+          }
         }
 
-        const vendido = ventasActuales
-          .filter((v) => v.jornadaId === jornada.id)
-          .flatMap((v) => v.items)
-          .filter((p) => p.productoId === item.productoId)
-          .reduce((suma, p) => suma + p.cantidad, 0);
-
-        const restante = Math.max(0, cargado.cantidad - vendido);
-
-        if (
-          !Number.isFinite(item.cantidad) ||
-          item.cantidad <= 0 ||
-          item.cantidad > restante + 0.000001
-        ) {
-          return `Stock insuficiente de ${item.nombreProducto}.`;
-        }
+        return null;
       }
+    );
 
-      return null;
-    });
-
+    // Mostrar error si no se pudo registrar.
     if (resultado) {
       setError(resultado);
       return;
     }
 
+    // Limpiar los datos de la venta.
     setCantidades({});
     setClienteId("");
     setMedioPago("efectivo");
@@ -252,9 +391,13 @@ export default function Autoventa() {
     );
   }
 
+  // --------------------------------------------------
+  // INTERFAZ
+  // --------------------------------------------------
+
   return (
     <div className="mx-auto max-w-4xl space-y-5 pb-10">
-      {/* Encabezado */}
+      {/* ENCABEZADO */}
       <div>
         <p className="text-xs font-bold uppercase tracking-wider text-blue-600">
           Autoventa · Repartidor
@@ -269,7 +412,7 @@ export default function Autoventa() {
         </p>
       </div>
 
-      {/* Mensajes */}
+      {/* MENSAJES */}
       {mensaje && (
         <div
           role="status"
@@ -290,11 +433,17 @@ export default function Autoventa() {
         </div>
       )}
 
-      {/* Jornada */}
+      {/* SELECCIÓN DE JORNADA */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center gap-2">
-          <Truck size={23} className="text-blue-600" />
-          <h2 className="text-lg font-bold">Jornada activa</h2>
+          <Truck
+            size={23}
+            className="text-blue-600"
+          />
+
+          <h2 className="text-lg font-bold">
+            Jornada activa
+          </h2>
         </div>
 
         <label className="block space-y-2">
@@ -304,19 +453,28 @@ export default function Autoventa() {
 
           <select
             value={jornadaId}
-            onChange={(e) => seleccionarJornada(e.target.value)}
+            onChange={(e) =>
+              seleccionarJornada(e.target.value)
+            }
             className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3 text-base"
           >
-            <option value="">Seleccionar jornada</option>
+            <option value="">
+              Seleccionar jornada
+            </option>
 
             {jornadasAbiertas.map((j) => {
               const c = camiones.find(
-                (camion) => camion.id === j.camionId
+                (camion) =>
+                  camion.id === j.camionId
               );
 
               return (
-                <option key={j.id} value={j.id}>
-                  {c?.nombre ?? "Camión"} · {j.chofer} · {j.zona}
+                <option
+                  key={j.id}
+                  value={j.id}
+                >
+                  {c?.nombre ?? "Camión"} ·{" "}
+                  {j.chofer} · {j.zona}
                 </option>
               );
             })}
@@ -325,16 +483,20 @@ export default function Autoventa() {
 
         {jornadasAbiertas.length === 0 && (
           <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-            No hay jornadas abiertas. Primero prepará una carga
-            desde Jornadas y confirmá la salida.
+            No hay jornadas abiertas.
+            Primero prepará una carga desde
+            Jornadas y confirmá la salida.
           </p>
         )}
 
         {jornada && (
           <div className="mt-4 rounded-lg bg-blue-50 p-4">
             <p className="font-semibold text-blue-900">
-              {camion?.nombre} · {jornada.chofer}
+              {camion?.nombre ??
+                "Camión no encontrado"}{" "}
+              · {jornada.chofer}
             </p>
+
             <p className="text-sm text-blue-700">
               Zona: {jornada.zona}
             </p>
@@ -344,7 +506,7 @@ export default function Autoventa() {
 
       {jornada && (
         <>
-          {/* Cliente */}
+          {/* CLIENTE */}
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="mb-4 text-lg font-bold">
               1. Seleccionar cliente
@@ -358,12 +520,17 @@ export default function Autoventa() {
               }}
               className="min-h-14 w-full rounded-xl border border-slate-300 p-3 text-base"
             >
-              <option value="">Elegir comercio</option>
+              <option value="">
+                Elegir comercio
+              </option>
 
               {clientes
                 .filter((c) => c.activo)
                 .map((c) => (
-                  <option key={c.id} value={c.id}>
+                  <option
+                    key={c.id}
+                    value={c.id}
+                  >
                     {c.nombreComercio} · {c.zona}
                   </option>
                 ))}
@@ -372,17 +539,22 @@ export default function Autoventa() {
             {cliente && (
               <p className="mt-3 text-sm text-slate-500">
                 {cliente.direccion} ·{" "}
-                {cliente.condicionPago === "cuenta_corriente"
+                {cliente.condicionPago ===
+                "cuenta_corriente"
                   ? "Cuenta corriente habilitada"
                   : "Pago contado"}
               </p>
             )}
           </section>
 
-          {/* Productos */}
+          {/* PRODUCTOS DEL CAMIÓN */}
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center gap-2">
-              <Package size={22} className="text-blue-600" />
+              <Package
+                size={22}
+                className="text-blue-600"
+              />
+
               <h2 className="text-lg font-bold">
                 2. Agregar productos
               </h2>
@@ -394,7 +566,9 @@ export default function Autoventa() {
                   cantidades[producto.productoId] ?? 0;
 
                 const incremento =
-                  producto.unidadMedida === "kg" ? 0.5 : 1;
+                  producto.unidadMedida === "kg"
+                    ? 0.5
+                    : 1;
 
                 return (
                   <div
@@ -406,21 +580,23 @@ export default function Autoventa() {
                     </p>
 
                     <p className="mt-1 text-sm text-slate-500">
-                      {moneda(producto.precioReferencia)} por{" "}
-                      {producto.unidadMedida}
+                      {moneda(producto.precioReferencia)}{" "}
+                      por {producto.unidadMedida}
                     </p>
 
                     <p className="mt-1 text-xs text-blue-700">
-                      Disponible: {producto.disponible}{" "}
+                      Disponible:{" "}
+                      {producto.disponible}{" "}
                       {unidades[producto.unidadMedida]}
                     </p>
 
-                    <div className="mt-4 flex items-center justify-between gap-3">
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                       <span className="text-sm font-medium text-slate-600">
                         Cantidad
                       </span>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        {/* QUITAR */}
                         <button
                           type="button"
                           aria-label={`Quitar ${producto.nombreProducto}`}
@@ -436,6 +612,7 @@ export default function Autoventa() {
                           <Minus size={22} />
                         </button>
 
+                        {/* CANTIDAD */}
                         <input
                           type="number"
                           min="0"
@@ -458,6 +635,7 @@ export default function Autoventa() {
                           className="h-12 w-20 rounded-lg border border-slate-300 text-center text-lg font-bold"
                         />
 
+                        {/* AGREGAR */}
                         <button
                           type="button"
                           aria-label={`Agregar ${producto.nombreProducto}`}
@@ -489,10 +667,14 @@ export default function Autoventa() {
             )}
           </section>
 
-          {/* Cobro */}
+          {/* RESUMEN Y COBRO */}
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center gap-2">
-              <ShoppingCart size={22} className="text-blue-600" />
+              <ShoppingCart
+                size={22}
+                className="text-blue-600"
+              />
+
               <h2 className="text-lg font-bold">
                 3. Resumen y cobro
               </h2>
@@ -513,26 +695,33 @@ export default function Autoventa() {
                       <p className="font-medium">
                         {item.nombreProducto}
                       </p>
+
                       <p className="text-slate-500">
-                        {item.cantidad} × {moneda(item.precioUnitario)}
+                        {item.cantidad} ×{" "}
+                        {moneda(item.precioUnitario)}
                       </p>
                     </div>
 
-                    <strong>{moneda(item.subtotal)}</strong>
+                    <strong>
+                      {moneda(item.subtotal)}
+                    </strong>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="my-5 flex items-center justify-between border-t border-slate-200 pt-4">
+            {/* TOTAL */}
+            <div className="my-5 flex items-center justify-between gap-3 border-t border-slate-200 pt-4">
               <span className="font-semibold">
                 Total de venta
               </span>
-              <span className="text-3xl font-bold text-slate-900">
+
+              <span className="text-2xl font-bold text-slate-900 sm:text-3xl">
                 {moneda(total)}
               </span>
             </div>
 
+            {/* MEDIOS DE PAGO */}
             <p className="mb-3 text-sm font-semibold">
               Forma de pago
             </p>
@@ -547,14 +736,17 @@ export default function Autoventa() {
               ).map(([valor, etiqueta]) => {
                 const deshabilitado =
                   valor === "cuenta_corriente" &&
-                  cliente?.condicionPago !== "cuenta_corriente";
+                  cliente?.condicionPago !==
+                    "cuenta_corriente";
 
                 return (
                   <button
                     key={valor}
                     type="button"
                     disabled={deshabilitado}
-                    onClick={() => setMedioPago(valor)}
+                    onClick={() =>
+                      setMedioPago(valor)
+                    }
                     className={`min-h-14 rounded-xl border-2 px-3 py-3 font-medium transition-colors ${
                       medioPago === valor
                         ? "border-blue-600 bg-blue-50 text-blue-700"
@@ -567,10 +759,15 @@ export default function Autoventa() {
               })}
             </div>
 
+            {/* GUARDAR VENTA */}
             <button
               type="button"
               onClick={guardarVenta}
-              disabled={!cliente || itemsVenta.length === 0}
+              disabled={
+                !cliente ||
+                itemsVenta.length === 0 ||
+                !camion
+              }
               className="mt-6 flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-5 text-lg font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <CheckCircle2 size={24} />
@@ -578,10 +775,14 @@ export default function Autoventa() {
             </button>
           </section>
 
-          {/* Historial de la jornada */}
+          {/* HISTORIAL DE VENTAS */}
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center gap-2">
-              <Receipt size={22} className="text-blue-600" />
+              <Receipt
+                size={22}
+                className="text-blue-600"
+              />
+
               <h2 className="text-lg font-bold">
                 Ventas registradas
               </h2>
@@ -605,13 +806,17 @@ export default function Autoventa() {
                     </p>
 
                     <p className="text-xs text-slate-500">
-                      {new Date(venta.fecha).toLocaleString("es-AR")}
+                      {new Date(
+                        venta.fecha
+                      ).toLocaleString("es-AR")}
                     </p>
 
                     <p className="mt-1 text-xs text-blue-700">
-                      {venta.medioPago === "cuenta_corriente"
+                      {venta.medioPago ===
+                      "cuenta_corriente"
                         ? "Cuenta corriente"
-                        : venta.medioPago === "transferencia"
+                        : venta.medioPago ===
+                          "transferencia"
                         ? "Transferencia"
                         : "Efectivo"}
                     </p>
@@ -627,9 +832,11 @@ export default function Autoventa() {
         </>
       )}
 
+      {/* AVISO DE PROTOTIPO */}
       <p className="text-center text-xs text-slate-500">
-        Prototipo de demostración. Sin cobros reales,
-        facturación ni sincronización entre dispositivos.
+        Prototipo de demostración.
+        Sin cobros reales, facturación
+        ni sincronización entre dispositivos.
       </p>
     </div>
   );
