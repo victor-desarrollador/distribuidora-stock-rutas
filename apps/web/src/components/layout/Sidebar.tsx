@@ -10,6 +10,8 @@ import {
   BarChart3,
   ClipboardList,
   RefreshCw,
+  ClipboardCheck,
+  Warehouse,
 } from "lucide-react";
 
 const menu = [
@@ -20,10 +22,11 @@ const menu = [
   { nombre: "Jornadas", icono: ClipboardList, ruta: "/jornadas" },
   { nombre: "Autoventa", icono: ShoppingCart, ruta: "/autoventa" },
   { nombre: "Movimientos", icono: RefreshCw, ruta: "/movimientos" },
+  { nombre: "Rendición", icono: ClipboardCheck, ruta: "/rendicion" },
+  { nombre: "Retornos", icono: Warehouse, ruta: "/retornos" },
   { nombre: "Ventas", icono: ShoppingCart, ruta: "/ventas" },
   { nombre: "Cuentas corrientes", icono: Wallet, ruta: "/cuentas" },
   { nombre: "Reportes", icono: BarChart3, ruta: "/reportes" },
-  { nombre: "Rendición", icono: BarChart3, ruta: "/rendicion" }
 ];
 
 export default function Sidebar() {

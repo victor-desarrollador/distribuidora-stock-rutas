@@ -1,4 +1,3 @@
-
 import { useMemo, useState } from "react";
 import {
   Truck,
@@ -8,96 +7,103 @@ import {
   AlertTriangle,
   ClipboardList,
 } from "lucide-react";
-
 import { useCamiones } from "../hooks/useCamiones";
 import { useProductos } from "../hooks/useProductos";
 import { useJornadas } from "../hooks/useJornadas";
-
+import { useRetornos } from "../hooks/useRetornos";
 import {
   type Jornada,
   type ItemCarga,
 } from "../data/mockJornadas";
-
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
     style: "currency",
     currency: "ARS",
     maximumFractionDigits: 2,
   }).format(valor);
-
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
   kg: "kg",
 };
-
 export default function Jornadas() {
   const { camiones } = useCamiones();
   const { productos } = useProductos();
-
+  const { retornos } = useRetornos();
   const {
     jornadas,
     crearJornada,
     confirmarSalida,
   } = useJornadas();
-
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [camionId, setCamionId] = useState("");
   const [chofer, setChofer] = useState("");
   const [zona, setZona] = useState("");
-
   const [cantidades, setCantidades] = useState<
     Record<number, string>
   >({});
-
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
-
-  // Las jornadas en preparación o abiertas ocupan stock.
+  // Stock comprometido en las cargas, menos los retornos aprobados.
+  // Las jornadas cerradas siguen reservando lo que no regresó.
   const stockReservado = useMemo(() => {
     const reservado: Record<number, number> = {};
-
+    // Toda mercadería cargada salió del depósito central.
     for (const jornada of jornadas) {
-  // En esta demo todavía no existen transferencias
-  // de retorno al depósito.
-  //
-  // Conservamos la reserva de TODAS las cargas,
-  // incluso las de jornadas cerradas.
-  //
-  // Así evitamos reutilizar mercadería que ya
-  // fue vendida o que aún no se reintegró.
-  for (const item of jornada.items) {
-    reservado[item.productoId] =
-      (reservado[item.productoId] ?? 0) +
-      item.cantidad;
-  }
-}
-
+      for (const item of jornada.items) {
+        reservado[item.productoId] =
+          (reservado[item.productoId] ?? 0) + item.cantidad;
+      }
+    }
+    // Solo reincorporamos los retornos aprobados de jornadas cerradas.
+    for (const retorno of retornos) {
+      const jornadaOrigen = jornadas.find(
+        (j) => j.id === retorno.jornadaId
+      );
+      if (
+        !jornadaOrigen ||
+        jornadaOrigen.estado !== "cerrada" ||
+        jornadaOrigen.camionId !== retorno.camionId
+      ) {
+        continue;
+      }
+      for (const item of retorno.items) {
+        // Evitar contar un producto ajeno a la carga original.
+        const cargado = jornadaOrigen.items.find(
+          (p) => p.productoId === item.productoId
+        );
+        if (
+          !cargado ||
+          cargado.unidadMedida !== item.unidadMedida ||
+          !Number.isFinite(item.cantidadAprobada) ||
+          item.cantidadAprobada < 0 ||
+          item.cantidadAprobada > item.cantidadContada
+        ) {
+          continue;
+        }
+        reservado[item.productoId] =
+          (reservado[item.productoId] ?? 0) - item.cantidadAprobada;
+      }
+    }
     return reservado;
-  }, [jornadas]);
-
+  }, [jornadas, retornos]);
   // Camiones sin otra jornada activa y fuera de mantenimiento.
   const camionesDisponibles = camiones.filter((camion) => {
     if (camion.estado !== "disponible") return false;
-
     return !jornadas.some(
       (jornada) =>
         jornada.camionId === camion.id &&
         jornada.estado !== "cerrada"
     );
   });
-
   function disponibilidad(productoId: number) {
     const producto = productos.find((p) => p.id === productoId);
-
     if (!producto) return 0;
-
     return Math.max(
       0,
       producto.stock - (stockReservado[productoId] ?? 0)
     );
   }
-
   const itemsSeleccionados = useMemo(() => {
     return productos
       .filter((producto) => {
@@ -112,25 +118,20 @@ export default function Jornadas() {
         precioReferencia: producto.precio,
       }));
   }, [productos, cantidades]);
-
   const valorCarga = itemsSeleccionados.reduce(
     (total, item) =>
       total + item.cantidad * item.precioReferencia,
     0
   );
-
   const jornadasOrdenadas = [...jornadas].sort((a, b) =>
     b.fechaCreacion.localeCompare(a.fechaCreacion)
   );
-
   const jornadasAbiertas = jornadas.filter(
     (j) => j.estado === "abierta"
   ).length;
-
   const jornadasPreparacion = jornadas.filter(
     (j) => j.estado === "preparacion"
   ).length;
-
   function limpiarFormulario() {
     setMostrarFormulario(false);
     setCamionId("");
@@ -138,19 +139,15 @@ export default function Jornadas() {
     setZona("");
     setCantidades({});
   }
-
   function abrirFormulario() {
     setError("");
     setMensaje("");
     setMostrarFormulario(true);
   }
-
   function guardarPreparacion() {
     setError("");
     setMensaje("");
-
     const idCamion = Number(camionId);
-
     if (
       !camionId ||
       !camionesDisponibles.some((c) => c.id === idCamion)
@@ -158,35 +155,28 @@ export default function Jornadas() {
       setError("Seleccioná un camión disponible.");
       return;
     }
-
     if (!chofer.trim() || !zona.trim()) {
       setError("Completá el chofer y la zona de reparto.");
       return;
     }
-
     if (itemsSeleccionados.length === 0) {
       setError("Agregá al menos un producto a la carga.");
       return;
     }
-
     // Comprobamos todas las cantidades antes de guardar.
     for (const producto of productos) {
       const texto = cantidades[producto.id] ?? "";
       if (!texto.trim()) continue;
-
       const cantidad = Number(texto);
-
       const cantidadValida =
         Number.isFinite(cantidad) &&
         cantidad >= 0 &&
         (producto.unidadMedida === "kg" ||
           Number.isInteger(cantidad));
-
       if (!cantidadValida) {
         setError(`Cantidad inválida: ${producto.nombre}`);
         return;
       }
-
       if (cantidad > disponibilidad(producto.id)) {
         setError(
           `No hay stock suficiente de ${producto.nombre}.`
@@ -194,7 +184,6 @@ export default function Jornadas() {
         return;
       }
     }
-
     const jornada: Jornada = {
       id: crypto.randomUUID(),
       camionId: idCamion,
@@ -205,41 +194,32 @@ export default function Jornadas() {
       estado: "preparacion",
       items: itemsSeleccionados,
     };
-
     if (!crearJornada(jornada)) {
       setError("No se pudo guardar la jornada.");
       return;
     }
-
     limpiarFormulario();
     setMensaje("Carga preparada correctamente.");
   }
-
   function iniciarReparto(jornada: Jornada) {
     setError("");
     setMensaje("");
-
     if (jornada.estado !== "preparacion") return;
-
     const camion = camiones.find(
       (c) => c.id === jornada.camionId
     );
-
     if (!camion || camion.estado !== "disponible") {
       setError("El camión ya no está disponible.");
       return;
     }
-
     if (!confirmarSalida(jornada.id)) {
       setError("No se pudo confirmar la salida.");
       return;
     }
-
     setMensaje(
       `Salida confirmada: ${camion.nombre}.`
     );
   }
-
   return (
     <div className="space-y-6">
       {/* Encabezado */}
@@ -252,7 +232,6 @@ export default function Jornadas() {
             Preparación de cargas y salidas de camiones
           </p>
         </div>
-
         <button
           type="button"
           onClick={abrirFormulario}
@@ -262,7 +241,6 @@ export default function Jornadas() {
           Nueva jornada
         </button>
       </div>
-
       {/* Estadísticas */}
       <div className="grid gap-4 sm:grid-cols-3">
         {[
@@ -292,7 +270,6 @@ export default function Jornadas() {
           </div>
         ))}
       </div>
-
       {/* Mensajes */}
       {mensaje && (
         <div
@@ -303,7 +280,6 @@ export default function Jornadas() {
           {mensaje}
         </div>
       )}
-
       {error && (
         <div
           role="alert"
@@ -313,14 +289,12 @@ export default function Jornadas() {
           {error}
         </div>
       )}
-
       {/* Nueva jornada */}
       {mostrarFormulario && (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
           <h2 className="mb-5 text-xl font-bold text-slate-800">
             Preparar carga del camión
           </h2>
-
           <div className="grid gap-4 md:grid-cols-3">
             <label className="space-y-2 text-sm font-medium">
               <span>Camión *</span>
@@ -340,7 +314,6 @@ export default function Jornadas() {
                 ))}
               </select>
             </label>
-
             <label className="space-y-2 text-sm font-medium">
               <span>Chofer *</span>
               <input
@@ -350,7 +323,6 @@ export default function Jornadas() {
                 className="min-h-12 w-full rounded-lg border border-slate-300 p-3"
               />
             </label>
-
             <label className="space-y-2 text-sm font-medium">
               <span>Zona *</span>
               <input
@@ -361,20 +333,16 @@ export default function Jornadas() {
               />
             </label>
           </div>
-
           <h3 className="mb-3 mt-8 text-lg font-semibold">
             Mercadería para cargar
           </h3>
-
           <p className="mb-4 text-sm text-slate-500">
-            Las cantidades disponibles descuentan las cargas
-            preparadas y los repartos abiertos de esta demo.
+            Las cantidades disponibles contemplan las cargas
+            y los retornos aprobados al depósito en esta demo.
           </p>
-
           <div className="space-y-3">
             {productos.map((producto) => {
               const disponible = disponibilidad(producto.id);
-
               return (
                 <div
                   key={producto.id}
@@ -385,24 +353,20 @@ export default function Jornadas() {
                       className="shrink-0 text-blue-600"
                       size={23}
                     />
-
                     <div>
                       <p className="font-medium text-slate-800">
                         {producto.nombre}
                       </p>
-
                       <p className="text-sm text-slate-500">
                         Disponible: {disponible}{" "}
                         {unidades[producto.unidadMedida]}
                       </p>
-
                       <p className="text-xs text-slate-400">
                         {moneda(producto.precio)} por{" "}
                         {producto.unidadMedida}
                       </p>
                     </div>
                   </div>
-
                   <label className="flex items-center gap-2 text-sm">
                     <span>Cargar:</span>
                     <input
@@ -432,7 +396,6 @@ export default function Jornadas() {
               );
             })}
           </div>
-
           {/* Resumen */}
           <div className="mt-6 rounded-xl bg-blue-50 p-5">
             <p className="text-sm font-medium text-blue-700">
@@ -445,7 +408,6 @@ export default function Jornadas() {
               Calculado con precios de venta de referencia.
             </p>
           </div>
-
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
@@ -454,7 +416,6 @@ export default function Jornadas() {
             >
               Guardar preparación
             </button>
-
             <button
               type="button"
               onClick={limpiarFormulario}
@@ -465,13 +426,11 @@ export default function Jornadas() {
           </div>
         </section>
       )}
-
       {/* Listado de jornadas */}
       <section className="space-y-4">
         <h2 className="text-xl font-bold text-slate-800">
           Jornadas registradas
         </h2>
-
         {jornadasOrdenadas.length === 0 && (
           <div className="rounded-xl bg-white p-10 text-center text-slate-500">
             <ClipboardList
@@ -481,19 +440,16 @@ export default function Jornadas() {
             Todavía no hay jornadas registradas.
           </div>
         )}
-
         {jornadasOrdenadas.map((jornada) => {
           const camion = camiones.find(
             (c) => c.id === jornada.camionId
           );
-
           const total = jornada.items.reduce(
             (acumulado, item) =>
               acumulado +
               item.cantidad * item.precioReferencia,
             0
           );
-
           return (
             <article
               key={jornada.id}
@@ -505,7 +461,6 @@ export default function Jornadas() {
                     size={28}
                     className="text-blue-600"
                   />
-
                   <div>
                     <h3 className="text-lg font-bold text-slate-800">
                       {camion?.nombre ?? "Camión no encontrado"}
@@ -515,7 +470,6 @@ export default function Jornadas() {
                     </p>
                   </div>
                 </div>
-
                 <span
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${
                     jornada.estado === "abierta"
@@ -532,14 +486,12 @@ export default function Jornadas() {
                     : "Cerrada"}
                 </span>
               </div>
-
               <p className="mt-3 text-xs text-slate-500">
                 Preparada:{" "}
                 {new Date(
                   jornada.fechaCreacion
                 ).toLocaleString("es-AR")}
               </p>
-
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[360px] text-left text-sm">
                   <thead className="border-b text-slate-500">
@@ -550,7 +502,6 @@ export default function Jornadas() {
                       </th>
                     </tr>
                   </thead>
-
                   <tbody>
                     {jornada.items.map((item) => (
                       <tr
@@ -569,7 +520,6 @@ export default function Jornadas() {
                   </tbody>
                 </table>
               </div>
-
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs text-slate-500">
@@ -579,7 +529,6 @@ export default function Jornadas() {
                     {moneda(total)}
                   </p>
                 </div>
-
                 {jornada.estado === "preparacion" && (
                   <button
                     type="button"
@@ -589,7 +538,6 @@ export default function Jornadas() {
                     Confirmar salida
                   </button>
                 )}
-
                 {jornada.estado === "abierta" && (
                   <span className="flex items-center gap-2 font-medium text-green-700">
                     <CheckCircle2 size={20} />
@@ -601,11 +549,10 @@ export default function Jornadas() {
           );
         })}
       </section>
-
       <p className="text-sm text-slate-500">
         Modo demostración: las cargas no descuentan
-        inventario real. La reserva de disponibilidad
-        funciona solamente con datos de este navegador.
+        inventario real. La disponibilidad para nuevas cargas
+        se calcula con datos de este navegador.
       </p>
     </div>
   );
