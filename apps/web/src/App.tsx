@@ -12,6 +12,7 @@ import Productos from "./pages/Productos";
 import Clientes from "./pages/Clientes";
 import Camiones from "./pages/Camiones";
 import Jornadas from "./pages/Jornadas";
+import Autoventa from "./pages/Autoventa";
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/camiones" element={<Camiones />} />
           <Route path="/jornadas" element={<Jornadas />} />
+          <Route path="/ventas" element={<Autoventa />} />
           <Route path="*" element={<Dashboard />} />
         </Routes>
       </AppLayout>

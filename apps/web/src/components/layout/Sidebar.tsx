@@ -19,6 +19,7 @@ const menu = [
   { nombre: "Cuentas corrientes", icono: Wallet, ruta: "/cuentas" },
   { nombre: "Reportes", icono: BarChart3, ruta: "/reportes" },
   { nombre: "Jornadas", icono: BarChart3, ruta: "/jornadas" },
+  { nombre: "Autoventa", icono: ShoppingCart, ruta: "/autoventa"},
 ];
 
 export default function Sidebar() {
@@ -38,10 +39,9 @@ export default function Sidebar() {
             key={ruta}
             to={ruta}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 transition-colors ${
-                isActive
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+              `flex items-center gap-3 rounded-lg px-4 py-3 transition-colors ${isActive
+                ? "bg-blue-600 text-white"
+                : "text-slate-300 hover:bg-slate-800 hover:text-white"
               }`
             }
           >
