@@ -1,5 +1,9 @@
 
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+} from "react-router-dom";
 
 import AppLayout from "./components/layout/AppLayout";
 
@@ -7,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import Productos from "./pages/Productos";
 import Clientes from "./pages/Clientes";
 import Camiones from "./pages/Camiones";
+import Jornadas from "./pages/Jornadas";
 
 export default function App() {
   return (
@@ -17,6 +22,7 @@ export default function App() {
           <Route path="/productos" element={<Productos />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/camiones" element={<Camiones />} />
+          <Route path="/jornadas" element={<Jornadas />} />
           <Route path="*" element={<Dashboard />} />
         </Routes>
       </AppLayout>
