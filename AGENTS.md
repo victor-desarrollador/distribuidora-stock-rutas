@@ -90,6 +90,7 @@ Documentación, commits y mensajes al usuario en español (Argentina). Identific
 ├── AGENTS.md             este archivo
 ├── CLAUDE.md             instrucciones específicas de Claude Code
 ├── opencode.json         configuración de OpenCode (permisos, plugins)
+├── .agents/skills/       skills fijadas en el repositorio y compartidas por los agentes
 ├── .opencode/agents/     subagentes de OpenCode (auditor de solo lectura)
 ├── .claude/              configuración compartida de Claude Code
 ├── docs/
