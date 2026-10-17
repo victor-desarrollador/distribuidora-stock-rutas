@@ -1,0 +1,375 @@
+# PRD — Sistema de Control de Stock y Rendición
+
+**Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
+**Fecha:** 17/10/2026
+**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v1.4; **no lo reemplaza**.
+**Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
+
+---
+
+## 0. Cómo leer este documento
+
+- **Fuente de verdad:** `BLUEPRINT.md` v1.4, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR **aprobadas** y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
+- **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
+- **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
+- **ADR:** hoy la única ADR es **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas**, en **versión 1.2 (ronda 3 de correcciones documentales)** y estado **`propuesta` — NO APROBADA** (`docs/decisions/001-rpc-privilegiadas.md`; `docs/decisions/README.md`). Sus **veinte puntos P1–P20** (sección 18 de la ADR) son **decisiones pendientes de aprobación humana**; sus recomendaciones son **no vinculantes**. Este PRD la trata como dependencia pendiente, nunca como decisión vigente, y **no convierte en requisito ninguna de sus recomendaciones**.
+- **Fase 2:** lo listado en Blueprint §5 permanece fuera de Fase 1.
+- Este documento **no inventa** decisiones ausentes: donde falta definición, remite a «Decisiones pendientes» (§21), a «Dependencias de ADR» (§22) y al Blueprint §15.
+
+### Categorías que este documento distingue
+
+| Categoría | Significado | Dónde se marca |
+|---|---|---|
+| **Aprobado por el Blueprint** | Regla vigente de Fase 1. | Requisitos de §7 a §11 y §14. |
+| **PROPUESTA NO APROBADA / PROPUESTA TÉCNICA NO APROBADA** | Regla del Blueprint marcada como propuesta; **no es requisito**. **No se implementa** (AGENTS.md §3). | Avisos en §7, §9, §10, §14 y §20. |
+| **Decisión pendiente de ADR** | Punto **P1–P20** de ADR-001 v1.2 (ronda 3), en estado `propuesta`; requiere **decisión humana**. | §11, §18, §21 y §22. |
+| **Fase 2 / fuera de alcance** | Postergado por decisión confirmada; no integra la primera entrega. | §20. |
+
+---
+
+## 1. Producto y contexto
+
+- Distribuidora de lácteos y fiambres. Operación inicial de **dos camiones** (cantidad final por validar). Se estiman **6 a 10 usuarios** (Blueprint §2).
+- **Venta digital online-first:** el vendedor/piloto registra las operaciones desde Android cuando hay conexión. Sin Internet usa **talonario numerado de papel**. No se implementa sincronización offline automática (Blueprint §2).
+- Una vez finalizada la jornada, el sistema compara lo que salió en el camión, lo vendido, lo devuelto y el dinero entregado, y expone las diferencias y los responsables de cada paso (Blueprint §1).
+- **Arquitectura prevista:** frontend React + TypeScript + Vite, deploy en Vercel; backend Supabase (Auth, PostgreSQL, RLS, RPC, Storage). La lógica que mueve stock o dinero vive en la base, no en el frontend (Blueprint §6).
+- Fase 1 se organiza en entregas **1A** (operación con papel + registro diferido) y **1B** (operación digital móvil), según Blueprint §4 y §14.
+
+---
+
+## 2. Problema
+
+El dueño no tiene hoy una forma confiable de saber, por camión y por jornada, **qué mercadería salió, qué se vendió y qué volvió**, ni de detectar y atribuir **faltantes de mercadería y de dinero** (Blueprint §1). Sin un registro trazable y con separación de responsabilidades:
+
+- la carga, las ventas, los retornos y el dinero dependen de lo que alguien recuerde o anote;
+- no hay forma de distinguir un error honesto de un faltante, ni de saber quién hizo cada paso;
+- un faltante o sobrante no deja rastro auditable.
+
+El repositorio contiene hoy un **prototipo de demostración** de frontend, sin backend, que no cumple las reglas del Blueprint (ver `INVENTARIO_ETAPA_0.md`). El producto de Fase 1 es el sistema real definido en el Blueprint, no una evolución del prototipo.
+
+---
+
+## 3. Objetivo del producto
+
+Que el dueño **sepa qué mercadería sale en cada camión, qué se vendió y qué volvió**, y que pueda **detectar faltantes de mercadería y de dinero por camión, por jornada y por vendedor** (Blueprint §1).
+
+Todo lo que no sirva a ese objetivo queda fuera de Fase 1 (Blueprint §1, §3.4).
+
+---
+
+## 4. Pregunta principal que debe responder el sistema
+
+El sistema debe poder responder siempre (Blueprint §1):
+
+> «El camión X salió el día D con esta carga. Según las ventas y devoluciones, debería haber vuelto con A y entregado $B. Volvió con C y entregó $E. **La diferencia es esta, y estos son los responsables de cada paso.**»
+
+---
+
+## 5. Usuarios y roles
+
+Tres roles, con las capacidades confirmadas en Blueprint §9. No se crean roles independientes de depósito o administración en Fase 1.
+
+| Rol | Puede | No puede |
+|---|---|---|
+| **Dueño** | Visión general; administrar usuarios, clientes, productos, stock, jornadas y rendiciones; autorizar gastos y retiros; confirmar recepción de retiros. | Borrar movimientos confirmados sin reversión auditada. |
+| **Encargado** | Operación general; editar y validar clientes; administrar cargas, conteos, cierre con diferencias, gastos y retiros de efectivo. | Administrar roles globales ni borrar historial sin compensación. |
+| **Vendedor / Piloto** | Ver su jornada y clientes necesarios; **crear cliente nuevo**; registrar ventas y pagos mixtos; transcribir papel; finalizar ventas (`ventas_finalizadas`); confirmar entrega de retiro de dinero. | Editar ficha de cliente existente, cambiar precios maestros, aprobar su propio conteo/rendición, registrar retiros como receptor autorizado. |
+
+Reglas transversales de rol (Blueprint §3.2, §7.5, §9):
+
+- **Quien cuenta el regreso no es el vendedor** de esa jornada; si no hay otra persona disponible, el conteo queda pendiente, sin auto-bypass.
+- La separación vendedor/conteo se valida **por participación real** en la jornada, incluso si una persona acumula permisos.
+- El vendedor **puede crear** clientes nuevos pero **nunca editar** fichas existentes (Blueprint §2, §7.5).
+
+---
+
+## 6. Flujo operativo de una jornada
+
+Estados (Blueprint §7.5): `abierta → cargada → en_reparto → ventas_finalizadas → regreso_contado → cerrada`. Los eventos se registran por separado y el cierre exige su validación; se evitan transiciones implícitas.
+
+1. **Preparación / apertura.** Se crea la jornada del camión para la fecha, con vendedor asignado.
+2. **Carga.** Se carga mercadería desde depósito al camión (`carga_camion`). El camión no se carga con mercadería en cuarentena.
+3. **Salida / reparto.** El vendedor registra ventas digitales con conexión; si no hay Internet, usa talonario numerado de papel.
+4. **Finalización de ventas (`ventas_finalizadas`).** El vendedor transcribe, guarda en el servidor y declara completas las notas de papel **antes** de que el encargado inicie el conteo formal.
+5. **Conteo de regreso (`regreso_contado`).** Lo realiza dueño/encargado, distinto del vendedor, con clasificación física por aptitud (`apto` / `cuarentena` / `no_apto`). El conteo se captura **antes** de registrar el retorno definitivo.
+6. **Retorno y merma.** El stock apto vuelve a depósito; el no apto pasa a cuarentena/merma según regla, con movimientos explícitos.
+7. **Rendición y cierre (`cerrada`).** Se concilia mercadería y dinero por medio; las diferencias (positivas o negativas) requieren revisión, motivo y aprobación de dueño/encargado. Al cerrar, el saldo del camión queda en cero solo cuando la conciliación y la regularización están completas.
+
+Reglas de la jornada (Blueprint §2, §7.5):
+
+- **Una sola jornada por (`empresa_id`, `camion_id`, `fecha`)**, aunque otra del mismo camión y día ya esté cerrada.
+- Un retiro de efectivo puede registrarse mientras la jornada está `en_reparto`.
+- Una jornada **cerrada es inmutable**; las rectificaciones posteriores se hacen con operaciones compensatorias auditadas (Blueprint §3.3, §7.5).
+
+---
+
+## 7. Requisitos funcionales Fase 1
+
+Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blueprint §7). Las entregas 1A/1B son las del Blueprint §4 y §14.
+
+| ID | Requisito | Entrega | Fuente |
+|---|---|---|---|
+| RF-01 | **Productos:** alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad`/`pieza`), precio, stock mínimo. Fiambre por pieza/media pieza. | 1A | Blueprint §4, §7.1 |
+| RF-02 | **Clientes:** consultar y buscar; **alta por vendedor** desde celular; dueño/encargado editan y validan. Historial básico. | 1A; altas móviles 1B | Blueprint §4, §7.5 |
+| RF-03 | **Depósito y camiones:** stock por ubicación, carga por jornada, movimientos auditados, cuarentena y retornos. | 1A | Blueprint §4, §7.2 |
+| RF-04 | **Jornadas:** una por camión y fecha, asignación de vendedor, preparación, salida, carga final de ventas, conteo por tercero, rendición y cierre. | 1A | Blueprint §4, §7.5 |
+| RF-05 | **Autoventa:** venta online en Android; talonario numerado como contingencia; carga de pendientes antes del conteo; control de duplicados y notas anuladas. | 1A papel / 1B digital | Blueprint §4, §7.5 |
+| RF-06 | **Pagos de venta (mixtos):** múltiples medios por venta (efectivo, transferencia, importe a cuenta); la suma de componentes debe igualar el total. | 1A pagos; 1B captura móvil | Blueprint §4, §7.5, §7.8 |
+| RF-07 | **Retiros de efectivo:** solicitud de dueño/encargado, **doble confirmación** (quien entrega y quien recibe), auditoría y afectación al saldo de efectivo por rendir. | 1A diferido / 1B en vivo | Blueprint §4, §7.6 |
+| RF-08 | **Gastos en ruta:** registrados únicamente con autorización de dueño/encargado; afectan la conciliación como categoría separada de los retiros. | 1A registración autorizada / 1B móvil | Blueprint §4, §7.6 |
+| RF-09 | **Devoluciones y mermas:** motivos, clasificación por aptitud, segregación de cuarentena y trazabilidad. La aptitud se evalúa por producto; no hay autorización genérica para todo retorno. | 1A | Blueprint §4, §7.7 |
+| RF-10 | **Rendición:** mercadería esperada vs contada por estado; efectivo/transferencias/a cuenta/retiros separados; diferencias solo con aprobación y motivo. | 1A | Blueprint §4, §7.8 |
+| RF-11 | **Reportes y usuarios:** los 9 reportes de Blueprint §11, exportación CSV, 3 roles, RLS y auditoría. | 1A; ampliaciones 1B | Blueprint §4, §11 |
+
+**Sub-requisitos de integridad funcional** (reglas que atraviesan varios módulos):
+
+- Toda venta identifica origen (`digital`/`papel`), serie y número de nota cuando aplica, usuario, instante de registro del servidor, jornada, cliente, ítems, precios históricos y pagos (Blueprint §7.5).
+- La validación de duplicados de nota es por **empresa, serie y número en todo el histórico**, no solo dentro de una jornada; también hay idempotencia por solicitud. Las notas anuladas se preservan con motivo y sin efecto de stock/dinero (Blueprint §7.5, §8).
+- Las devoluciones de cliente recibidas se registran como entrada al camión **una vez** y no suponen stock vendible automático (Blueprint §7.8).
+- Faltantes y sobrantes generan **movimientos explícitos** (`faltante_rendicion` / `sobrante_rendicion`) con autorización; nunca se crea mercadería sin causa (Blueprint §7.4, §7.8).
+
+**Puntos expresamente NO vigentes** (no son requisitos de Fase 1):
+
+- **PROPUESTA NO APROBADA — Stock negativo transitorio** en la ubicación del camión con jornada abierta y marca `excede_stock` (Blueprint §7.4, §8, §15).
+- **PROPUESTA NO APROBADA — Anulación de ventas por el vendedor** antes de `ventas_finalizadas` con motivo obligatorio (Blueprint §7.5, §15).
+- **PROPUESTA NO APROBADA — Prohibición de descuentos** al vendedor y esquema de precio de lista vs aplicado (Blueprint §7.5, §15).
+- **PROPUESTA NO APROBADA — Retiro que supera el saldo registrado sin bloqueo** (Blueprint §7.6, §15).
+- **PROPUESTA TÉCNICA NO APROBADA — Vencimientos por partida de ingreso** (`partidas_ingreso`), sin saldo por partida ni FEFO (Blueprint §2, §4, §8, §15).
+
+---
+
+## 8. Requisitos no funcionales
+
+| ID | Requisito | Fuente |
+|---|---|---|
+| RNF-01 | **Transaccionalidad.** Cada operación crítica (cargar camión, registrar regreso, cerrar jornada, mover dinero) es una transacción: o se guarda todo, o nada. | Blueprint §6 |
+| RNF-02 | **Libros inmutables.** Las tablas de movimientos son solo de inserción: sin UPDATE ni DELETE. Los cambios de stock generan movimientos; los cambios de dinero, asientos auditables. | Blueprint §3.1, §6, §10 |
+| RNF-03 | **Lógica en la base.** La lógica que mueve stock o dinero vive en RPC de la base; el frontend no inserta movimientos directamente. | Blueprint §6 |
+| RNF-04 | **Idempotencia.** Clave única por operación (ventas, retiros, cargas, cierres y compras futuras) y protección frente a concurrencia/reintentos. | Blueprint §7.5, §10 |
+| RNF-05 | **Tiempo.** Timestamp del servidor en UTC y zona horaria operativa explícita; distinguir hora declarada del hecho de la hora efectiva de registro. | Blueprint §10 |
+| RNF-06 | **Seguridad.** Supabase Auth con cuentas individuales; roles y membresía desde tablas protegidas (no `user_metadata`); RLS y autorización real en servidor. | Blueprint §10 |
+| RNF-07 | **Secretos.** Nunca en el frontend ni en el repositorio; entornos local/staging/producción separados. | Blueprint §10; AGENTS.md §5 |
+| RNF-08 | **Probabilidad de prueba.** «Nada se da por terminado sin prueba»: test automatizado o verificación manual documentada. | Blueprint §3.5, §12 |
+| RNF-09 | **Responsive.** Interfaz utilizable en escritorio (depósito/administración) y en Android (vendedor en ruta). | Blueprint §2, §4 |
+| RNF-10 | **Dependencias.** Versión exacta, preferentemente publicadas hace al menos dos semanas. | AGENTS.md §6.8 |
+| RNF-11 | **Una migración por cambio de base**, versionada en `supabase/migrations/`; nunca cambios manuales. | Blueprint §6, §13; AGENTS.md §6.4 |
+
+> **Dependencia de arquitectura (no vigente):** el patrón concreto de RPC privilegiadas para las escrituras críticas y su topología son objeto de **ADR-001, versión 1.2 (ronda 3), en estado `propuesta` — NO APROBADA**. Hasta su aprobación y prueba, no se generan migraciones ni se adopta ningún patrón (Blueprint §10:279; `docs/decisions/001-rpc-privilegiadas.md`). Sus **P1–P20** son decisiones pendientes de aprobación humana.
+
+---
+
+## 9. Integridad de stock
+
+- **El stock nunca se edita a mano.** Todo cambio es un movimiento registrado: quién, cuándo, por qué, cuánto, desde dónde y hacia dónde (Blueprint §3.1, §7.4).
+- **El stock de cada ubicación es la suma de sus movimientos.** Puede existir una tabla/vista de saldos mantenida por la misma transacción, pero el libro de movimientos es la verdad (Blueprint §7.4).
+- **Ubicaciones** (Blueprint §7.2): `deposito`, `cuarentena` (no vendible, no se puede cargar a un camión), `camion:<id>` (jornada abierta), `merma`.
+- **Cantidades enteras en la unidad mínima.** Fiambres/quesos en medias piezas; nunca decimales. Precio por pieza; el de media queda pendiente (Blueprint §7.1, §15).
+- **Tipos de movimiento** (Blueprint §7.4): `ingreso`, `carga_camion`, `venta`, `retorno_camion`, `devolucion_cliente`, `a_cuarentena`, `cuarentena_apta`, `merma`, `faltante_rendicion`, `sobrante_rendicion`, `ajuste`.
+- **No se permiten saldos negativos silenciosos.** Si una venta en papel aún no registrada hace que una venta posterior exceda el saldo informático, se registra una **incidencia de conciliación** y se exige regularización trazable por dueño/encargado; la venta física nunca se borra ni se inventa stock (Blueprint §7.4).
+- **Ajustes** con motivo obligatorio y permiso de administrador (Blueprint §7.4).
+
+> **PROPUESTA NO APROBADA:** permitir **negativo transitorio** exclusivamente en la ubicación del camión con jornada abierta, marcar la venta `excede_stock`, registrar incidencia y bloquear el cierre hasta regularización autorizada; depósito y cuarentena nunca en negativo. Debe revisarse con operaciones simultáneas (Blueprint §7.4, §8, §15). **No implementar.**
+
+---
+
+## 10. Integridad financiera
+
+Conciliación financiera por medio (Blueprint §7.8):
+
+```
+efectivo_esperado_entrega = efectivo_efectivamente_cobrado
+                            + otros_ingresos_efectivo_documentados
+                            - retiros_con_doble_confirmacion
+                            - gastos_efectivo_autorizados_y_comprobados
+diferencia_efectivo = efectivo_contado_y_entregado - efectivo_esperado_entrega
+```
+
+Reglas:
+
+- **Pagos mixtos:** la suma de los componentes (efectivo, transferencia, a cuenta) debe igualar el total de la venta. `a_cuenta` **no** es dinero ingresado (Blueprint §7.5, §7.8).
+- **Transferencias:** estados `declarada` y `verificada`, con **verificación manual** (identificador de quien verificó y fecha). Una transferencia declarada no es efectivo físico ni se presume acreditada (Blueprint §7.8).
+- **Retiros de efectivo:** doble confirmación obligatoria (entrega y recepción); afectan la rendición **solo tras ambas confirmaciones**; prohibición de duplicados por `idempotency_key`; nunca importes negativos (Blueprint §7.6).
+- **Gastos en ruta:** categoría separada de los retiros, con autorización y comprobante/motivo (Blueprint §7.6).
+- **Diferencias:** requieren revisión, motivo y aprobación de dueño/encargado; no asignan automáticamente responsabilidad económica al vendedor (Blueprint §7.8).
+- **Congelamiento de totales:** se conservan total original, componentes de pago, precios históricos, conteos y cálculo congelado al cerrar (Blueprint §7.8).
+
+> **PROPUESTA NO APROBADA:** que un retiro que supera el saldo registrado **avise y requiera explicación sin bloquear automáticamente el retiro físico** (puede haber notas de papel pendientes) (Blueprint §7.6, §15). **No implementar.**
+
+---
+
+## 11. Seguridad y autorización
+
+- **Autenticación:** Supabase Auth con cuentas individuales. Membresía, empresa y roles se leen de tablas protegidas, no de `user_metadata` modificable por el usuario (Blueprint §10).
+- **RLS en todas las tablas expuestas** por la API, restringiendo por empresa, rol y estado. Los controles visuales nunca son la única defensa (Blueprint §10).
+- **`authenticated` y `anon` no reciben INSERT/UPDATE/DELETE directos** sobre libros de movimientos de stock/caja ni sobre registros confirmados; la rectificación es por asientos compensatorios (Blueprint §10).
+- **Escrituras críticas por RPC en la base** con autorización comprobada en el servidor (Blueprint §6:97, §10:274-276).
+- **Lecturas y ediciones ordinarias** con grants y RLS apropiados; las Edge Functions solo si aparece lógica externa no conveniente en SQL (Blueprint §10:279).
+- **El frontend nunca mueve stock ni dinero** y nunca usa credenciales administrativas en el navegador (Blueprint §6; AGENTS.md §5).
+
+> **DEPENDENCIA — ADR-001 v1.2 (ronda 3), PROPUESTA — NO APROBADA:** el **patrón concreto** de la puerta de entrada privilegiada, la **topología** (A, B, C o D) y la **cadena exacta de validaciones** (por ejemplo, `auth.uid()`, membresía vigente, `empresa_id` derivado del servidor, rol, estado, cantidades y permisos) son objeto de ADR-001, en estado `propuesta`. **No se implementan ni se generan migraciones** hasta que la ADR se apruebe y pase las pruebas de autorización (Blueprint §10:279; `docs/decisions/001-rpc-privilegiadas.md`). Esos puntos figuran como **decisiones pendientes P1–P20**, cuyas recomendaciones son **no vinculantes**; este PRD **no las adopta como requisitos**. El detalle operativo de esta revisión está en `docs/quality/security-review.md`.
+
+---
+
+## 12. Multiempresa
+
+- **Todas las tablas de negocio llevan `empresa_id`** y las políticas RLS filtran por él (Blueprint §7.3, §8).
+- Hoy existe **una sola empresa**. No se construye registro de empresas, suscripciones ni panel de administración de plataforma (Blueprint §7.3).
+- El diseño debe dejar preparado el filtrado por `empresa_id` para poder probar el aislamiento entre empresas sin construir la funcionalidad completa de alta de empresas (Blueprint §7.3, §12).
+
+---
+
+## 13. UX móvil y escritorio
+
+- **Móvil (Android, vendedor/piloto en ruta):** registrar la jornada, crear clientes nuevos, registrar ventas y pagos mixtos, transcribir papel y finalizar ventas (`ventas_finalizadas`); en 1B, retiros en vivo y gastos (Blueprint §4, §7.5).
+- **Escritorio (depósito/administración):** productos, clientes, camiones, cargas, conteos, rendición, cierre, reportes y administración de usuarios (Blueprint §4, §11).
+- **Online-first:** la operación digital asume conexión; el talonario numerado de papel es la contingencia. No hay modo offline automático ni sincronización (Blueprint §2, §5).
+- **Reutilización del prototipo:** el prototipo actual (`apps/web/`) es **referencia de UX**, no de reglas. Sus pantallas y layouts pueden servir como referencia visual, pero la lógica debe reimplementarse conforme al Blueprint (`INVENTARIO_ETAPA_0.md`, §16–§17). No hay decisión registrada sobre el destino del prototipo (Blueprint §15; `INVENTARIO_ETAPA_0.md`, §18.20).
+
+---
+
+## 14. Estados y transiciones
+
+**Jornada** (Blueprint §7.5): `abierta → cargada → en_reparto → ventas_finalizadas → regreso_contado → cerrada`. Cada transición es un evento registrado por separado; el cierre exige su validación y no se admiten transiciones implícitas. Una jornada `cerrada` es **inmutable** (Blueprint §3.3).
+
+**Notas de talonario** (Blueprint §8): `utilizada`, `anulada`, `justificada`. Las anuladas se preservan con motivo y sin efecto de stock/dinero (Blueprint §7.5, §8).
+
+**Transferencias** (Blueprint §7.8): `declarada` → `verificada` (verificación manual).
+
+**Retiros de efectivo** (Blueprint §7.6): `pendiente_doble_confirmacion` hasta la aceptación de **ambos** participantes; solo entonces afecta la rendición.
+
+> **PROPUESTA NO APROBADA:** la anulación de ventas por el vendedor antes de `ventas_finalizadas` (y luego solo con operación compensatoria de dueño/encargado) y la marca de venta `excede_stock` (Blueprint §7.5, §7.4). **No implementar.**
+
+---
+
+## 15. Casos de error y recuperación
+
+| Caso | Comportamiento esperado | Fuente |
+|---|---|---|
+| Nota de papel con número duplicado en la misma empresa/serie | Rechazo; aviso de salto de numeración | Blueprint §7.5, §12 |
+| Venta con stock informático insuficiente (papel pendiente) | Registrar incidencia de conciliación; regularización trazable; nunca saldo negativo silencioso | Blueprint §7.4, §12 |
+| Retiro duplicado | Idempotencia: una sola operación | Blueprint §7.6, §12 |
+| Retiro con confirmación pendiente de uno de los actores | No descuenta caja hasta que ambos confirmen | Blueprint §7.6, §12 |
+| Intento de modificar una jornada cerrada | Rechazo; la corrección es por operación compensatoria auditada | Blueprint §3.3, §7.5 |
+| Diferencia (faltante o sobrante) al cerrar | Se informa, se valoriza y se registra movimiento con autorización; nunca se crea mercadería sin causa | Blueprint §7.4, §7.8 |
+| Devolución de mercadería no apta | No reingresa a stock vendible; va a cuarentena/merma según aptitud verificable | Blueprint §7.7 |
+| Carga superior a lo disponible en depósito / carga de cuarentena | Rechazo | Blueprint §12 |
+| Cierre sin conteo de regreso | Rechazo | Blueprint §12 |
+
+Recuperación general: las correcciones sobre registros confirmados se hacen con **asientos/movimientos compensatorios auditados con motivo**; nunca con borrado silencioso ni reescritura (Blueprint §3.3, §7.5, §7.6).
+
+---
+
+## 16. Auditoría y trazabilidad
+
+- **Libro de movimientos de stock** (`movimientos_stock`) y **tabla de auditoría** (`auditoria`) con usuario, acción, tabla, registro, datos antes/después y fecha (Blueprint §8).
+- Toda operación crítica registra **quién hizo cada paso**, con timestamp del servidor UTC y zona horaria operativa explícita (Blueprint §3.2, §10).
+- Los registros confirmados son inmutables; la rectificación es por compensación auditada (Blueprint §6, §10).
+- La auditoría es central para el objetivo: «estos son los responsables de cada paso» (Blueprint §1).
+
+---
+
+## 17. Criterios de aceptación
+
+Un módulo se considera terminado cuando cumple las **pruebas obligatorias** de Blueprint §12 y «nada se da por terminado sin prueba» (Blueprint §3.5). Criterios por área (no exhaustivos; el detalle está en Blueprint §12):
+
+- **Stock:** cargar descuenta depósito y suma camión por el mismo importe; no se carga más que lo disponible; no se carga cuarentena; media pieza guarda y vende en medias; el saldo de cada ubicación coincide con la suma de movimientos.
+- **Jornada:** no hay dos jornadas por camión y fecha (aunque una esté cerrada); el vendedor no registra el conteo de regreso; las notas de papel pendientes bloquean el conteo formal; no se cierra sin conteo; una jornada cerrada rechaza toda modificación.
+- **Rendición:** pago mixto suma el total; `a_cuenta` no suma al efectivo esperado; retiro confirmado por ambos descuenta caja exactamente una vez; dos solicitudes del mismo retiro producen una sola operación; gastos no autorizados no reducen la caja; devoluciones no se duplican; al cerrar, el stock del camión queda en 0.
+- **Ventas en papel:** número duplicado en cualquier jornada de la misma empresa/serie se rechaza; un salto de numeración genera aviso.
+- **Seguridad:** el wrapper rechaza `anon`, usuario sin membresía, usuario de otra empresa y vendedor intentando cerrar jornada o retirar; sin escrituras directas en el ledger; un usuario sin rol no ve datos; ningún rol hace UPDATE/DELETE en movimientos; usuario de otra `empresa_id` no ve ni opera; transferencia declarada no figura verificada hasta intervención habilitada; vendedor crea cliente pero no edita existente; solo dueño/encargado inician un retiro y solo ambos participantes lo confirman.
+
+---
+
+## 18. Estrategia de testing
+
+Niveles previstos (AGENTS.md §9; Blueprint §12):
+
+| Nivel | Herramienta | Qué cubre |
+|---|---|---|
+| Unitario | Vitest (`npm test`) | Lógica de dominio pura. |
+| Integración / base | pgTAP sobre las RPC (`supabase test db`) — **bloqueado hasta aprobar ADR-001** | Reglas de stock, dinero, jornada y seguridad. |
+| End-to-end | Playwright (E2E versionado) | Recorridos críticos de UI. |
+| Exploración funcional | Playwright CLI | Apoyo manual para validar y depurar (ver `docs/quality/browser-testing.md`). |
+
+- Las pruebas de **dominio** e **integración** pueden prepararse de forma independiente; las que dependen de la arquitectura propuesta de **RPC privilegiadas** permanecen bloqueadas hasta aprobar **ADR-001 (versión 1.2, ronda 3; hoy PROPUESTA — NO APROBADA)** y pasar las pruebas de autorización (`INVENTARIO_ETAPA_0.md`, errata E-1; `docs/quality/security-review.md`).
+- Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar, y no deben aparecer errores de lint nuevos respecto del incidente abierto (AGENTS.md §9).
+- El proceso de revisión y auditoría se documenta en `docs/quality/review-process.md`.
+
+---
+
+## 19. Métricas de éxito
+
+El Blueprint **no define** métricas de éxito cuantitativas; esta sección **no las inventa**. Los siguientes son **candidatos a acordar con el dueño** (no aprobados), derivados del objetivo (Blueprint §1):
+
+- Porcentaje de jornadas cerradas **sin diferencias** no explicadas (mercadería y dinero).
+- Diferencias detectadas y valorizadas por camión y por vendedor, en unidades y en pesos (Blueprint §11, reporte 2).
+- Tiempo entre el regreso del camión y el cierre de la jornada.
+- Notas de papel pendientes al inicio del conteo (debe tender a cero).
+- Productos con faltantes más frecuentes (Blueprint §11, reporte 3).
+
+> Estas métricas quedan **pendientes de definición y aprobación** con el dueño. No son requisitos ni criterios de aceptación.
+
+---
+
+## 20. Fuera de alcance
+
+Fuera de Fase 1 por decisión confirmada (Blueprint §5):
+
+**Fase 2** (presupuestar/planificar; no incluida en la primera entrega):
+- Preventa y pedidos programados.
+- Proveedores y compras (alta, historial, recepción distinta de la fecha de compra, remito/factura sin duplicar ingresos, foto/PDF en almacenamiento privado, costo histórico, vencimientos de deuda).
+- Pagos a proveedores (combinados, cuotas, pagos parciales, cuenta corriente de proveedor).
+- Gestión completa de cuenta corriente de clientes (aplicación de cobros a documentos, vencimientos, saldos históricos). En Fase 1 solo se registra el importe vendido a cuenta y se informa.
+- Gestión por lotes y FEFO.
+- Listas de precios por cliente, exportaciones ampliadas y reportes avanzados.
+
+**Sin fecha comprometida:**
+- Facturación electrónica ARCA (los comprobantes de Fase 1 son internos, no fiscales).
+- Aplicación Android nativa; modo offline automático/sincronización.
+- GPS/seguimiento en vivo, optimización de rutas, integraciones bancarias.
+- Funciones de IA en el producto, n8n, módulo sanitario regulatorio o plataforma SaaS completa.
+
+**PROPUESTA TÉCNICA NO APROBADA —** control de vencimientos por partida de ingreso (`partidas_ingreso`) y alertas orientativas por fecha, sin saldo por partida, asignación de salida a partida, FEFO ni trazabilidad de salida (Blueprint §2, §4, §8, §15). **No implementar.**
+
+---
+
+## 21. Decisiones pendientes
+
+Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes de diseñar tablas/RPC:**
+
+1. **Alcance contractual** de 1A + 1B (precio y fechas); no asumir que 30 días bastan.
+2. **Venta con stock insuficiente** — negativo transitorio solo camión en jornada abierta, venta `excede_stock`, cierre bloqueado hasta regularización. *(PROPUESTA NO APROBADA.)*
+3. **Anulaciones** — vendedor anula sus ventas antes de finalizar, con motivo; luego solo dueño/encargado. *(PROPUESTA NO APROBADA.)*
+4. **Descuentos** — prohibidos para el vendedor en Fase 1. *(PROPUESTA NO APROBADA.)*
+5. **ADR-001** — aprobar el patrón de RPC privilegiadas y probar revocaciones/permisos. *(PROPUESTA TÉCNICA NO APROBADA; hoy `propuesta`, v1.2 ronda 3, con P1–P20 pendientes.)*
+6. **Ventas con pagos combinados** — confirmar medios exactos (efectivo, transferencia, débito/QR, a cuenta) y si una misma venta admite saldo impago.
+7. **Alta de clientes por vendedor** — campos mínimos, manejo de duplicados y cuándo el encargado valida.
+8. **Talonarios** — por vendedor o camión, serie, numeración, asignación y control de duplicados.
+9. **Doble confirmación de retiro sin Internet** — cómo se documenta y quién regulariza.
+10. **Gastos de ruta** — tipos, quién solicita/autoriza, comprobante, momento y efecto en la rendición.
+11. **Devoluciones por producto** — criterios documentables de aptitud apto/no apto.
+12. **Vencimientos** — fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. *(PROPUESTA NO APROBADA.)*
+13. **Precio media pieza** — exactamente mitad o precio especial; redondeo en dinero.
+14. **Fechas** — día operativo, zona horaria del negocio y corte de jornada.
+
+**Prioridad media — antes de entrega:** verificación de transferencias en Fase 1; manejo de cobros de deudas anteriores (cuenta corriente integral es Fase 2); valuación de faltantes y responsabilidades; cantidad exacta de camiones/usuarios/catálogo y conectividad.
+
+**Decisiones de ADR-001 (v1.2, ronda 3) — PENDIENTES DE APROBACIÓN HUMANA.** Con independencia de los pendientes anteriores, ADR-001 enumera **veinte decisiones P1–P20** (su sección 18) que **no están aprobadas** y cuyas recomendaciones son **no vinculantes**. Orden de resolución propuesto por la propia ADR (§15): **P19 y P20 primero** (proceso de gobernanza en dos aprobaciones y alcance de «No generar migraciones» de Blueprint §10:279), y después las decisiones técnicas que requiera una validación controlada. **P18** (registro de intentos rechazados) es una **decisión futura separada** y **no es requisito previo** de esa validación. Ninguna de las P1–P20 es requisito vigente de este PRD.
+
+---
+
+## 22. Dependencias de ADR
+
+- **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (`docs/decisions/001-rpc-privilegiadas.md`): **versión 1.2, ronda 3 de correcciones documentales**, estado **`propuesta` — NO APROBADA** (`docs/decisions/README.md`). Es la dependencia de arquitectura para la seguridad de las escrituras críticas de stock y dinero. Sus **veinte puntos P1–P20** (sección 18 de la ADR) son **decisiones pendientes de aprobación humana**, y sus recomendaciones son **no vinculantes**. Hasta su aprobación y prueba **no se generan migraciones** ni se adopta ningún patrón de RPC privilegiada (Blueprint §10:279; ADR-001; `docs/decisions/README.md`).
+- **Contradicción documental pendiente (no resuelta en este PRD).** ADR-001 §4 registra que el texto de Blueprint §10:277 (RPC pública `SECURITY DEFINER` como puerta de entrada) **contradice** la guía vigente de Supabase, que indica **no crear nunca** funciones `SECURITY DEFINER` en un esquema expuesto («Never create one in a schema listed under *Exposed schemas*»). La elección entre seguir el texto literal del Blueprint o la guía del proveedor es la **decisión pendiente P1**; ningún agente puede resolverla (ADR-001 §4 y §5). Este PRD **no la resuelve** ni adopta una topología.
+- **Otras reglas con estado de propuesta** (no son ADR, pero bloquean implementación): stock negativo transitorio, anulación de ventas, prohibición de descuentos, retiro que excede el saldo y vencimientos por partida (Blueprint §7.4–§7.6, §15).
+- **Regla de estado:** una ADR solo se implementa en estado `aprobada`. Cambiar el estado a `aprobada` requiere aprobación humana explícita; un agente no puede aprobar una ADR (`docs/decisions/README.md`; AGENTS.md §3).
+
+---
+
+*Historial del documento*
+
+| Versión | Fecha | Cambio |
+|---|---|---|
+| 0.1 | 17/10/2026 | Versión inicial. Complementa `BLUEPRINT.md` v1.4; no autoriza implementación. Reproduce las propuestas no aprobadas con su marca y mantiene ADR-001 como dependencia pendiente. |
+| 0.2 | 17/10/2026 | Corrección sobre la base documental actual: ADR-001 queda identificada como **v1.2, ronda 3** y sus **P1–P20** como decisiones pendientes de aprobación humana (con P19/P20 primero y P18 como decisión futura separada); se agrega el cuadro de categorías (§0) que separa regla aprobada, propuesta no aprobada, decisión pendiente de ADR y Fase 2/fuera de alcance; la cadena de validaciones de la RPC deja de figurar como requisito; se registra la contradicción Blueprint §10:277 / guía de Supabase como decisión pendiente (P1), sin resolverla. |
