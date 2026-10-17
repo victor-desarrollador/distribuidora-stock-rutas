@@ -4,6 +4,74 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 17/10/2026 — Tooling de calidad ya auditado y corrección documental del proceso de revisión
+
+**Rama:** `chore/herramientas-calidad` · **Agente:** Claude Code · **Estado:** cambios sin commitear; el commit documental **todavía no tiene auditoría final**; **ADR-001 sigue PROPUESTA — NO APROBADA**
+
+### Herramientas de calidad incorporadas (commit ya auditado y aprobado)
+
+Commit de tooling: `54f393490471a45214577d618034f3ea05a99518`
+
+Resultado de la auditoría del tooling: **APPROVED**.
+
+- Herramientas incorporadas: skill `grilling` y Playwright CLI `0.1.22`.
+- Observaciones de la auditoría, todas **no bloqueantes**:
+  - **L-1:** preaprobación de comandos Playwright.
+  - **L-2:** `run-code` puede ejecutar JavaScript en el contexto del navegador.
+  - **L-3:** trazabilidad upstream/npm de `0.1.22` verificada, sin riesgo.
+
+### Documentación creada (commit sin auditoría final)
+
+Commit documental: `9e589264fdd427ebe21d174d61b37c4c86e173cc`
+
+- `docs/PRD.md`
+- `docs/quality/review-process.md`
+- `docs/quality/security-review.md`
+- `docs/quality/browser-testing.md`
+
+Ese commit documental **todavía NO tiene auditoría final**.
+
+### Qué se hizo en esta tarea
+
+Corrección documental mínima en `docs/quality/review-process.md`, §2.1: «ADR vigente a la fecha» pasa a «Versión documental actual de ADR-001»; se conserva el resto de la oración (v1.2, ronda 3, estado `propuesta` — NO APROBADA, P1–P20 pendientes, P19 y P20 primero según la propuesta, y P18 como decisión separada que no es requisito previo). Se agrega esta entrada de bitácora.
+
+### Alcance: lo que esta tarea NO autoriza
+
+- no autoriza migraciones;
+- no aprueba RLS;
+- no aprueba RPC privilegiadas;
+- no cambia grants;
+- no cambia auth;
+- no cambia reglas de stock ni de dinero;
+- no modifica código de aplicación.
+
+### Revisiones de Claude pendientes
+
+- Claude `/code-review`: **pendiente/opcional** por falta de disponibilidad actual.
+- Claude `/security-review`: **pendiente/opcional** por falta de disponibilidad actual.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `docs/quality/review-process.md` | corrección de redacción en §2.1 |
+| `docs/progress-log.md` | esta entrada |
+
+Sin otros archivos modificados: no se tocaron `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md`, ADR-001, `docs/PRD.md`, `docs/quality/security-review.md`, `docs/quality/browser-testing.md`, código, SQL, migraciones, workflows, `package.json` ni lockfiles.
+
+### Cómo se verificó
+
+- `git diff --check`, `git diff -- docs/quality/review-process.md docs/progress-log.md` y `git status --short`: solo cambian las dos rutas autorizadas. No se ejecutaron typecheck, tests, Playwright ni build porque no hay cambios de código.
+
+### Riesgos pendientes
+
+1. El commit documental `9e589264fdd427ebe21d174d61b37c4c86e173cc` **sigue pendiente de auditoría final**; no debe interpretarse como aprobado.
+2. **ADR-001 sigue PROPUESTA — NO APROBADA.** Esta tarea no cambia su estado.
+3. **P1–P20 siguen pendientes de aprobación humana.**
+4. No existe autorización de seguridad nueva.
+
+---
+
 ## 17/10/2026 — ADR-001, ronda 3: correcciones de la segunda revisión de Codex (sigue PROPUESTA — NO APROBADA)
 
 **Rama:** `docs/adr-001-revision` (base `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agente:** Claude Code · **Estado:** commiteado inicialmente como `405bf94810d8640059e7d50ea142e299138db2a4`; auditoría final realizada; pendiente de push y merge; **no existe aprobación humana de ADR-001**

@@ -29,7 +29,7 @@ Cada eslabón es una compuerta: no se avanza al siguiente sin cerrar el anterior
 
 ### 2.1 Definición / requisitos
 - Leer `BLUEPRINT.md` completo, `AGENTS.md`, `CLAUDE.md`, las ADR **aprobadas** y las últimas entradas de `docs/progress-log.md` (AGENTS.md §1).
-- **ADR vigente a la fecha:** ADR-001 — Puerta de entrada SQL para operaciones privilegiadas, **versión 1.2 (ronda 3)**, estado **`propuesta` — NO APROBADA**. Sus **P1–P20** son decisiones pendientes de aprobación humana y sus recomendaciones son **no vinculantes**; la propia ADR propone decidir **P19 y P20 primero**, y **P18** es una decisión futura separada que **no** es requisito previo (`docs/decisions/001-rpc-privilegiadas.md` §15 y §18; `docs/decisions/README.md`).
+- **Versión documental actual de ADR-001:** ADR-001 — Puerta de entrada SQL para operaciones privilegiadas, **versión 1.2 (ronda 3)**, estado **`propuesta` — NO APROBADA**. Sus **P1–P20** son decisiones pendientes de aprobación humana y sus recomendaciones son **no vinculantes**; la propia ADR propone decidir **P19 y P20 primero**, y **P18** es una decisión futura separada que **no** es requisito previo (`docs/decisions/001-rpc-privilegiadas.md` §15 y §18; `docs/decisions/README.md`).
 - Identificar qué reglas del Blueprint siguen **pendientes de aprobación**.
 - Si la tarea depende de una regla `PROPUESTA NO APROBADA` / `PROPUESTA TÉCNICA NO APROBADA` o de una ADR en estado `propuesta`: **detener esa parte, informar el bloqueo y pedir aprobación expresa** (AGENTS.md §3; `CLAUDE.md`, Procedimiento 4). No elegir «la opción más razonable» por cuenta propia.
 
