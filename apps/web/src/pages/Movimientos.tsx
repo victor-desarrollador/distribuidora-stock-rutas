@@ -74,12 +74,16 @@ export default function Movimientos() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  const jornadasAbiertas = jornadas.filter(
-    (j) => j.estado === "abierta"
+  const jornadasAbiertas = useMemo(
+    () => jornadas.filter((j) => j.estado === "abierta"),
+    [jornadas]
   );
 
-  const jornada = jornadasAbiertas.find(
-    (j) => j.id === formulario.jornadaId
+  // Referencia estable: evita invalidar en cada render los
+  // useMemo que dependen de `jornada`.
+  const jornada = useMemo(
+    () => jornadasAbiertas.find((j) => j.id === formulario.jornadaId),
+    [jornadasAbiertas, formulario.jornadaId]
   );
 
   const cliente = clientes.find(
@@ -97,8 +101,12 @@ export default function Movimientos() {
   // Devoluciones y cambios solo usan clientes activos.
   const requiereCliente = formulario.tipo !== "merma";
 
-  const movimientosJornada = movimientos.filter(
-    (m) => m.jornadaId === formulario.jornadaId
+  const movimientosJornada = useMemo(
+    () =>
+      movimientos.filter(
+        (m) => m.jornadaId === formulario.jornadaId
+      ),
+    [movimientos, formulario.jornadaId]
   );
 
   // Cantidades que dejaron de estar disponibles.
@@ -124,7 +132,7 @@ export default function Movimientos() {
     }
 
     return resultado;
-  }, [ventas, movimientos, formulario.jornadaId]);
+  }, [ventas, movimientosJornada, formulario.jornadaId]);
 
   const disponibles = useMemo(() => {
     const resultado: Record<number, number> = {};

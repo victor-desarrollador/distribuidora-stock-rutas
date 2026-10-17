@@ -41,8 +41,14 @@ export default function CuentasCorrientes() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  const clientesCuenta = clientes.filter(
-    (c) => c.condicionPago === "cuenta_corriente"
+  // Referencia estable: `clientes` solo cambia por reemplazo
+  // inmutable del estado, así que el filtro produce el mismo resultado.
+  const clientesCuenta = useMemo(
+    () =>
+      clientes.filter(
+        (c) => c.condicionPago === "cuenta_corriente"
+      ),
+    [clientes]
   );
 
   const resumenClientes = useMemo(
@@ -87,8 +93,11 @@ export default function CuentasCorrientes() {
     resumenClientes.reduce((s, c) => s + c.saldo, 0)
   );
 
-  const cliente = clientesCuenta.find(
-    (c) => c.id === Number(clienteId)
+  // Referencia estable para la dependencia de los useMemo
+  // que consumen `cliente` (mismo `.find()`, sin cambiar semantics).
+  const cliente = useMemo(
+    () => clientesCuenta.find((c) => c.id === Number(clienteId)),
+    [clientesCuenta, clienteId]
   );
 
   const saldoCliente = cliente

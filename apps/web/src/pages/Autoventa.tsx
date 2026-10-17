@@ -80,12 +80,19 @@ export default function Autoventa() {
   // --------------------------------------------------
 
   // Solo se puede vender en jornadas abiertas.
-  const jornadasAbiertas = jornadas.filter(
-    (jornada) => jornada.estado === "abierta"
+  const jornadasAbiertas = useMemo(
+    () =>
+      jornadas.filter(
+        (jornada) => jornada.estado === "abierta"
+      ),
+    [jornadas]
   );
 
-  const jornada = jornadasAbiertas.find(
-    (j) => j.id === jornadaId
+  // Referencia estable: evita recrear el objeto en cada render
+  // y así invalidar los useMemo que dependen de `jornada`.
+  const jornada = useMemo(
+    () => jornadasAbiertas.find((j) => j.id === jornadaId),
+    [jornadasAbiertas, jornadaId]
   );
 
   const camion = camiones.find(

@@ -8,7 +8,7 @@ import {
   Settings,
 } from "lucide-react";
 import { Navigate } from "react-router-dom";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../auth/useAuth";
 
 // Claves de las operaciones que vamos a reiniciar.
 // No incluir productos, clientes, camiones ni sesión.

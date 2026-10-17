@@ -7,11 +7,11 @@ import {
 } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 
+import { useAuth } from "../auth/useAuth";
 import {
-  useAuth,
   usuariosDemo,
   type RolUsuario,
-} from "../AuthContext";
+} from "../auth/usuariosDemo";
 
 function inicioPorRol(rol: RolUsuario) {
   if (rol === "vendedor") return "/autoventa";

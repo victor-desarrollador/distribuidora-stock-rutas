@@ -4,6 +4,59 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 18/10/2026 — Cierre del incidente de lint (`chore/corregir-lint`)
+
+**Rama:** `chore/corregir-lint` (creada desde `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agente:** agente de implementación · **Estado:** incidente **resuelto localmente** en esta rama; la rama queda **pendiente de revisión independiente por Codex/OpenCode**; **no hay aprobación de merge a main** — el merge queda reservado a decisión humana posterior a esa revisión.
+
+### Qué se hizo
+
+- Se resolvieron exactamente los 10 errores y 1 advertencia de ESLint del incidente `docs/incidents/2026-10-12-lint-falla-en-main.md`, sin cambios de comportamiento de negocio, stock, dinero, roles ni flujos demo.
+- `AuthContext.tsx`: separación estructural sin excepciones ESLint. `usuariosDemo` y tipos demo moved a `src/auth/usuariosDemo.ts`; contexto y tipo a `src/auth/AuthContextValue.ts`; hook `useAuth` a `src/auth/useAuth.ts`. `AuthContext.tsx` exporta solo `AuthProvider`. Los consumidores (`App.tsx`, `ProtectedRoute.tsx`, `AppLayout.tsx`, `Sidebar.tsx`, `Login.tsx`, `ConfiguracionDemo.tsx`) actualizan sus imports explícitamente. No hay re-exportaciones no-componente desde `AuthContext.tsx`.
+- `Sidebar.tsx`: eliminado el effect que hacía `setMenuAbierto(false)` al cambiar de ruta (error `react-hooks/set-state-in-effect`). El cierre tras navegar ya lo proveen los handlers `onClick` existentes de cada `NavLink`, más botón X, backdrop y Escape. Sin efecto nuevo ni remount por key. Comportamiento desktop idéntico.
+- `hooks/useMovimientos.ts`: `any` reemplazado por predicado `(p: unknown)` con narrowing justificado por la forma runtime de los productos demo (sin aserciones para silenciar el linter).
+- Páginas `Autoventa.tsx`, `CuentasCorrientes.tsx`, `Movimientos.tsx`, `Retornos.tsx`: estabilización mínima de dependencias derivadas envolviendo los `.find()`/`.filter()` preexistentes en `useMemo` con sus deps reales. Mismos cálculos, filtros, jornada seleccionada y reglas de aprobación/retorno. En `Movimientos.tsx` la dep correcta de `disponibles` resultó ser `[jornada, salidas]` (agregar `movimientosJornada` fue marcado como innecesario porque `salidas` ya lo porta transitivamente); resultado numérico idéntico y advertencia `exhaustive-deps` resuelta.
+- CI: verificado que lint, typecheck, tests y build pasaban localmente, se quitó `continue-on-error: true` del job `lint` de `.github/workflows/ci.yml`; el lint de CI es ahora bloqueante.
+- El incidente fue marcado como **cerrado** en su documento, con evidencia de verificación.
+
+### Archivos afectados
+
+| Archivo | Cambio |
+|---|---|
+| `apps/web/src/auth/usuariosDemo.ts` | nuevo; datos y tipos demo de autenticación |
+| `apps/web/src/auth/AuthContextValue.ts` | nuevo; contexto y tipo |
+| `apps/web/src/auth/useAuth.ts` | nuevo; hook de acceso al contexto |
+| `apps/web/src/AuthContext.tsx` | modificado; exporta solo `AuthProvider` |
+| `apps/web/src/App.tsx`, `components/ProtectedRoute.tsx`, `components/layout/AppLayout.tsx`, `components/layout/Sidebar.tsx`, `pages/Login.tsx`, `pages/ConfiguracionDemo.tsx` | modificados; imports actualizados |
+| `apps/web/src/components/layout/Sidebar.tsx` | modificado; cierre de menú por handler, sin effect |
+| `apps/web/src/hooks/useMovimientos.ts` | modificado; type guard en lugar de `any` |
+| `apps/web/src/pages/Autoventa.tsx`, `CuentasCorrientes.tsx`, `Movimientos.tsx`, `Retornos.tsx` | modificados; estabilización de deps vía `useMemo` |
+| `.github/workflows/ci.yml` | modificado; job `lint` bloqueante |
+| `docs/incidents/2026-10-12-lint-falla-en-main.md` | modificado; estado cerrado con evidencia |
+| `docs/progress-log.md` | esta entrada |
+
+### Cómo se verificó y resultados exactos
+
+- `npm run lint` → exit 0; 0 errores, 0 advertencias (baseline del incidente: 10 errores + 1 advertencia).
+- `npm run typecheck` (`tsc -b`) → exit 0.
+- `npm test` (Vitest) → exit 0; 2 archivos de prueba, 5/5 pruebas pasan.
+- `npm run build` (`tsc -b && vite build`) → exit 0; bundle generado sin errores.
+- `git diff --check` → sin problemas de whitespace.
+- Playwright no se ejecutó: fuera del área afectada (los cambios son mecánicos de linting sobre componentes/páginas existentes sin nuevos flujos E2E); no se amplió el scope para instalar browsers.
+
+### Riesgos conocidos
+
+1. No hay tests E2E que cubran específicamente el flujo "cerrar menú móvil al navegar"; verificación fue estática + smoke de build/tests. Riesgo bajo porque los handlers `onClick` preexistentes ya hacían el cierre.
+2. El hash del bundle cambia respecto del baseline (esperable al editar código).
+3. El job `lint` bloqueante de CI no ha corrido aún en GitHub Actions; se ejercitará en el primer PR desde esta rama.
+4. `aprobados` en `Retornos.tsx` sigue siendo objeto de estado mutado con spread; sus deps `[jornada, aprobados]` ahora son estables en la parte de `jornada` — semántica inalterada.
+
+### Fuera de alcance confirmado
+
+- ADR-001 permanece en estado `propuesta` y no fue tocada: sin migraciones, SQL, RLS, RPC, grants ni arquitectura de base de datos.
+- Sin nuevas dependencias; sin refactor de archivos no relacionados; sin cambios en reglas de negocio, roles ni lógica de stock/dinero.
+
+---
+
 ## 16/10/2026 — Instalación reproducible de dos Agent Skills compartidas
 
 **Rama:** `chore/skills-agentes` (creada desde `607394c87ec62150da6bed9c90f3749c575612e8`) · **Agente:** Codex · **Estado:** sin commitear; correcciones documentales de auditoría aplicadas; pendiente de nueva revisión independiente y aprobación humana

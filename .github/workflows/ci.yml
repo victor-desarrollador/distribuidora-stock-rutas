@@ -33,11 +33,8 @@ jobs:
       - run: npm run build
 
   lint:
-    name: Lint (no bloqueante)
+    name: Lint
     runs-on: ubuntu-latest
-    # Errores preexistentes: docs/incidents/2026-10-12-lint-falla-en-main.md
-    # Quitar continue-on-error cuando el incidente se cierre.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

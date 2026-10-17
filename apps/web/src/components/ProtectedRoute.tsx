@@ -4,10 +4,8 @@ import {
   useLocation,
 } from "react-router-dom";
 
-import {
-  useAuth,
-  type RolUsuario,
-} from "../AuthContext";
+import { useAuth } from "../auth/useAuth";
+import type { RolUsuario } from "../auth/usuariosDemo";
 
 import type { ReactNode } from "react";
 

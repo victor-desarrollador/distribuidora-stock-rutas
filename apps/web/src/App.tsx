@@ -10,11 +10,9 @@ import {
 import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 
-import {
-  AuthProvider,
-  useAuth,
-  type RolUsuario,
-} from "./AuthContext";
+import { AuthProvider } from "./AuthContext";
+import { useAuth } from "./auth/useAuth";
+import type { RolUsuario } from "./auth/usuariosDemo";
 
 import Dashboard from "./pages/Dashboard";
 import Productos from "./pages/Productos";

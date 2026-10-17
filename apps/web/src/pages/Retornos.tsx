@@ -60,12 +60,17 @@ export default function Retornos() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  const jornadasCerradas = jornadas.filter(
-    (j) => j.estado === "cerrada" && j.cierre
+  const jornadasCerradas = useMemo(
+    () =>
+      jornadas.filter((j) => j.estado === "cerrada" && j.cierre),
+    [jornadas]
   );
 
-  const jornada = jornadasCerradas.find(
-    (j) => j.id === jornadaId
+  // Referencia estable: evita invalidar en cada render el
+  // useMemo `filas` que depende de `jornada`.
+  const jornada = useMemo(
+    () => jornadasCerradas.find((j) => j.id === jornadaId),
+    [jornadasCerradas, jornadaId]
   );
 
   const retornoExistente = retornos.find(

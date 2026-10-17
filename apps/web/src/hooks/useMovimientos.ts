@@ -3,7 +3,9 @@ import { useState } from "react";
 
 import {
   type MovimientoReparto,
+  type ProductoMovimiento,
 } from "../data/mockMovimientos";
+import type { UnidadMedida } from "../data/mockProductos";
 
 const STORAGE_KEY = "distribuidora_movimientos_demo_v1";
 
@@ -17,14 +19,26 @@ export function leerMovimientos(): MovimientoReparto[] {
 
     if (!Array.isArray(datos)) return [];
 
-    const productoValido = (p: any) =>
-      p !== null &&
-      typeof p === "object" &&
-      Number.isSafeInteger(p.productoId) &&
-      typeof p.nombreProducto === "string" &&
-      ["unidad", "pieza", "kg"].includes(p.unidadMedida) &&
-      Number.isFinite(p.cantidad) &&
-      p.cantidad > 0;
+    const esProducto = (p: unknown): p is Partial<ProductoMovimiento> =>
+      typeof p === "object" && p !== null;
+
+    // Validador estructural equivalente al original (sin `any`):
+    // chequea en runtime cada campo antes de leerlo.
+    const productoValido = (p: unknown) => {
+      if (!esProducto(p)) return false;
+
+      const { productoId, nombreProducto, unidadMedida, cantidad } = p;
+
+      return (
+        Number.isSafeInteger(productoId) &&
+        typeof nombreProducto === "string" &&
+        ["unidad", "pieza", "kg"].includes(
+          unidadMedida as UnidadMedida
+        ) &&
+        Number.isFinite(cantidad) &&
+        (cantidad as number) > 0
+      );
+    };
 
     const valido = datos.every((m) => {
       if (!m || typeof m !== "object") return false;
