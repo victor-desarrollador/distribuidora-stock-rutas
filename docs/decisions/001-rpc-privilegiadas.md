@@ -17,7 +17,7 @@
 | Revisión independiente | Codex | **CHANGES REQUIRED** (12 correcciones). |
 | v1.2, ronda 2 | Claude Code | Aplica las 12 correcciones. |
 | Segunda revisión independiente | Codex | **CHANGES REQUIRED** (4 correcciones sobre la ronda 2). |
-| v1.2, ronda 3 | Claude Code | Esta versión: aplica las 4 correcciones (secciones 4, 5, 15, 17, 19 y 21). Pendiente de nueva revisión independiente y de aprobación humana. |
+| v1.2, ronda 3 | Claude Code | Esta versión: aplica las 4 correcciones (secciones 4, 5, 15, 17, 18, 19 y 21). Pendiente de nueva revisión independiente y de aprobación humana. |
 
 ---
 

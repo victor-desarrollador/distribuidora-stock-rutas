@@ -6,7 +6,7 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ## 17/10/2026 — ADR-001, ronda 3: correcciones de la segunda revisión de Codex (sigue PROPUESTA — NO APROBADA)
 
-**Rama:** `docs/adr-001-revision` (base `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agente:** Claude Code · **Estado:** sin commitear; pendiente de nueva revisión independiente; **no existe aprobación humana de ADR-001**
+**Rama:** `docs/adr-001-revision` (base `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agente:** Claude Code · **Estado:** commiteado inicialmente como `405bf94810d8640059e7d50ea142e299138db2a4`; auditoría final realizada; pendiente de push y merge; **no existe aprobación humana de ADR-001**
 
 ### Revisión de Codex sobre la ronda 2
 
@@ -47,6 +47,28 @@ Sin SQL, migraciones, schemas, roles, grants, RLS, RPC ni cambios de seguridad. 
 2. Siguen pendientes las veinte decisiones P1–P20, con P19 y P20 primero.
 3. Hay que elegir entre el texto literal del Blueprint (C) y la guía explícita de Supabase (D u otra). Es una decisión humana.
 4. La ronda 3 necesita una nueva revisión independiente sobre el commit que se cree (`AGENTS.md` §2).
+
+
+### Auditoría final del commit documental
+
+Commit auditado: `405bf94810d8640059e7d50ea142e299138db2a4`
+
+Veredicto: **APPROVED WITH CORRECTIONS**.
+
+La auditoría confirmó que el commit contiene únicamente los tres archivos
+documentales autorizados, que ADR-001 continúa en estado
+**PROPUESTA — NO APROBADA**, y que no incorpora SQL, migraciones, RLS, RPC
+ni código de aplicación.
+
+Se detectaron dos observaciones menores y no bloqueantes:
+
+1. La bitácora todavía indicaba que la ronda 3 estaba “sin commitear”.
+   Esta entrada actualiza el estado real del trabajo.
+2. El historial de la ADR omitía la sección 18 en la enumeración de secciones
+   modificadas por la ronda 3. Se agregó esa referencia.
+
+Estas correcciones son exclusivamente documentales y no aprueban ninguna de
+las decisiones P1–P20 ni modifican el perfil de seguridad de la propuesta.
 
 ---
 
