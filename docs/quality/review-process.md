@@ -103,7 +103,7 @@ Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar,
    - **riesgo**;
    - **corrección propuesta**;
    - **bloqueo** (si bloquea el cierre o no).
-7. **Convenciones operativas de este proceso.** Las dos reglas siguientes son **convenciones operativas** adoptadas para este proceso de revisión y **aprobadas por el humano en esta tarea**. **No** se heredan de `AGENTS.md` ni de `BLUEPRINT.md` y no modifican su texto; su eventual ratificación formal en `AGENTS.md` queda pendiente y no se hace en este documento:
+7. **Convenciones operativas de este proceso.** Las dos reglas siguientes nacieron como **convenciones operativas** adoptadas para este proceso de revisión y aprobadas por el humano en esa tarea. **Desde la rama `chore/formalizar-proceso-agentes` quedan además formalizadas en `AGENTS.md`** (§2.3.5, §2.3.6 y §2.4), que es la instrucción operativa para los agentes. Este documento sigue **describiendo** el proceso y **no reemplaza** a `AGENTS.md`, y no modifica ningún requisito funcional del Blueprint. Se conservan aquí por trazabilidad:
    - **Máximo 3 ciclos** `implementar → auditar → corregir`, con intervención humana al tercer ciclo sin cierre (§3.4).
    - **Revisión de seguridad obligatoria** cuando el cambio toca superficies sensibles (§2.8; criterios y superficies en `docs/quality/security-review.md`).
 
