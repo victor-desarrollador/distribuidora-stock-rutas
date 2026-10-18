@@ -6,7 +6,7 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ## 17/10/2026 — Integrar el dominio de rendición en `Rendicion.tsx` (ejecución estricta) y quitar `kg` de esa pantalla
 
-**Rama:** `refactor/integrar-dominio-rendicion` (base `edbbef5`) · **Agente:** OpenCode · **Estado:** implementado con TDD (RED → GREEN) y verificado en local; **sin commit, sin push y sin merge**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+**Rama:** `refactor/integrar-dominio-rendicion` (base `edbbef5`) · **Agente:** OpenCode · **Estado:** implementado con TDD (RED → GREEN) y verificado en local; commiteado en `48d2f0bd21a72802abf945a85920f7519e1b2a36` (commit principal) y `6e8aa795ae134ee6156d42664f603437fe0db4b1` (commit correctivo); **sin push y sin merge**; **ADR-001 continúa PROPUESTA — NO APROBADA**
 
 ### Contexto
 
@@ -75,7 +75,7 @@ Limpiar `kg` de Autoventa/Jornadas/Movimientos/Retornos/Productos; el tipo compa
 
 ### Corrección posterior a la auditoría (`fix: precisar bloqueo de rendicion`)
 
-Segundo commit de la misma rama, posterior a la auditoría independiente de `48d2f0b`. Atiende dos hallazgos no bloqueantes (L1 y L2) y **no cambia ninguna lógica**:
+Segundo commit de la misma rama, `6e8aa795ae134ee6156d42664f603437fe0db4b1` (`fix: precisar bloqueo de rendicion`), posterior a la auditoría independiente de `48d2f0bd21a72802abf945a85920f7519e1b2a36`. Atiende dos hallazgos no bloqueantes (L1 y L2) y **no cambia ninguna lógica**:
 
 - **L1 (documentación):** se aclaró la trazabilidad de la primera iteración local **no commiteada** (`Rendicion.test.ts` temporal y supresión de `react-refresh`) y se explicitó que el diff de `48d2f0b` **no elimina archivos** ni **remueve supresiones preexistentes del parent**.
 - **L2 (texto de UI):** el aviso visible y el error de «Confirmar cierre» ya no dicen solo "stock esperado negativo"; ahora describen las dos causas reales del estado `inconsistente` (salidas > cargado y cantidades inválidas/no canónicas). Mismo estado interno `stockInconsistente` y mismo bloqueo.
@@ -86,7 +86,7 @@ Sin cambios en `rendicion_calculos.ts`, dominio, hooks, `localStorage`, SQL, mig
 
 1. **`pieza` no está integrada al dominio canónico**: sigue en piezas enteras y **su cierre está bloqueado** en `Rendicion` hasta una migración de representación a medias piezas (fuera de esta tarea). No se migraron datos.
 2. **`UnidadMedida` sigue incluyendo `"kg"`** (`mockProductos.ts`), compartido por muchas pantallas; eliminarlo del tipo y limpiar `kg` del resto del prototipo es una tarea aparte (en `Rendicion` ya no existe camino de `kg`).
-3. **No hay hash propio**: la tarea pide explícitamente no commitear; queda pendiente de aprobación humana antes de commit/merge.
+3. **Estado de integración pendiente**: la tarea quedó commiteada en esta rama —commit principal `48d2f0bd21a72802abf945a85920f7519e1b2a36` (`refactor: integrar dominio en rendicion`) y commit correctivo `6e8aa795ae134ee6156d42664f603437fe0db4b1` (`fix: precisar bloqueo de rendicion`)—. Esta corrección documental (solo `docs/progress-log.md`) produce un **hash nuevo, todavía sin calcular**. Quedan pendientes: la **auditoría del nuevo hash** resultante de esta corrección documental, la **aprobación humana**, el **push** y el **merge**. No hubo push ni merge.
 
 ---
 
