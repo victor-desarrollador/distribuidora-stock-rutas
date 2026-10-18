@@ -1,15 +1,15 @@
 # PRD — Sistema de Control de Stock y Rendición
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 17/10/2026
-**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v1.4; **no lo reemplaza**.
+**Fecha:** 18/10/2026
+**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v1.6; **no lo reemplaza**.
 **Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
 
 ---
 
 ## 0. Cómo leer este documento
 
-- **Fuente de verdad:** `BLUEPRINT.md` v1.4, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR **aprobadas** y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
+- **Fuente de verdad:** `BLUEPRINT.md` v1.6, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR **aprobadas** y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
 - **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
 - **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
 - **ADR:** hoy la única ADR es **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas**, en **versión 1.2 (ronda 3 de correcciones documentales)** y estado **`propuesta` — NO APROBADA** (`docs/decisions/001-rpc-privilegiadas.md`; `docs/decisions/README.md`). Sus **veinte puntos P1–P20** (sección 18 de la ADR) son **decisiones pendientes de aprobación humana**; sus recomendaciones son **no vinculantes**. Este PRD la trata como dependencia pendiente, nunca como decisión vigente, y **no convierte en requisito ninguna de sus recomendaciones**.
@@ -109,7 +109,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 
 | ID | Requisito | Entrega | Fuente |
 |---|---|---|---|
-| RF-01 | **Productos:** alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad`/`pieza`), precio, stock mínimo. Fiambre por pieza/media pieza. | 1A | Blueprint §4, §7.1 |
+| RF-01 | **Productos:** alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad`/`pieza`), precio, stock mínimo. **Lácteos por unidad entera; fiambres por pieza/media pieza; sin `kg` en Fase 1.** | 1A | Blueprint §4, §7.1 |
 | RF-02 | **Clientes:** consultar y buscar; **alta por vendedor** desde celular; dueño/encargado editan y validan. Historial básico. | 1A; altas móviles 1B | Blueprint §4, §7.5 |
 | RF-03 | **Depósito y camiones:** stock por ubicación, carga por jornada, movimientos auditados, cuarentena y retornos. | 1A | Blueprint §4, §7.2 |
 | RF-04 | **Jornadas:** una por camión y fecha, asignación de vendedor, preparación, salida, carga final de ventas, conteo por tercero, rendición y cierre. | 1A | Blueprint §4, §7.5 |
@@ -163,7 +163,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 - **El stock nunca se edita a mano.** Todo cambio es un movimiento registrado: quién, cuándo, por qué, cuánto, desde dónde y hacia dónde (Blueprint §3.1, §7.4).
 - **El stock de cada ubicación es la suma de sus movimientos.** Puede existir una tabla/vista de saldos mantenida por la misma transacción, pero el libro de movimientos es la verdad (Blueprint §7.4).
 - **Ubicaciones** (Blueprint §7.2): `deposito`, `cuarentena` (no vendible, no se puede cargar a un camión), `camion:<id>` (jornada abierta), `merma`.
-- **Cantidades enteras en la unidad mínima.** Fiambres/quesos en medias piezas; nunca decimales. Precio por pieza; el de media queda pendiente (Blueprint §7.1, §15).
+- **Cantidades enteras en la unidad mínima.** **Lácteos** por **unidad entera**; **fiambres** por **pieza/media**, con representación canónica en **medias piezas** (entero); nunca decimales y **sin `kg` en Fase 1** (Blueprint §7.1). Ejemplo de consistencia categoría/unidad *(no es una regla de nombres)*: `Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`. Precio por pieza; el de media queda pendiente (Blueprint §7.1, §15).
 - **Tipos de movimiento** (Blueprint §7.4): `ingreso`, `carga_camion`, `venta`, `retorno_camion`, `devolucion_cliente`, `a_cuarentena`, `cuarentena_apta`, `merma`, `faltante_rendicion`, `sobrante_rendicion`, `ajuste`.
 - **No se permiten saldos negativos silenciosos.** Si una venta en papel aún no registrada hace que una venta posterior exceda el saldo informático, se registra una **incidencia de conciliación** y se exige regularización trazable por dueño/encargado; la venta física nunca se borra ni se inventa stock (Blueprint §7.4).
 - **Ajustes** con motivo obligatorio y permiso de administrador (Blueprint §7.4).
@@ -223,7 +223,7 @@ Reglas:
 - **Móvil (Android, vendedor/piloto en ruta):** registrar la jornada, crear clientes nuevos, registrar ventas y pagos mixtos, transcribir papel y finalizar ventas (`ventas_finalizadas`); en 1B, retiros en vivo y gastos (Blueprint §4, §7.5).
 - **Escritorio (depósito/administración):** productos, clientes, camiones, cargas, conteos, rendición, cierre, reportes y administración de usuarios (Blueprint §4, §11).
 - **Online-first:** la operación digital asume conexión; el talonario numerado de papel es la contingencia. No hay modo offline automático ni sincronización (Blueprint §2, §5).
-- **Reutilización del prototipo:** el prototipo actual (`apps/web/`) es **referencia de UX**, no de reglas. Sus pantallas y layouts pueden servir como referencia visual, pero la lógica debe reimplementarse conforme al Blueprint (`INVENTARIO_ETAPA_0.md`, §16–§17). No hay decisión registrada sobre el destino del prototipo (Blueprint §15; `INVENTARIO_ETAPA_0.md`, §18.20).
+- **Reutilización del prototipo:** el prototipo actual (`apps/web/`) es **referencia de UX**, no de reglas. Sus pantallas y layouts pueden servir como referencia visual, pero la lógica debe reimplementarse conforme al Blueprint (`INVENTARIO_ETAPA_0.md`, §16–§17). No hay decisión registrada sobre el destino del prototipo (Blueprint §15; `INVENTARIO_ETAPA_0.md`, §18.20). El prototipo usa además `kg` y piezas enteras, lo que **no cumple** la regla de unidades vigente (Blueprint §7.1) y **requiere migración** (`docs/requirements/migracion-unidades-prototipo.md`). El versionado de las claves demo de `localStorage` (**v1 → v2**, con inicialización limpia y **sin migración automática** de cantidades) es una **decisión humana aprobada**; su ejecución queda pendiente de autorización.
 
 ---
 
@@ -376,3 +376,5 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 | 0.1 | 17/10/2026 | Versión inicial. Complementa `BLUEPRINT.md` v1.4; no autoriza implementación. Reproduce las propuestas no aprobadas con su marca y mantiene ADR-001 como dependencia pendiente. |
 | 0.2 | 17/10/2026 | Corrección sobre la base documental actual: ADR-001 queda identificada como **v1.2, ronda 3** y sus **P1–P20** como decisiones pendientes de aprobación humana (con P19/P20 primero y P18 como decisión futura separada); se agrega el cuadro de categorías (§0) que separa regla aprobada, propuesta no aprobada, decisión pendiente de ADR y Fase 2/fuera de alcance; la cadena de validaciones de la RPC deja de figurar como requisito; se registra la contradicción Blueprint §10:277 / guía de Supabase como decisión pendiente (P1), sin resolverla. |
 | 0.3 | 17/10/2026 | Correcciones documentales de la auditoría final: se marca como **modelo de datos propuesto** todo identificador tomado de Blueprint §8 (`movimientos_stock`, `auditoria`, `idempotency_key`, estados de nota) con remisión a ADR-001 §3.2; nota en los criterios de Seguridad que dependen de P1 y no implican aprobación de la topología wrapper; RNF-11 cita `Blueprint §13, regla 4` y queda condicionada a autorización de migraciones. Sin cambios de reglas de negocio ni de seguridad. |
+| 0.4 | 18/10/2026 | Acompaña a `BLUEPRINT.md` v1.5: refleja como **requisito aprobado** la decisión humana de unidades (lácteos por unidad entera; fiambres por pieza/media pieza, canónico en medias piezas; sin `kg` en Fase 1) en RF-01 y §9, y señala que el prototipo legacy requiere migración (`docs/requirements/migracion-unidades-prototipo.md`). Sin cambios de reglas no aprobadas; ADR-001 sigue `propuesta`. |
+| 0.5 | 18/10/2026 | Acompaña a `BLUEPRINT.md` v1.6: agrega en §9 el **ejemplo de consistencia categoría/unidad** (`Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`) y registra en §13 que el versionado de `localStorage` **v1 → v2** (sin migración automática) es una **decisión humana aprobada**, pendiente de ejecución. ADR-001 sigue `propuesta`. |

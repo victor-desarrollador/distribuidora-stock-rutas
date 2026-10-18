@@ -1,8 +1,8 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 1.4 (documento de trabajo controlado; propuestas no aprobadas identificadas)
-**Fecha:** 12/10/2026 (hora local Argentina)
+**Versión:** 1.6 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Fecha:** 18/10/2026 (hora local Argentina)
 **Estado:** Apto para inventario técnico de solo lectura y planificación de tareas independientes. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
 > Este documento es la fuente de referencia del proyecto. Todo agente (Claude Code, OpenCode, Codex) y toda persona que trabaje en el repositorio debe leerlo antes de escribir código. Si algo del código contradice este documento, el documento manda hasta que se registre una decisión que lo cambie (ver sección 13: ADR).
@@ -31,7 +31,7 @@ Todo lo que no sirva a ese objetivo queda fuera de la Fase 1.
 - El dueño o encargado puede **retirar efectivo en cualquier momento del recorrido**: queda fecha/hora de registro del servidor, hora declarada del hecho si difiere, quién entrega, quién recibe, importe, camión, jornada y confirmación de **ambas personas**.
 - Gastos del recorrido con dinero recaudado: **solo con autorización** del dueño/encargado y comprobante/motivo registrados (detalle pendiente).
 - El cierre con diferencias lo aprueba **dueño o encargado**, sin eliminar la diferencia registrada.
-- Fiambres: **solo pieza y media pieza**, sin venta por kilogramo en la versión acordada.
+- **Unidades (decisión humana confirmada):** los **lácteos** se venden y controlan por **cantidad/unidad entera**; los **fiambres**, **únicamente por pieza o media pieza** (1 pieza = 2 medias piezas; 1/2 pieza = 1 media pieza; la representación canónica es siempre un entero en medias piezas). **No existe `kg` en Fase 1.** El prototipo legacy todavía usa `kg` y expresa las piezas como piezas enteras, y requiere migración (ver §7.1 y `docs/requirements/migracion-unidades-prototipo.md`).
 - Vencimientos: el cliente pidió **control de vencimientos asociado a productos, sin trazabilidad por lote**. **PROPUESTA TÉCNICA NO APROBADA:** anotar fecha de vencimiento en cada ingreso de mercadería, sin asignar ventas a ingresos ni prometer saldos disponibles por partida. Ver secciones 4, 5 y 8.
 - Devoluciones: **tratamiento según producto**. No exigen aprobación humana general para retornar al stock vendible, pero **nunca** se reingresará automáticamente mercadería no apta: debe cumplir reglas verificables de aptitud, origen y conservación; criterios pendientes.
 - **Fase 2:** preventa, pedidos programados, proveedores, compras, comprobantes de compra, pagos combinados a proveedores, cuotas y cuentas corrientes de proveedores. En Fase 2 se contemplará recepción distinta de la fecha de compra y almacenamiento privado de foto/PDF de comprobantes.
@@ -102,16 +102,19 @@ Backend:   Supabase — Auth · PostgreSQL · RLS · RPC (funciones SQL) · Stor
 
 ## 7. Reglas de negocio
 
-### 7.1 Unidades: pieza y media pieza
+### 7.1 Unidades: unidad entera, pieza y media pieza
 
 - Cada producto tiene una **forma de venta**:
-  - `unidad` — se cuenta por unidad (ej. yogur, sachet de leche, caja).
-  - `pieza` — fiambres y quesos por pieza, admite media pieza.
-- Para productos `pieza`, **el stock se guarda en medias piezas** (número entero).
-  - 1 pieza = 2 medias. 1 media pieza = 1.
+  - `unidad` — **lácteos**: se venden y controlan por **cantidad/unidad entera** (ej. yogur, sachet de leche, queso, caja). Nunca fracciones.
+  - `pieza` — **fiambres**: se venden y controlan **únicamente por pieza o media pieza**.
+- **No existe `kg` en Fase 1.** Ningún producto se vende, carga, cuenta ni rinde por kilogramo.
+- Para productos `pieza` (fiambres), **el stock se guarda en medias piezas** (número entero), que es la **representación canónica**.
+  - 1 pieza = 2 medias piezas. 1/2 pieza = 1 media pieza.
   - En pantalla se muestra como "4 piezas + 1 media" (= 9 en la base).
-- **Nunca se usan decimales para cantidades.** Todas las cantidades en la base son enteros en la unidad mínima.
+- **Nunca se usan decimales para cantidades.** Todas las cantidades en la base son enteros en la unidad mínima: **unidad entera** para `unidad`, **medias piezas** para `pieza`.
+- **Ejemplo de consistencia categoría/unidad** *(es solo un ejemplo de coherencia categoría↔unidad; **no** es una regla sobre nombres de producto)*: `Queso cremoso en bote` (untable) → `Lácteos` / `unidad` (cantidad canónica **entera**); `Queso cremoso en pieza` → `Fiambres` / `pieza` (cantidad canónica **entera en medias piezas**). **No** se admite la combinación `Lácteos` + `pieza` ni `Fiambres` + `unidad`.
 - Precio: se define **precio por pieza**. El precio de la media pieza es la mitad, salvo que se defina un precio propio de media pieza. *(Confirmar con el cliente — ver sección 15.)*
+- **Prototipo legacy (pendiente de migración).** El prototipo de demostración actual (`apps/web/src/`) **todavía contiene `kg`** y **expresa las piezas como piezas enteras** (no en medias piezas). Esa representación **no cumple esta regla** y **requiere migración** antes de reutilizar sus datos o su lógica. El requisito de migración está en `docs/requirements/migracion-unidades-prototipo.md`. El versionado de las claves demo de `localStorage` (v1 → v2, con **inicialización limpia** y **sin migración automática** de cantidades) es una **decisión humana aprobada** (18/10/2026); su **ejecución** queda pendiente de autorización.
 
 ### 7.2 Ubicaciones de stock
 
@@ -477,3 +480,5 @@ Estado: abierto | resuelto (solo con prueba)
 | 1.2 | 12/10/2026 | Corrección de permisos SQL/RPC, orden 1A/1B, tipos de movimiento y modelo de conteos, talonarios, transferencias, vencimiento por partida recomendado y nuevas pruebas; decisiones de negocio aún pendientes. |
 | 1.3 | 12/10/2026 | Correcciones de vencimientos sin saldos por partida; pagos mixtos y retiros diferidos incorporados en 1A; 1B conserva autoventa y retiros en vivo; propuesta ADR-001 para RPC privilegiadas; anulaciones, descuentos y stock negativo acotado pendientes de aprobación. |
 | 1.4 | 12/10/2026 | Corrige tabla de alcance, estandariza `finalizar ventas`, prohíbe explícitamente implementar propuestas/ADR no aprobadas y señala la excepción condicional de stock negativo. Añade criterio de pgTAP al ADR-001, sin aprobarlo. |
+| 1.5 | 18/10/2026 | **Decisión humana de unidades:** lácteos por **unidad entera**; fiambres por **pieza o media pieza** (canónico entero en medias piezas); **no existe `kg` en Fase 1**. Aclara §2 y §7.1 y marca que el **prototipo legacy** usa `kg` y piezas enteras y **requiere migración** (nuevo requisito en `docs/requirements/migracion-unidades-prototipo.md`). Sin cambios en propuestas no aprobadas; ADR-001 sigue sin aprobar. |
+| 1.6 | 18/10/2026 | §7.1: agrega **ejemplo de consistencia categoría/unidad** (`Queso cremoso en bote` → Lácteos/unidad; `Queso cremoso en pieza` → Fiambres/pieza), aclarando que es solo un ejemplo y **no** una regla de nombres; no se admite `Lácteos` + `pieza`. Recoge la **decisión humana aprobada** de separar el producto demo. |

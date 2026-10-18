@@ -4,6 +4,62 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 18/10/2026 — Decisiones humanas aprobadas: separación del queso cremoso demo y versionado de `localStorage` demo v1 → v2 (solo documentación)
+
+**Rama:** `refactor/migrar-unidades-prototipo` · **Agente:** OpenCode · **Estado:** documentación actualizada; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Decisiones humanas aprobadas
+
+1. **Producto demo `Queso cremoso`:** separarlo en dos productos coherentes con la categoría. `Queso cremoso en bote` (untable) → **Lácteos** / `unidad` (entero); `Queso cremoso en pieza` → **Fiambres** / `pieza` (entero en medias piezas). **No** se mantiene la combinación `Lácteos` + `pieza`. Es un ejemplo de consistencia categoría/unidad; **no** una regla sobre nombres de producto.
+2. **`localStorage` demo:** versionar las claves demo de **v1 → v2** y **reinicializar** los datos demo. **Sin migración automática** de cantidades v1 → v2, porque los valores legacy de `pieza` están en piezas enteras y reutilizar el mismo número lo reinterpretaría como medias piezas (legacy `18` = 18 piezas; v2 `18` = 9 piezas). v1 no se reinterpreta ni se elimina en esta tarea.
+
+### Qué se hizo (solo documentación)
+
+- `BLUEPRINT.md` → **v1.6**: §7.1 agrega el **ejemplo de consistencia categoría/unidad** (`Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`); fila de historial 1.6.
+- `docs/PRD.md` → historial **0.5**: ejemplo en §9; §13 registra que el versionado `v1 → v2` (sin migración automática) es **decisión humana aprobada**; referencias a `BLUEPRINT.md` v1.6.
+- `docs/requirements/migracion-unidades-prototipo.md`: nueva §4-bis (productos demo de referencia); §7-bis pasa de «DECISIÓN PENDIENTE» a **DECISIÓN HUMANA APROBADA** con estrategia (claves v2, inicialización limpia, datos normalizados, sin migración desde v1, v1 intacto); criterios de aceptación ampliados (sin `Lácteos`+`pieza`, sin `Fiambres`+`unidad`, sin `kg`, fiambres en medias piezas, `localStorage` v2 coherente, ningún valor v1 reutilizado); tests y bloqueos actualizados.
+- `docs/progress-log.md`: esta entrada.
+
+### Cómo se verificó
+
+Cambio **exclusivamente documental**; no se modificó código. `git diff --check` sin espacios problemáticos; `git status --short` muestra solo los documentos previstos.
+
+### Riesgos y pendientes
+
+1. **Implementación pendiente de autorización**: la migración del prototipo no está autorizada; requiere el plan humano correspondiente.
+2. **v1 no se borra**: el borrado de las claves `_demo_v1` es una decisión separada, no incluida aquí.
+3. **ADR-001** sigue **PROPUESTA — NO APROBADA** y **P1–P20** siguen pendientes; esta tarea no los toca.
+
+---
+
+## 18/10/2026 — Definición documental de unidades (lácteos por unidad entera; fiambres por pieza/media; sin `kg`) y requisito de migración del prototipo
+
+**Rama:** `refactor/migrar-unidades-prototipo` (base `3c0c005c785e8b163493f46b74f0938774d1b7a4`) · **Agente:** OpenCode · **Estado:** definición documental; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Contexto
+
+Decisión humana confirmada: los **lácteos** se venden y controlan por **cantidad/unidad entera**; los **fiambres**, **únicamente por pieza o media pieza**, con representación canónica **entera en medias piezas** (1 pieza = 2 medias piezas; 1/2 pieza = 1 media pieza); **no existe `kg` en Fase 1**. El prototipo legacy todavía contiene `kg` y piezas expresadas como piezas enteras, y requiere migración. Tarea **solo documental**: preparar el requisito antes de modificar código.
+
+### Qué se hizo
+
+- `BLUEPRINT.md` → **v1.5** (fecha 18/10/2026): §2 y §7.1 aclarados con la decisión; se indica que el prototipo legacy usa `kg`/piezas enteras y requiere migración; fila de historial 1.5. Sin cambios en propuestas no aprobadas.
+- `docs/PRD.md` → historial **0.4**: referencia a `BLUEPRINT.md` v1.5; la regla queda como **requisito aprobado** en RF-01 y §9; nota del prototipo legacy en §13. No se crea un segundo PRD.
+- `docs/requirements/migracion-unidades-prototipo.md` (**nuevo**): objetivo, estado actual, estado objetivo, matriz de unidades, eliminación de `kg`, archivos afectados, riesgo de reinterpretar datos de `localStorage`, propuesta de versionar claves demo `v1 → v2` (**decisión técnica pendiente de aprobación humana, no implementada**), criterio de aceptación, tests requeridos y fuera de alcance (Supabase, SQL, RLS, RPC, ADR-001).
+- `docs/progress-log.md`: esta entrada.
+
+### Cómo se verificó
+
+Cambio **exclusivamente documental**; no se modificó código. `git diff --check` sin espacios problemáticos; `git status --short` muestra solo los documentos previstos. No se ejecutaron pruebas de aplicación porque no hubo cambios de código.
+
+### Riesgos pendientes
+
+1. **Implementación pendiente**: la migración del prototipo no está autorizada; requiere plan humano y su propio ciclo de verificación.
+2. **`localStorage` v1 → v2**: propuesta técnica **pendiente de aprobación humana**; mientras tanto, riesgo de reinterpretar datos demo si se cambia la semántica sin migrar (documentado en §7 del requisito).
+3. **Dato demo inconsistente**: `Queso cremoso` figura como `Lácteos` con `unidadMedida: "pieza"`; debe alinearse a `unidad` al migrar.
+4. **ADR-001** sigue **PROPUESTA — NO APROBADA** y **P1–P20** siguen pendientes; esta tarea no los toca.
+
+---
+
 ## 17/10/2026 — Integrar el dominio de rendición en `Rendicion.tsx` (ejecución estricta) y quitar `kg` de esa pantalla
 
 **Rama:** `refactor/integrar-dominio-rendicion` (base `edbbef5`) · **Agente:** OpenCode · **Estado:** implementado con TDD (RED → GREEN) y verificado en local; commiteado en `48d2f0bd21a72802abf945a85920f7519e1b2a36` (commit principal) y `6e8aa795ae134ee6156d42664f603437fe0db4b1` (commit correctivo); **sin push y sin merge**; **ADR-001 continúa PROPUESTA — NO APROBADA**
