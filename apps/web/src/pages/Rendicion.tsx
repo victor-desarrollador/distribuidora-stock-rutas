@@ -13,6 +13,14 @@ import { useVentas } from "../hooks/useVentas";
 import { useMovimientos } from "../hooks/useMovimientos";
 import { useCobros } from "../hooks/useCobros";
 import { salidasPorMovimiento } from "../data/mockMovimientos";
+import type { ItemCarga } from "../data/mockJornadas";
+import {
+  MENSAJE_PIEZA_LEGACY,
+  bloqueaRendicion,
+  calcularFilaMercaderia,
+  conteoValido,
+  leerCantidad,
+} from "./rendicion_calculos";
 
 const moneda = (cantidad: number) =>
   new Intl.NumberFormat("es-AR", {
@@ -20,42 +28,18 @@ const moneda = (cantidad: number) =>
     currency: "ARS",
   }).format(cantidad);
 
-const unidades = {
+// Etiquetas de las unidades admitidas por la rendición. El kilogramo no existe
+// en el dominio aprobado (BLUEPRINT.md §2 y §7.1: unidad / pieza / media pieza,
+// nunca kilogramo), así que esta pantalla no le da ningún camino funcional.
+const ETIQUETA_UNIDAD = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 } as const;
 
-const redondear = (cantidad: number) =>
-  Math.round((cantidad + Number.EPSILON) * 1000) / 1000;
-
-function leerCantidad(
-  texto: string | undefined
-): number | null {
-  if (texto === undefined || texto.trim() === "") {
-    return null;
-  }
-
-  const cantidad = Number(texto);
-
-  return Number.isFinite(cantidad) && cantidad >= 0
-    ? cantidad
-    : null;
-}
-
-function cantidadValida(
-  cantidad: number,
-  unidad: "unidad" | "pieza" | "kg"
-): boolean {
-  return (
-    Number.isFinite(cantidad) &&
-    cantidad >= 0 &&
-    (unidad === "kg"
-      ? Math.abs(
-          cantidad * 1000 - Math.round(cantidad * 1000)
-        ) < 0.000001
-      : Number.isInteger(cantidad))
-  );
+function etiquetaUnidad(unidad: ItemCarga["unidadMedida"]): string {
+  if (unidad === "unidad") return ETIQUETA_UNIDAD.unidad;
+  if (unidad === "pieza") return ETIQUETA_UNIDAD.pieza;
+  return "—";
 }
 
 export default function Rendicion() {
@@ -198,28 +182,13 @@ export default function Rendicion() {
         }
       }
 
-      const esperado = redondear(
-        item.cantidad - vendido - merma - reemplazos
-      );
-
-      const contado = leerCantidad(
-        conteos[String(item.productoId)]
-      );
-
-      const diferencia =
-        contado === null
-          ? null
-          : redondear(contado - esperado);
-
-      return {
-        ...item,
-        vendido: redondear(vendido),
-        merma: redondear(merma),
-        reemplazos: redondear(reemplazos),
-        esperado,
-        contado,
-        diferencia,
-      };
+      return calcularFilaMercaderia({
+        item,
+        vendido,
+        merma,
+        reemplazos,
+        contadoTexto: conteos[String(item.productoId)],
+      });
     });
   }, [jornada, ventas, movimientos, conteos]);
 
@@ -254,11 +223,9 @@ export default function Rendicion() {
       acumulado.set(producto.productoId, {
         productoId: producto.productoId,
         nombre: producto.nombreProducto,
-        cantidad: redondear(
-          (anterior?.cantidad ?? 0) +
-            producto.cantidad
-        ),
-        unidad: unidades[producto.unidadMedida],
+        cantidad:
+          (anterior?.cantidad ?? 0) + producto.cantidad,
+        unidad: etiquetaUnidad(producto.unidadMedida),
       });
     }
 
@@ -277,6 +244,21 @@ export default function Rendicion() {
             100
         ) / 100;
 
+  const stockInconsistente = filasMercaderia.some(
+    (fila) => fila.estado === "inconsistente"
+  );
+
+  const hayPiezaLegacy = filasMercaderia.some(
+    (fila) => fila.estado === "pieza_legacy"
+  );
+
+  const hayUnidadNoSoportada = filasMercaderia.some(
+    (fila) => fila.estado === "no_soportada"
+  );
+
+  const rendicionBloqueada =
+    bloqueaRendicion(filasMercaderia);
+
   const tieneDiferencias =
     filasMercaderia.some(
       (fila) =>
@@ -285,11 +267,6 @@ export default function Rendicion() {
     ) ||
     (diferenciaEfectivo !== null &&
       Math.abs(diferenciaEfectivo) > 0.009);
-
-  const stockInconsistente =
-    filasMercaderia.some(
-      (fila) => fila.esperado < -0.000001
-    );
 
   function seleccionarJornada(id: string) {
     setJornadaId(id);
@@ -329,17 +306,19 @@ export default function Rendicion() {
     if (
       !jornada ||
       jornada.estado !== "abierta" ||
-      stockInconsistente
+      rendicionBloqueada
     ) {
       return;
     }
 
     setConteos(
       Object.fromEntries(
-        filasMercaderia.map((fila) => [
-          String(fila.productoId),
-          String(fila.esperado),
-        ])
+        filasMercaderia
+          .filter((fila) => fila.esperado !== null)
+          .map((fila) => [
+            String(fila.productoId),
+            String(fila.esperado),
+          ])
       )
     );
 
@@ -371,23 +350,29 @@ export default function Rendicion() {
       return;
     }
 
+    if (hayPiezaLegacy) {
+      setError(MENSAJE_PIEZA_LEGACY);
+      return;
+    }
+
+    if (hayUnidadNoSoportada) {
+      setError(
+        "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar."
+      );
+      return;
+    }
+
     const conteosFinales: Record<
       string,
       number
     > = {};
 
     for (const fila of filasMercaderia) {
-      const valor = leerCantidad(
+      const valor = conteoValido(
         conteos[String(fila.productoId)]
       );
 
-      if (
-        valor === null ||
-        !cantidadValida(
-          valor,
-          fila.unidadMedida
-        )
-      ) {
+      if (valor === null) {
         setError(
           `Ingresá un conteo válido para ${fila.nombreProducto}.`
         );
@@ -587,7 +572,7 @@ export default function Rendicion() {
                 <button
                   type="button"
                   onClick={completarConEsperados}
-                  disabled={stockInconsistente}
+                  disabled={rendicionBloqueada}
                   className="min-h-11 rounded-lg border border-blue-300 px-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40"
                 >
                   Completar con esperados
@@ -602,6 +587,15 @@ export default function Rendicion() {
               es una ayuda: no sustituye el recuento físico.
             </p>
 
+            {hayPiezaLegacy && (
+              <p
+                role="alert"
+                className="mb-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900"
+              >
+                {MENSAJE_PIEZA_LEGACY}
+              </p>
+            )}
+
             {stockInconsistente && (
               <p
                 role="alert"
@@ -609,6 +603,20 @@ export default function Rendicion() {
               >
                 Se detectó stock esperado negativo.
                 Revisá el historial de ventas y movimientos.
+              </p>
+            )}
+
+            {hayUnidadNoSoportada && (
+              <p
+                role="alert"
+                className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800"
+              >
+                Hay productos con una unidad que el
+                sistema no soporta. El dominio
+                aprobado solo admite unidades y
+                piezas (media pieza): no existe venta
+                por kilogramo. Revisá esos productos
+                antes de rendir.
               </p>
             )}
 
@@ -623,166 +631,176 @@ export default function Rendicion() {
                       {fila.nombreProducto}
                     </h3>
 
-                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                      <div>
-                        <p className="text-slate-500">
-                          Cargado
-                        </p>
-                        <strong>
-                          {fila.cantidad}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <p className="text-slate-500">
-                          Vendido
-                        </p>
-                        <strong>
-                          {fila.vendido}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <p className="text-slate-500">
-                          Mermas / cambios
-                        </p>
-                        <strong>
-                          {redondear(
-                            fila.merma +
-                              fila.reemplazos
-                          )}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <p className="text-slate-500">
-                          Esperado
-                        </p>
-                        <strong>
-                          {fila.esperado}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-slate-100 pt-4">
-                      <label className="space-y-1 text-sm font-medium">
-                        <span>
-                          Stock físico contado *
-                        </span>
-
-                        <input
-                          type="number"
-                          min="0"
-                          step={
-                            fila.unidadMedida ===
-                            "kg"
-                              ? "0.001"
-                              : "1"
-                          }
-                          value={
-                            conteos[
-                              String(
-                                fila.productoId
-                              )
-                            ] ?? ""
-                          }
-                          disabled={
-                            jornada.estado ===
-                            "cerrada"
-                          }
-                          onChange={(e) =>
-                            setConteos(
-                              (actual) => ({
-                                ...actual,
-                                [String(
-                                  fila.productoId
-                                )]:
-                                  e.target.value,
-                              })
-                            )
-                          }
-                          className="block min-h-12 w-36 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
-                          placeholder="Ej: 45"
-                        />
-                      </label>
-
-                      <div
-                        className="text-right text-sm"
-                        aria-live="polite"
-                      >
-                        <p className="text-slate-500">
-                          Diferencia
-                        </p>
-
-                        {fila.diferencia ===
-                        null ? (
-                          <span className="text-slate-500">
-                            Sin contar
-                          </span>
-                        ) : (
-                          <strong
-                            className={
-                              fila.diferencia ===
-                              0
-                                ? "text-green-700"
-                                : fila.diferencia >
-                                    0
-                                  ? "text-amber-700"
-                                  : "text-red-700"
-                            }
-                          >
-                            {fila.diferencia >
-                            0
-                              ? "+"
-                              : ""}
-                            {fila.diferencia}{" "}
-                            {
-                              unidades[
-                                fila.unidadMedida
-                              ]
-                            }{" "}
-                            ·{" "}
-                            {fila.diferencia ===
-                            0
-                              ? "Exacto"
-                              : fila.diferencia >
-                                  0
-                                ? "Sobrante"
-                                : "Faltante"}
-                          </strong>
-                        )}
-                      </div>
-                    </div>
-
-                    {fila.contado !==
-                      null && (
-                      <p className="mt-3 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
-                        Cálculo:{" "}
-                        {fila.contado}{" "}
-                        contados −{" "}
-                        {fila.esperado}{" "}
-                        esperados ={" "}
-                        <strong>
-                          {fila.diferencia}{" "}
-                          {
-                            unidades[
-                              fila.unidadMedida
-                            ]
-                          }
-                        </strong>
+                    {fila.estado ===
+                    "pieza_legacy" ? (
+                      <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                        {MENSAJE_PIEZA_LEGACY}
                       </p>
+                    ) : fila.estado ===
+                      "no_soportada" ? (
+                      <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                        Unidad no soportada por el
+                        sistema. Esta fila no se
+                        puede conciliar ni cerrar.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                          <div>
+                            <p className="text-slate-500">
+                              Cargado
+                            </p>
+                            <strong>
+                              {fila.cargado}{" "}
+                              {etiquetaUnidad(
+                                fila.unidadMedida
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <p className="text-slate-500">
+                              Vendido
+                            </p>
+                            <strong>
+                              {fila.vendido}{" "}
+                              {etiquetaUnidad(
+                                fila.unidadMedida
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <p className="text-slate-500">
+                              Mermas / cambios
+                            </p>
+                            <strong>
+                              {fila.merma +
+                                fila.reemplazos}{" "}
+                              {etiquetaUnidad(
+                                fila.unidadMedida
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <p className="text-slate-500">
+                              Esperado
+                            </p>
+                            <strong>
+                              {fila.esperado ===
+                              null
+                                ? "—"
+                                : fila.esperado}{" "}
+                              {etiquetaUnidad(
+                                fila.unidadMedida
+                              )}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-slate-100 pt-4">
+                          <label className="space-y-1 text-sm font-medium">
+                            <span>
+                              Stock físico contado *
+                            </span>
+
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={
+                                conteos[
+                                  String(
+                                    fila.productoId
+                                  )
+                                ] ?? ""
+                              }
+                              disabled={
+                                jornada.estado ===
+                                "cerrada"
+                              }
+                              onChange={(e) =>
+                                setConteos(
+                                  (actual) => ({
+                                    ...actual,
+                                    [String(
+                                      fila.productoId
+                                    )]:
+                                      e.target.value,
+                                  })
+                                )
+                              }
+                              className="block min-h-12 w-36 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
+                              placeholder="Ej: 45"
+                            />
+                          </label>
+
+                          <div
+                            className="text-right text-sm"
+                            aria-live="polite"
+                          >
+                            <p className="text-slate-500">
+                              Diferencia
+                            </p>
+
+                            {fila.diferencia ===
+                            null ? (
+                              <span className="text-slate-500">
+                                Sin contar
+                              </span>
+                            ) : (
+                              <strong
+                                className={
+                                  fila.diferencia ===
+                                  0
+                                    ? "text-green-700"
+                                    : fila.diferencia >
+                                        0
+                                      ? "text-amber-700"
+                                      : "text-red-700"
+                                }
+                              >
+                                {fila.diferencia >
+                                0
+                                  ? "+"
+                                  : ""}
+                                {fila.diferencia}{" "}
+                                {etiquetaUnidad(
+                                  fila.unidadMedida
+                                )}{" "}
+                                ·{" "}
+                                {fila.diferencia ===
+                                0
+                                  ? "Exacto"
+                                  : fila.diferencia >
+                                      0
+                                    ? "Sobrante"
+                                    : "Faltante"}
+                              </strong>
+                            )}
+                          </div>
+                        </div>
+
+                        {fila.contado !==
+                          null &&
+                          fila.diferencia !==
+                            null && (
+                          <p className="mt-3 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
+                            Cálculo:{" "}
+                            {fila.contado}{" "}
+                            contados −{" "}
+                            {fila.esperado}{" "}
+                            esperados ={" "}
+                            <strong>
+                              {fila.diferencia}{" "}
+                              {etiquetaUnidad(
+                                fila.unidadMedida
+                              )}
+                            </strong>
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 )
@@ -1025,7 +1043,7 @@ export default function Rendicion() {
                   confirmarCierre
                 }
                 disabled={
-                  stockInconsistente
+                  rendicionBloqueada
                 }
                 className="mt-5 min-h-14 w-full rounded-xl bg-green-600 px-5 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40"
               >

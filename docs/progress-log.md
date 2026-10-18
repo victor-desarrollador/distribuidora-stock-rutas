@@ -4,6 +4,81 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 17/10/2026 — Integrar el dominio de rendición en `Rendicion.tsx` (ejecución estricta) y quitar `kg` de esa pantalla
+
+**Rama:** `refactor/integrar-dominio-rendicion` (base `edbbef5`) · **Agente:** OpenCode · **Estado:** implementado con TDD (RED → GREEN) y verificado en local; **sin commit, sin push y sin merge**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Contexto
+
+Tarea autorizada: integrar en la pantalla `Rendicion` el dominio aprobado de cantidades/rendición (`calcular_esperado`, `calcular_diferencia`, `es_cantidad_valida`) y eliminar de **esa** pantalla el soporte legacy de `kg`. Fuente: `BLUEPRINT.md` §2 y §7.1 (unidad / pieza / media pieza; nunca kilogramo), §7.4 y §12.
+
+Ajustes de la **decisión humana** sobre la primera iteración: (1) tratar `pieza` con criterio estricto (no conciliable) y (2) eliminar la supresión de `react-refresh` moviendo la lógica pura fuera del componente.
+
+### Hallazgo determinante: cómo representa HOY el prototipo la unidad `pieza`
+
+**`pieza` todavía está representada en PIEZAS ENTERAS, no en medias piezas.** Verificado en el código, no inferido:
+
+- `apps/web/src/data/mockJornadas.ts` (`ItemCarga.unidadMedida`, `cantidad`), `mockVentas.ts` (`DetalleVenta.cantidad`) y `mockMovimientos.ts` (`ProductoMovimiento.cantidad`): las cantidades son `number` sin conversión; demo con `Queso cremoso` = 35 piezas, `Jamón cocido` = 18, `Salame milán` = 6.
+- `apps/web/src/pages/Jornadas.tsx` (líneas 174-175 y 377-380), `Autoventa.tsx` (238-241), `Movimientos.tsx` (171-173) y `Retornos.tsx` (37-42): para `pieza` exigen entero (`Number.isInteger`) y `step="1"`; **no admiten `0.5`**. Solo `kg` admitía 3 decimales.
+- `Rendicion.tsx` (previo): su `cantidadValida` también exigía entero para `pieza`; **nunca aceptó medias piezas**.
+
+### Decisión humana (estricta)
+
+La representación legacy de `pieza` (piezas enteras) **no se considera conciliable** contra el dominio, que exige medias piezas como unidad mínima. Por eso, para `unidadMedida === "pieza"`:
+
+- la fila se marca **`pieza_legacy`** (no conciliable);
+- **no** se llama a `calcular_esperado` ni a `calcular_diferencia`;
+- **no** se convierte piezas a medias piezas (nada silencioso);
+- se **bloquean** «Completar con esperados» y «Confirmar cierre»;
+- se muestra el aviso: *"Los productos por pieza todavía usan la representación legacy. Deben migrarse a medias piezas antes de poder cerrar la rendición."*
+
+**No se modificaron datos ni se migró `localStorage`.** El cierre de una jornada con productos por `pieza` queda bloqueado hasta la migración a medias piezas (fuera de esta tarea). Para `unidad` se usa el dominio aprobado; el kilogramo sigue tratado como no soportado en `Rendicion` (sin reintroducir su lógica).
+
+### Cambios
+
+- `apps/web/src/pages/rendicion_calculos.ts` (**nuevo**, módulo puro, sin React):
+  - `calcularFilaMercaderia` + tipos `EntradaFilaMercaderia` / `FilaMercaderia` / `EstadoFilaMercaderia`; `bloqueaRendicion(filas)`; `conteoValido(texto)`; `leerCantidad(texto)`; constante `MENSAJE_PIEZA_LEGACY`.
+  - `unidad`: dominio canónico (entero ≥ 0); `salidas > cargado` ⇒ `inconsistente` sin lanzar hacia React.
+  - `pieza`: `pieza_legacy`, sin dominio, sin esperado ni diferencia.
+  - kilogramo u otra unidad: `no_soportada`, sin dominio ni camino funcional.
+- `apps/web/src/pages/Rendicion.tsx`:
+  - Importa el módulo puro; **ya no exporta funciones** y **no hay ninguna supresión de lint**.
+  - Eliminado el soporte de `kg` (mapa de unidades, validación especial `cantidadValida`, `step` decimal).
+  - Eliminados los redondeos decimales de mercadería (`redondear`). **No se tocó el redondeo de dinero ni la lógica de caja.**
+  - Bloqueo de «Completar con esperados» y del cierre ante filas `inconsistente`, `pieza_legacy` o `no_soportada`, con avisos específicos.
+- `apps/web/src/pages/rendicion_calculos.test.ts` (**nuevo**); se eliminó `Rendicion.test.ts` (probaba la función que ahora vive en el módulo).
+- `docs/progress-log.md`: esta entrada.
+
+### Tests obligatorios cubiertos (16 pruebas nuevas)
+
+- **unidad**: esperado correcto; sin diferencia; faltante; sobrante; conteo decimal inválido; `salidas > cargado` ⇒ inconsistencia sin excepción hacia React.
+- **pieza legacy**: fila `pieza_legacy`; sin esperado canónico; sin diferencia canónica; bloquea el cierre (sola y junto a una fila válida); mensaje que exige migración a medias piezas.
+- **kg legacy**: `no_soportada`; no usa el dominio canónico; bloquea el cierre.
+- **`bloqueaRendicion`**: no bloquea filas conciliables; bloquea ante cualquier fila no conciliable.
+
+### Fuera de alcance (no se tocó)
+
+Limpiar `kg` de Autoventa/Jornadas/Movimientos/Retornos/Productos; el tipo compartido `UnidadMedida = "unidad" | "pieza" | "kg"` (`apps/web/src/data/mockProductos.ts`), usado por muchas pantallas; modelos mock; hooks; migrar datos demo; `localStorage`; Supabase; SQL; migraciones; RLS; RPC; ADR-001.
+
+### Verificación (desde `apps/web/`)
+
+| Verificación | Resultado |
+|---|---|
+| `npm test -- --run` | exit 0; `Test Files 5 passed (5)`; `Tests 55 passed (55)` (39 previos + 16 nuevos) |
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 (**sin ninguna supresión**; no quedan `eslint-disable`) |
+| `npm run build` | exit 0 (`index-GW6Mg1y8.js`) |
+| `npx playwright test` | exit 0; `1 passed` |
+| raíz: `git diff --check` | exit 0 (sin espacios en blanco problemáticos) |
+
+### Riesgos y deuda pendiente
+
+1. **`pieza` no está integrada al dominio canónico**: sigue en piezas enteras y **su cierre está bloqueado** en `Rendicion` hasta una migración de representación a medias piezas (fuera de esta tarea). No se migraron datos.
+2. **`UnidadMedida` sigue incluyendo `"kg"`** (`mockProductos.ts`), compartido por muchas pantallas; eliminarlo del tipo y limpiar `kg` del resto del prototipo es una tarea aparte (en `Rendicion` ya no existe camino de `kg`).
+3. **No hay hash propio**: la tarea pide explícitamente no commitear; queda pendiente de aprobación humana antes de commit/merge.
+
+---
+
 ## 17/10/2026 — Corrección M1: `piezas_a_medias` admite medias piezas exactas
 
 **Rama:** `feat/dominio-cantidades-rendicion` (base `1001fadc4809bd4b63510dd3604603767760130c`) · **Agente:** OpenCode · **Estado:** corrección de auditoría implementada y verificada en local; **sin push y sin merge**; **ADR-001 continúa PROPUESTA — NO APROBADA**
