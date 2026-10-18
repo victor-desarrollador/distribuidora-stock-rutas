@@ -42,6 +42,13 @@ function etiquetaUnidad(unidad: ItemCarga["unidadMedida"]): string {
   return "—";
 }
 
+// Aviso cuando la mercadería no se puede conciliar por alguno de los dos
+// motivos reales del estado `inconsistente`: las salidas superan lo cargado o
+// hay cantidades fuera del dominio canónico (no enteras / negativas). El bloqueo
+// lo decide `bloqueaRendicion`; esto es solo el texto que ve el usuario.
+const MENSAJE_INCONSISTENCIA_MERCADERIA =
+  "Hay una inconsistencia de mercadería: las salidas superan lo cargado o existen cantidades inválidas. Revisá los datos antes de cerrar.";
+
 export default function Rendicion() {
   const { jornadas, cerrarJornada } = useJornadas();
   const { camiones } = useCamiones();
@@ -344,9 +351,7 @@ export default function Rendicion() {
     }
 
     if (stockInconsistente) {
-      setError(
-        "Hay productos con stock esperado negativo. Revisá las ventas y movimientos antes de cerrar."
-      );
+      setError(MENSAJE_INCONSISTENCIA_MERCADERIA);
       return;
     }
 
@@ -601,8 +606,7 @@ export default function Rendicion() {
                 role="alert"
                 className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800"
               >
-                Se detectó stock esperado negativo.
-                Revisá el historial de ventas y movimientos.
+                {MENSAJE_INCONSISTENCIA_MERCADERIA}
               </p>
             )}
 

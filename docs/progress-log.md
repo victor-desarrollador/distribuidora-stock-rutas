@@ -14,6 +14,8 @@ Tarea autorizada: integrar en la pantalla `Rendicion` el dominio aprobado de can
 
 Ajustes de la **decisión humana** sobre la primera iteración: (1) tratar `pieza` con criterio estricto (no conciliable) y (2) eliminar la supresión de `react-refresh` moviendo la lógica pura fuera del componente.
 
+**Trazabilidad de esa primera iteración (aclaración de auditoría).** Esa «primera iteración» existió **solo en el espacio de trabajo local y nunca se commiteó**. Incluía un `apps/web/src/pages/Rendicion.test.ts` temporal y una supresión de `react-refresh` en `Rendicion.tsx`. Ambos se descartaron **antes** del commit `48d2f0b`. Por eso, el diff de `48d2f0b` (parent `edbbef5`) **no elimina ningún archivo** ni **remueve una supresión preexistente del parent**: `Rendicion.test.ts` no figura en ningún commit del historial y `edbbef5:apps/web/src/pages/Rendicion.tsx` no tenía ninguna supresión de lint. No se reescribe historia ni se borra evidencia: esta aclaración solo deja la trazabilidad explícita.
+
 ### Hallazgo determinante: cómo representa HOY el prototipo la unidad `pieza`
 
 **`pieza` todavía está representada en PIEZAS ENTERAS, no en medias piezas.** Verificado en el código, no inferido:
@@ -42,11 +44,11 @@ La representación legacy de `pieza` (piezas enteras) **no se considera concilia
   - `pieza`: `pieza_legacy`, sin dominio, sin esperado ni diferencia.
   - kilogramo u otra unidad: `no_soportada`, sin dominio ni camino funcional.
 - `apps/web/src/pages/Rendicion.tsx`:
-  - Importa el módulo puro; **ya no exporta funciones** y **no hay ninguna supresión de lint**.
+  - Importa el módulo puro; **no exporta helpers puros** (la lógica pura vive en `rendicion_calculos.ts`) y **no hay ninguna supresión de lint**.
   - Eliminado el soporte de `kg` (mapa de unidades, validación especial `cantidadValida`, `step` decimal).
   - Eliminados los redondeos decimales de mercadería (`redondear`). **No se tocó el redondeo de dinero ni la lógica de caja.**
   - Bloqueo de «Completar con esperados» y del cierre ante filas `inconsistente`, `pieza_legacy` o `no_soportada`, con avisos específicos.
-- `apps/web/src/pages/rendicion_calculos.test.ts` (**nuevo**); se eliminó `Rendicion.test.ts` (probaba la función que ahora vive en el módulo).
+- `apps/web/src/pages/rendicion_calculos.test.ts` (**nuevo**). El `Rendicion.test.ts` temporal perteneció **solo** a la primera iteración local no commiteada y se descartó antes de este commit (ver «Trazabilidad» en Contexto); el diff de `48d2f0b` **no elimina ningún archivo**.
 - `docs/progress-log.md`: esta entrada.
 
 ### Tests obligatorios cubiertos (16 pruebas nuevas)
@@ -70,6 +72,15 @@ Limpiar `kg` de Autoventa/Jornadas/Movimientos/Retornos/Productos; el tipo compa
 | `npm run build` | exit 0 (`index-GW6Mg1y8.js`) |
 | `npx playwright test` | exit 0; `1 passed` |
 | raíz: `git diff --check` | exit 0 (sin espacios en blanco problemáticos) |
+
+### Corrección posterior a la auditoría (`fix: precisar bloqueo de rendicion`)
+
+Segundo commit de la misma rama, posterior a la auditoría independiente de `48d2f0b`. Atiende dos hallazgos no bloqueantes (L1 y L2) y **no cambia ninguna lógica**:
+
+- **L1 (documentación):** se aclaró la trazabilidad de la primera iteración local **no commiteada** (`Rendicion.test.ts` temporal y supresión de `react-refresh`) y se explicitó que el diff de `48d2f0b` **no elimina archivos** ni **remueve supresiones preexistentes del parent**.
+- **L2 (texto de UI):** el aviso visible y el error de «Confirmar cierre» ya no dicen solo "stock esperado negativo"; ahora describen las dos causas reales del estado `inconsistente` (salidas > cargado y cantidades inválidas/no canónicas). Mismo estado interno `stockInconsistente` y mismo bloqueo.
+
+Sin cambios en `rendicion_calculos.ts`, dominio, hooks, `localStorage`, SQL, migraciones, RLS, RPC ni dinero. Sin tests nuevos: el proyecto no tiene infraestructura de tests de componentes (no hay `@testing-library`/jsdom) y ningún test afirmaba el texto anterior.
 
 ### Riesgos y deuda pendiente
 
