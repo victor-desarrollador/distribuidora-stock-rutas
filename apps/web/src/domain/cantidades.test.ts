@@ -47,9 +47,18 @@ describe("conversión pieza / media pieza (§7.1)", () => {
     expect(piezas_a_medias(medias_a_piezas(6))).toBe(6);
   });
 
-  it("convierte cantidades enteras de piezas a medias piezas", () => {
+  it("convierte piezas enteras a medias piezas", () => {
     expect(piezas_a_medias(0)).toBe(0);
+    expect(piezas_a_medias(1)).toBe(2);
     expect(piezas_a_medias(4)).toBe(8);
+  });
+
+  it("admite medias piezas exactas (múltiplos de 0.5)", () => {
+    expect(piezas_a_medias(0)).toBe(0);
+    expect(piezas_a_medias(0.5)).toBe(1);
+    expect(piezas_a_medias(1)).toBe(2);
+    expect(piezas_a_medias(1.5)).toBe(3);
+    expect(piezas_a_medias(4.5)).toBe(9);
   });
 
   it("la conversión de piezas siempre termina en un entero válido en medias piezas", () => {
@@ -62,11 +71,18 @@ describe("conversión pieza / media pieza (§7.1)", () => {
     expect(piezas_a_medias(2) + 1).toBe(5);
   });
 
-  it("rechaza valores inválidos al convertir", () => {
+  it("rechaza piezas negativas, no múltiplos de 0.5 y no finitas", () => {
     expect(() => piezas_a_medias(-1)).toThrow(Error);
-    expect(() => piezas_a_medias(1.5)).toThrow(Error);
+    expect(() => piezas_a_medias(-0.5)).toThrow(Error);
+    expect(() => piezas_a_medias(0.25)).toThrow(Error);
+    expect(() => piezas_a_medias(0.75)).toThrow(Error);
+    expect(() => piezas_a_medias(1.25)).toThrow(Error);
     expect(() => piezas_a_medias(Number.NaN)).toThrow(Error);
     expect(() => piezas_a_medias(Number.POSITIVE_INFINITY)).toThrow(Error);
+    expect(() => piezas_a_medias(Number.NEGATIVE_INFINITY)).toThrow(Error);
+  });
+
+  it("rechaza valores inválidos al convertir medias piezas a piezas", () => {
     expect(() => medias_a_piezas(-1)).toThrow(Error);
     expect(() => medias_a_piezas(1.5)).toThrow(Error);
     expect(() => medias_a_piezas(Number.NaN)).toThrow(Error);

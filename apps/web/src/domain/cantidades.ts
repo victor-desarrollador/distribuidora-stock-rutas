@@ -35,9 +35,25 @@ export function validar_cantidad(cantidad: number): void {
   }
 }
 
-/** Convierte piezas enteras a la unidad mínima (medias piezas). */
+/**
+ * Convierte piezas a la unidad mínima (medias piezas). Admite medias piezas
+ * exactas: 0.5 piezas = 1 media, 1.5 piezas = 3 medias. Rechaza negativos,
+ * NaN, Infinity y cualquier valor que no sea un múltiplo exacto de 0.5. La
+ * salida es siempre una cantidad canónica entera en medias piezas.
+ *
+ * No usa `validar_cantidad` porque el argumento admite 0.5, que no es una
+ * cantidad canónica almacenable: la validación es local a piezas.
+ */
 export function piezas_a_medias(piezas: number): number {
-  validar_cantidad(piezas);
+  if (
+    !Number.isFinite(piezas) ||
+    piezas < 0 ||
+    !Number.isInteger(piezas * MEDIAS_POR_PIEZA)
+  ) {
+    throw new Error(
+      `Piezas inválidas: ${String(piezas)}. Se esperaba un múltiplo exacto de 0.5, finito y mayor o igual que cero.`
+    );
+  }
   return piezas * MEDIAS_POR_PIEZA;
 }
 

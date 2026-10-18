@@ -4,6 +4,50 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 17/10/2026 — Corrección M1: `piezas_a_medias` admite medias piezas exactas
+
+**Rama:** `feat/dominio-cantidades-rendicion` (base `1001fadc4809bd4b63510dd3604603767760130c`) · **Agente:** OpenCode · **Estado:** corrección de auditoría implementada y verificada en local; **sin push y sin merge**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Contexto
+
+La auditoría de solo lectura del commit `f14c4c97337c2278df7efb8ca5e25845e96e75b1` resultó **APPROVED WITH CORRECTIONS**, con un único hallazgo que afecta el contrato: **M1 — `piezas_a_medias` rechazaba `0.5`** lanzando `Error`, en vez de devolver `1` media pieza (caso "1/2 pieza = 1 media pieza").
+
+### Decisión humana
+
+`piezas_a_medias` debe aceptar cantidades en **múltiplos exactos de 0.5**:
+
+```
+0 -> 0   0.5 -> 1   1 -> 2   1.5 -> 3   2 -> 4   4.5 -> 9
+```
+
+Debe rechazar negativos, valores que no sean múltiplos de 0.5 (`0.25`, `0.75`, `1.25`), `NaN`, `Infinity` y `-Infinity`. La salida de `piezas_a_medias` sigue siendo siempre una cantidad canónica entera en medias piezas.
+
+### Cambios
+
+- `apps/web/src/domain/cantidades.ts`: `piezas_a_medias` valida localmente (finito, `>= 0` y `piezas * MEDIAS_POR_PIEZA` entero) en lugar de reutilizar `validar_cantidad`, que representa una cantidad canónica y por eso no admite `0.5`. `medias_a_piezas`, `es_cantidad_valida` y `validar_cantidad` no cambian.
+- `apps/web/src/domain/cantidades.test.ts`: se agrega "admite medias piezas exactas (múltiplos de 0.5)" y se corrigen los casos negativos de `piezas_a_medias`: el rechazo erróneo de `1.5` se reemplaza por `-0.5`, `0.25`, `0.75` y `1.25`. Los tests de `medias_a_piezas` y de `rendicion` no se tocan.
+- Sin cambios en `rendicion.ts`, `rendicion.test.ts`, pantallas, Supabase, migraciones, RLS ni RPC.
+
+### Fuera de esta corrección
+
+Los hallazgos **L1** (`snake_case` vs `AGENTS.md` §7), **L2** (`validar_cantidad` no nombra el campo que falló) y **L3** (duplicación con los validadores locales de las pantallas) quedan **no bloqueantes** y fuera de esta corrección; siguen como riesgos pendientes de la entrada anterior.
+
+### Verificación (desde `apps/web/`)
+
+| Verificación | Resultado |
+|---|---|
+| `npm test -- --run` | exit 0; `Test Files 4 passed (4)`; `Tests 39 passed (39)` (34 de dominio + 5 preexistentes) |
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm run build` | exit 0; `dist/assets/index-BKH7CK6R.js 394.04 kB │ gzip: 110.55 kB` |
+| `git diff --check` | exit 0 |
+
+### Reauditoría
+
+Esta corrección genera un **commit nuevo** (no `amend` del anterior). **Todo hash nuevo requiere reauditoría independiente completa** (AGENTS.md §2.3.4): la auditoría de `f14c4c9` no se reutiliza para el nuevo commit.
+
+---
+
 ## 17/10/2026 — Dominio puro de cantidades (unidad mínima) y cálculo básico de rendición
 
 **Rama:** `feat/dominio-cantidades-rendicion` (base `1001fadc4809bd4b63510dd3604603767760130c`) · **Agente:** OpenCode · **Estado:** implementado con TDD (RED → GREEN) y verificado en local; **sin push y sin merge**, pendiente de auditoría independiente sobre su propio hash; **ADR-001 continúa PROPUESTA — NO APROBADA**
