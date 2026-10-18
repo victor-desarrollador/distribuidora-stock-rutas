@@ -34,9 +34,9 @@ Solución aplicada:
 Correcciones mecánicas de lint únicamente (ver lista arriba). No se cambió comportamiento de negocio ni flujos demo.
 
 Pruebas que lo verifican (test o verificación manual documentada):
-Ejecutadas el 18/10/2026 sobre `chore/corregir-lint`: `npm run lint` → exit 0 (0 errores, 0 advertencias); `npm run typecheck` → exit 0; `npm test` (Vitest) → 5/5 pasan; `npm run build` → exit 0. Se quitó `continue-on-error: true` del job `lint` de `.github/workflows/ci.yml`, cumpliendo el criterio de cierre.
+Ejecutadas el 17/10/2026 sobre `chore/corregir-lint`: `npm run lint` → exit 0 (0 errores, 0 advertencias); `npm run typecheck` → exit 0; `npm test` (Vitest) → 5/5 pasan; `npm run build` → exit 0. Se quitó `continue-on-error: true` del job `lint` de `.github/workflows/ci.yml`, cumpliendo el criterio de cierre.
 
 Cómo evitar que vuelva a pasar:
 El job `lint` de CI ahora es bloqueante: cualquier fallo futuro rompe el pipeline.
 
-Estado: cerrado (18/10/2026, rama `chore/corregir-lint`)
+Estado: cerrado (17/10/2026, rama `chore/corregir-lint`)

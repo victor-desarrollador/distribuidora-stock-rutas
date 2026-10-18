@@ -4,7 +4,7 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
-## 18/10/2026 — Cierre del incidente de lint (`chore/corregir-lint`)
+## 17/10/2026 — Cierre del incidente de lint (`chore/corregir-lint`)
 
 **Rama:** `chore/corregir-lint` (creada desde `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agente:** agente de implementación · **Estado:** incidente **resuelto localmente** en esta rama; la rama queda **pendiente de revisión independiente por Codex/OpenCode**; **no hay aprobación de merge a main** — el merge queda reservado a decisión humana posterior a esa revisión.
 
