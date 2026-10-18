@@ -15,7 +15,7 @@ definición / requisitos
   → implementación
   → lint / typecheck / tests / build
   → Playwright (cuando corresponda)
-  → code review (disponible)
+  → code review (humana / independiente)
   → security review (cuando corresponda)
   → auditoría independiente (Codex / OpenCode)
   → aprobación humana
@@ -67,12 +67,14 @@ Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar,
 - Playwright CLI como apoyo de exploración/depuración. Detalle en `docs/quality/browser-testing.md`.
 - Una sesión manual de navegador **no** constituye por sí sola evidencia suficiente: los flujos críticos deben tener tests reproducibles.
 
-### 2.7 Code review (disponible)
-- Revisión de código disponible en el entorno. Si el revisor es un agente, **no aprueba su propio trabajo** (ver §3).
+### 2.7 Code review (humana / independiente)
+- La revisión de código por una **persona o agente distinto de quien implementó** forma parte del proceso y es la que cuenta. **No existe una compuerta automática garantizada.**
+- El comando `/code-review` de Claude está **pendiente/opcional por falta de disponibilidad actual** (ver `docs/progress-log.md`); mientras siga en ese estado no es un requisito del proceso ni una compuerta garantizada.
+- Si el revisor es un agente, **no aprueba su propio trabajo** (ver §3).
 - Comentarios de revisión se evalúan con rigor técnico; cuando sean dudosos, se verifican antes de implementarlos.
 
 ### 2.8 Security review (cuando corresponda)
-- Obligatoria cuando el cambio toca superficies sensibles. Criterios y superficies en `docs/quality/security-review.md`.
+- Obligatoria cuando el cambio toca superficies sensibles (**convención operativa de este proceso**; ver §3.7). Criterios y superficies en `docs/quality/security-review.md`.
 - Cuando corresponda, es **previa** a la auditoría independiente.
 
 ### 2.9 Auditoría independiente (Codex / OpenCode)
@@ -91,7 +93,7 @@ Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar,
 1. **Ningún agente aprueba su propio trabajo.** Tampoco el de otro agente. La aprobación es humana (AGENTS.md §2).
 2. **El auditor no modifica archivos.** Reporta; no corrige. El subagente `auditor` corre con `edit: deny` y `bash: deny` (`.opencode/agents/auditor.md`).
 3. **Si cambia el código después de una auditoría, el nuevo commit (nuevo hash) vuelve a auditarse.** No se reutiliza la auditoría anterior (AGENTS.md §2).
-4. **Máximo 3 ciclos `implementar → auditar → corregir`.** Al tercer ciclo sin cierre, se detiene y se **convoca intervención humana**. No se encadenan ciclos indefinidos.
+4. **Máximo 3 ciclos `implementar → auditar → corregir`** (**convención operativa de este proceso**; ver §3.7). Al tercer ciclo sin cierre, se detiene y se **convoca intervención humana**. No se encadenan ciclos indefinidos.
 5. **Auditorías siempre sobre un commit/hash concreto** cuando sea posible. Cada auditoría se identifica por el hash auditado; sin hash, la auditoría no es reproducible.
 6. **Hallazgos con formato completo y bloqueo explícito.** Cada hallazgo incluye:
    - **severidad** (crítico / alto / medio / bajo);
@@ -101,6 +103,9 @@ Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar,
    - **riesgo**;
    - **corrección propuesta**;
    - **bloqueo** (si bloquea el cierre o no).
+7. **Convenciones operativas de este proceso.** Las dos reglas siguientes son **convenciones operativas** adoptadas para este proceso de revisión y **aprobadas por el humano en esta tarea**. **No** se heredan de `AGENTS.md` ni de `BLUEPRINT.md` y no modifican su texto; su eventual ratificación formal en `AGENTS.md` queda pendiente y no se hace en este documento:
+   - **Máximo 3 ciclos** `implementar → auditar → corregir`, con intervención humana al tercer ciclo sin cierre (§3.4).
+   - **Revisión de seguridad obligatoria** cuando el cambio toca superficies sensibles (§2.8; criterios y superficies en `docs/quality/security-review.md`).
 
 ---
 

@@ -152,7 +152,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 | RNF-08 | **Probabilidad de prueba.** «Nada se da por terminado sin prueba»: test automatizado o verificación manual documentada. | Blueprint §3.5, §12 |
 | RNF-09 | **Responsive.** Interfaz utilizable en escritorio (depósito/administración) y en Android (vendedor en ruta). | Blueprint §2, §4 |
 | RNF-10 | **Dependencias.** Versión exacta, preferentemente publicadas hace al menos dos semanas. | AGENTS.md §6.8 |
-| RNF-11 | **Una migración por cambio de base**, versionada en `supabase/migrations/`; nunca cambios manuales. | Blueprint §6, §13; AGENTS.md §6.4 |
+| RNF-11 | **Una migración por cambio de base**, versionada en `supabase/migrations/`; nunca cambios manuales. Regla **aplicable cuando exista autorización de migraciones** (ver la nota de esta sección y §22); **no** implica que hoy corresponda generar migraciones. | Blueprint §13, regla 4; AGENTS.md §6.4 |
 
 > **Dependencia de arquitectura (no vigente):** el patrón concreto de RPC privilegiadas para las escrituras críticas y su topología son objeto de **ADR-001, versión 1.2 (ronda 3), en estado `propuesta` — NO APROBADA**. Hasta su aprobación y prueba, no se generan migraciones ni se adopta ningún patrón (Blueprint §10:279; `docs/decisions/001-rpc-privilegiadas.md`). Sus **P1–P20** son decisiones pendientes de aprobación humana.
 
@@ -188,7 +188,7 @@ Reglas:
 
 - **Pagos mixtos:** la suma de los componentes (efectivo, transferencia, a cuenta) debe igualar el total de la venta. `a_cuenta` **no** es dinero ingresado (Blueprint §7.5, §7.8).
 - **Transferencias:** estados `declarada` y `verificada`, con **verificación manual** (identificador de quien verificó y fecha). Una transferencia declarada no es efectivo físico ni se presume acreditada (Blueprint §7.8).
-- **Retiros de efectivo:** doble confirmación obligatoria (entrega y recepción); afectan la rendición **solo tras ambas confirmaciones**; prohibición de duplicados por `idempotency_key`; nunca importes negativos (Blueprint §7.6).
+- **Retiros de efectivo:** doble confirmación obligatoria (entrega y recepción); afectan la rendición **solo tras ambas confirmaciones**; prohibición de duplicados por `idempotency_key` *(nombre y ubicación de la columna: **modelo de datos propuesto**; ver ADR-001 §3.2 y P15)*; nunca importes negativos (Blueprint §7.6).
 - **Gastos en ruta:** categoría separada de los retiros, con autorización y comprobante/motivo (Blueprint §7.6).
 - **Diferencias:** requieren revisión, motivo y aprobación de dueño/encargado; no asignan automáticamente responsabilidad económica al vendedor (Blueprint §7.8).
 - **Congelamiento de totales:** se conservan total original, componentes de pago, precios históricos, conteos y cálculo congelado al cerrar (Blueprint §7.8).
@@ -231,7 +231,7 @@ Reglas:
 
 **Jornada** (Blueprint §7.5): `abierta → cargada → en_reparto → ventas_finalizadas → regreso_contado → cerrada`. Cada transición es un evento registrado por separado; el cierre exige su validación y no se admiten transiciones implícitas. Una jornada `cerrada` es **inmutable** (Blueprint §3.3).
 
-**Notas de talonario** (Blueprint §8): `utilizada`, `anulada`, `justificada`. Las anuladas se preservan con motivo y sin efecto de stock/dinero (Blueprint §7.5, §8).
+**Notas de talonario** (Blueprint §8): `utilizada`, `anulada`, `justificada` **[estados del modelo de datos propuesto; ADR-001 §3.2]**. Las anuladas se preservan con motivo y sin efecto de stock/dinero (Blueprint §7.5, §8).
 
 **Transferencias** (Blueprint §7.8): `declarada` → `verificada` (verificación manual).
 
@@ -261,7 +261,7 @@ Recuperación general: las correcciones sobre registros confirmados se hacen con
 
 ## 16. Auditoría y trazabilidad
 
-- **Libro de movimientos de stock** (`movimientos_stock`) y **tabla de auditoría** (`auditoria`) con usuario, acción, tabla, registro, datos antes/después y fecha (Blueprint §8).
+- **Libro de movimientos de stock** (`movimientos_stock`) y **tabla de auditoría** (`auditoria`) con usuario, acción, tabla, registro, datos antes/después y fecha (Blueprint §8). **[Modelo de datos propuesto]** Estos nombres de tabla y columna provienen de `BLUEPRINT.md` §8 («Modelo de datos (propuesto)»); su forma final está **pendiente de aprobación humana** junto con el modelo (ADR-001 §3.2). **No son DDL aprobado** y aquí se citan solo como referencia.
 - Toda operación crítica registra **quién hizo cada paso**, con timestamp del servidor UTC y zona horaria operativa explícita (Blueprint §3.2, §10).
 - Los registros confirmados son inmutables; la rectificación es por compensación auditada (Blueprint §6, §10).
 - La auditoría es central para el objetivo: «estos son los responsables de cada paso» (Blueprint §1).
@@ -277,6 +277,8 @@ Un módulo se considera terminado cuando cumple las **pruebas obligatorias** de 
 - **Rendición:** pago mixto suma el total; `a_cuenta` no suma al efectivo esperado; retiro confirmado por ambos descuenta caja exactamente una vez; dos solicitudes del mismo retiro producen una sola operación; gastos no autorizados no reducen la caja; devoluciones no se duplican; al cerrar, el stock del camión queda en 0.
 - **Ventas en papel:** número duplicado en cualquier jornada de la misma empresa/serie se rechaza; un salto de numeración genera aviso.
 - **Seguridad:** el wrapper rechaza `anon`, usuario sin membresía, usuario de otra empresa y vendedor intentando cerrar jornada o retirar; sin escrituras directas en el ledger; un usuario sin rol no ve datos; ningún rol hace UPDATE/DELETE en movimientos; usuario de otra `empresa_id` no ve ni opera; transferencia declarada no figura verificada hasta intervención habilitada; vendedor crea cliente pero no edita existente; solo dueño/encargado inician un retiro y solo ambos participantes lo confirman.
+
+> **Nota (dependencia P1).** Los criterios de **Seguridad** mencionan «el wrapper» y la «función privada» tal como los redacta `BLUEPRINT.md` §12; son criterios **heredados** del Blueprint y se conservan. Dependen de la **decisión pendiente P1** de ADR-001 (elección de topología), **no implican que la topología wrapper esté aprobada** y **no autorizan implementación ni migraciones** (ver §11 y §22; ADR-001 §4 y §5).
 
 ---
 
@@ -373,3 +375,4 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 |---|---|---|
 | 0.1 | 17/10/2026 | Versión inicial. Complementa `BLUEPRINT.md` v1.4; no autoriza implementación. Reproduce las propuestas no aprobadas con su marca y mantiene ADR-001 como dependencia pendiente. |
 | 0.2 | 17/10/2026 | Corrección sobre la base documental actual: ADR-001 queda identificada como **v1.2, ronda 3** y sus **P1–P20** como decisiones pendientes de aprobación humana (con P19/P20 primero y P18 como decisión futura separada); se agrega el cuadro de categorías (§0) que separa regla aprobada, propuesta no aprobada, decisión pendiente de ADR y Fase 2/fuera de alcance; la cadena de validaciones de la RPC deja de figurar como requisito; se registra la contradicción Blueprint §10:277 / guía de Supabase como decisión pendiente (P1), sin resolverla. |
+| 0.3 | 17/10/2026 | Correcciones documentales de la auditoría final: se marca como **modelo de datos propuesto** todo identificador tomado de Blueprint §8 (`movimientos_stock`, `auditoria`, `idempotency_key`, estados de nota) con remisión a ADR-001 §3.2; nota en los criterios de Seguridad que dependen de P1 y no implican aprobación de la topología wrapper; RNF-11 cita `Blueprint §13, regla 4` y queda condicionada a autorización de migraciones. Sin cambios de reglas de negocio ni de seguridad. |

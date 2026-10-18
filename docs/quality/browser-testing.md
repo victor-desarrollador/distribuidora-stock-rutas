@@ -12,7 +12,7 @@
 - **Es** una herramienta de exploración y depuración en un navegador real: abrir, navegar, interactuar, inspeccionar consola y requests, tomar capturas/traces y generar/afinar pruebas.
 - **No es** una prueba automatizada del repositorio. Los flujos críticos deben quedar cubiertos por **tests E2E versionados** (`tests/`, `npx playwright test`) y por **Vitest** para lógica de dominio.
 - Una sesión manual de navegador **no constituye por sí sola evidencia suficiente** para cerrar una tarea (`.agents/skills/playwright-cli/UPSTREAM.md`).
-- El estado local de la CLI vive en `.playwright-cli/`, que **se ignora por Git** (AGENTS.md §5; `.gitignore`).
+- El estado local de la CLI vive en `.playwright-cli/`, que **se ignora por Git** (fuente directa: `.gitignore:57-58`). El fundamento de fondo —no versionar secretos ni estado sensible— es el mismo principio de `AGENTS.md` §5.
 
 ### Procedencia
 
@@ -32,10 +32,17 @@ playwright-cli --version
 # Si no hay comando global, usar la versión local:
 npx --no-install playwright --version
 
-# Levantar la app en desarrollo (desde apps/web/)
-npm run dev
-# La URL es la que sirve Vite. La configuración E2E del proyecto usa
-# http://127.0.0.1:4173 (apps/web/playwright.config.ts:10,22).
+# Levantar la app en desarrollo (desde apps/web/).
+# Para usar la MISMA URL que la configuración E2E (http://127.0.0.1:4173),
+# levantá el servidor en ese puerto, igual que lo hace el webServer de
+# Playwright (apps/web/playwright.config.ts:21-23):
+npm run dev -- --host 127.0.0.1 --port 4173 --strictPort
+
+# Alternativa: `npm run dev` a secas sirve la URL que asigne Vite
+# (por defecto http://127.0.0.1:5173). Si usás esa, reemplazá 4173 por esa
+# URL en TODOS los comandos de este documento.
+# El puerto 4173 no está fijado en apps/web/vite.config.ts: proviene del
+# webServer del E2E (apps/web/playwright.config.ts:21-23).
 ```
 
 La CLI requiere el **navegador Chromium** de Playwright (`npx playwright install chromium` la primera vez, AGENTS.md §9).
@@ -128,13 +135,15 @@ Son los que hay que verificar en cada cambio relevante (alineados con Blueprint 
 | Aspecto | Exploración con Playwright CLI | Test E2E versionado (Playwright) |
 |---|---|---|
 | Naturaleza | Manual, asistida, exploratoria | Automatizada, reproducible |
-| Repetición | No | Sí, en cada corrida / CI |
+| Repetición | No | Sí, en cada corrida **local** (`npx playwright test`); **hoy el CI no ejecuta Playwright** |
 | Dónde vive | Sesión local (`.playwright-cli/`, efímero) | Repositorio (`tests/`) |
 | Qué deja | Hallazgos, capturas, trace | Resultado pass/fail reproducible |
 | Uso | Descubrir/entender/depurar un flujo; preparar un test | Proteger el flujo contra regresiones |
 | Reemplaza al otro | No | No |
 
 Regla: lo que la CLI descubre como flujo crítico **se convierte en test versionado**; la sesión manual queda como apoyo, no como cobertura.
+
+> **Cobertura en CI.** El test E2E versionado es **reproducible en cada corrida local** (`npx playwright test`). **Hoy el CI no ejecuta Playwright**: `.github/workflows/ci.yml` corre `typecheck`, `test`, `build` y `lint`, pero ningún paso `npx playwright test`. **Agregar Playwright al CI es una tarea separada que requiere autorización** y no debe darse por existente.
 
 ---
 

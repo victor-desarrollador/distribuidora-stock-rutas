@@ -6,7 +6,7 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ## 17/10/2026 — Tooling de calidad ya auditado y corrección documental del proceso de revisión
 
-**Rama:** `chore/herramientas-calidad` · **Agente:** Claude Code · **Estado:** cambios sin commitear; el commit documental **todavía no tiene auditoría final**; **ADR-001 sigue PROPUESTA — NO APROBADA**
+**Rama:** `chore/herramientas-calidad` · **Agente:** Claude Code · **Estado:** correcciones documentales **preparadas y pendientes de commit**; ADR-001 sigue **PROPUESTA — NO APROBADA**
 
 ### Herramientas de calidad incorporadas (commit ya auditado y aprobado)
 
@@ -15,12 +15,12 @@ Commit de tooling: `54f393490471a45214577d618034f3ea05a99518`
 Resultado de la auditoría del tooling: **APPROVED**.
 
 - Herramientas incorporadas: skill `grilling` y Playwright CLI `0.1.22`.
-- Observaciones de la auditoría, todas **no bloqueantes**:
+- Observaciones de la auditoría del tooling `54f3934…`, todas **no bloqueantes** (no confundir con los `L-1…L-7` de la auditoría final, que figuran más abajo):
   - **L-1:** preaprobación de comandos Playwright.
   - **L-2:** `run-code` puede ejecutar JavaScript en el contexto del navegador.
   - **L-3:** trazabilidad upstream/npm de `0.1.22` verificada, sin riesgo.
 
-### Documentación creada (commit sin auditoría final)
+### Documentación creada y auditoría final
 
 Commit documental: `9e589264fdd427ebe21d174d61b37c4c86e173cc`
 
@@ -29,11 +29,29 @@ Commit documental: `9e589264fdd427ebe21d174d61b37c4c86e173cc`
 - `docs/quality/security-review.md`
 - `docs/quality/browser-testing.md`
 
-Ese commit documental **todavía NO tiene auditoría final**.
+Commit de corrección documental: `bec986e695e27dec6f0c1892c21a45061ce624a9`
+
+**Auditoría final de `bec986e…`: APPROVED WITH CORRECTIONS.** El conjunto documental no modificó `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md`, ADR-001, código, SQL, migraciones, RLS, RPC, grants ni workflows.
 
 ### Qué se hizo en esta tarea
 
 Corrección documental mínima en `docs/quality/review-process.md`, §2.1: «ADR vigente a la fecha» pasa a «Versión documental actual de ADR-001»; se conserva el resto de la oración (v1.2, ronda 3, estado `propuesta` — NO APROBADA, P1–P20 pendientes, P19 y P20 primero según la propuesta, y P18 como decisión separada que no es requisito previo). Se agrega esta entrada de bitácora.
+
+**Correcciones de la auditoría final (preparadas, pendientes de commit).** El commit `bec986e695e27dec6f0c1892c21a45061ce624a9` fue auditado con veredicto **APPROVED WITH CORRECTIONS**. Sus hallazgos no bloqueantes **M-1, M-2 y L-1 a L-7 de la auditoría final** originan este commit documental de seguimiento:
+
+| Hallazgo | Corrección aplicada |
+|---|---|
+| **M-1** | `browser-testing.md` §2: se documenta `npm run dev -- --host 127.0.0.1 --port 4173 --strictPort` para usar 4173, y se aclara que `npm run dev` a secas sirve el puerto de Vite (5173 por defecto), que 4173 proviene del `webServer` del E2E y que en ese caso hay que reemplazar la URL en todos los comandos. |
+| **M-2** | `browser-testing.md` §7: la tabla deja de afirmar cobertura en CI. Dice «reproducible en cada corrida local» y que **hoy el CI no ejecuta Playwright**; se agrega nota: agregar Playwright al CI es una tarea separada y requiere autorización. |
+| **L-1** | `review-process.md`: el máximo de 3 ciclos y la obligatoriedad de la security review quedan identificados como **convenciones operativas de este proceso, aprobadas por el humano en esta tarea**, no heredadas de `AGENTS.md`/Blueprint (§2.8, §3.4 y nueva regla §3.7). `AGENTS.md` no se modifica. |
+| **L-2** | `PRD.md`: los identificadores tomados de Blueprint §8 (`movimientos_stock`, `auditoria`, `idempotency_key`, estados de nota) se marcan como **modelo de datos propuesto** con remisión a ADR-001 §3.2; no se presentan como DDL aprobado. |
+| **L-3** | `PRD.md` §17: el criterio «el wrapper rechaza `anon`…» se conserva como criterio heredado del Blueprint, con nota de que depende de **P1**, no implica aprobación de la topología wrapper y no autoriza implementación ni migraciones. |
+| **L-4** | `review-process.md` §2.7 y la cadena de §1: «code review (disponible)» pasa a «humana / independiente»; se aclara que `/code-review` de Claude está pendiente/opcional y que no existe una compuerta automática garantizada. |
+| **L-5** | `browser-testing.md`: el ignore de `.playwright-cli/` se cita por su fuente directa (`.gitignore:57-58`); `AGENTS.md` §5 se menciona solo por el principio de no versionar secretos/estado sensible. |
+| **L-6** | `PRD.md` RNF-11: cita corregida a `Blueprint §13, regla 4` + `AGENTS.md §6.4`, con la salvedad «aplicable cuando exista autorización de migraciones»; no insinúa que hoy corresponda migrar. |
+| **L-7** | Esta entrada: registra el hash auditado `bec986e…`, el veredicto y el origen de las correcciones de seguimiento. |
+
+Estas correcciones son **solo documentales**: no cambian reglas de negocio, no aprueban ADR-001 ni ninguna P1–P20 y no modifican el perfil de seguridad. No se registra el hash del commit de seguimiento porque **todavía no existe**.
 
 ### Alcance: lo que esta tarea NO autoriza
 
@@ -54,21 +72,24 @@ Corrección documental mínima en `docs/quality/review-process.md`, §2.1: «ADR
 
 | Archivo | Cambio |
 |---|---|
-| `docs/quality/review-process.md` | corrección de redacción en §2.1 |
+| `docs/quality/review-process.md` | corrección de redacción en §2.1; §1, §2.7, §2.8, §3.4 y nueva §3.7 (convenciones operativas y code review sin ambigüedad) |
+| `docs/quality/browser-testing.md` | §2 (procedimiento de puerto), §7 (cobertura en CI) y cita del ignore de `.playwright-cli/` |
+| `docs/PRD.md` | RNF-11; marca de modelo de datos propuesto (§10, §14, §16); nota de dependencia P1 en §17; historial 0.3 |
 | `docs/progress-log.md` | esta entrada |
 
-Sin otros archivos modificados: no se tocaron `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md`, ADR-001, `docs/PRD.md`, `docs/quality/security-review.md`, `docs/quality/browser-testing.md`, código, SQL, migraciones, workflows, `package.json` ni lockfiles.
+Sin otros archivos modificados: no se tocaron `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md`, ADR-001, `docs/quality/security-review.md`, código, SQL, migraciones, workflows, `package.json` ni lockfiles.
 
 ### Cómo se verificó
 
-- `git diff --check`, `git diff -- docs/quality/review-process.md docs/progress-log.md` y `git status --short`: solo cambian las dos rutas autorizadas. No se ejecutaron typecheck, tests, Playwright ni build porque no hay cambios de código.
+- `git diff --check` (sin errores de whitespace), `git diff --stat` y `git status --short`: solo cambian las rutas documentales autorizadas. No se ejecutaron typecheck, tests, Playwright ni build porque no hay cambios de código.
 
 ### Riesgos pendientes
 
-1. El commit documental `9e589264fdd427ebe21d174d61b37c4c86e173cc` **sigue pendiente de auditoría final**; no debe interpretarse como aprobado.
+1. Las correcciones de este seguimiento están **preparadas y sin commitear**; el nuevo commit deberá auditarse sobre su propio hash antes de push y merge (`review-process.md` §3.3).
 2. **ADR-001 sigue PROPUESTA — NO APROBADA.** Esta tarea no cambia su estado.
 3. **P1–P20 siguen pendientes de aprobación humana.**
-4. No existe autorización de seguridad nueva.
+4. **No se autoriza ningún cambio de base de datos ni de seguridad funcional**: migraciones, RLS, RPC, grants, auth, `empresa_id`, stock y dinero quedan fuera del alcance de esta tarea.
+5. No existe una compuerta automática de code/security review garantizada: `/code-review` y `/security-review` de Claude continúan **pendientes/opcionales** por falta de disponibilidad actual.
 
 ---
 
