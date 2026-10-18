@@ -4,6 +4,102 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 17/10/2026 — Dominio puro de cantidades (unidad mínima) y cálculo básico de rendición
+
+**Rama:** `feat/dominio-cantidades-rendicion` (base `1001fadc4809bd4b63510dd3604603767760130c`) · **Agente:** OpenCode · **Estado:** implementado con TDD (RED → GREEN) y verificado en local; **sin push y sin merge**, pendiente de auditoría independiente sobre su propio hash; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Objetivo
+
+Extraer lógica de dominio pura para cantidades en unidad mínima y cálculo básico de rendición, con los tests escritos antes que la implementación (TDD), sin integrarla todavía a ninguna pantalla.
+
+### Blueprint aplicable
+
+- §3: el stock no se edita a mano; simple antes que completo; nada se da por terminado sin prueba.
+- §7.1: cantidades enteras en la unidad mínima; 1 pieza = 2 medias piezas.
+- §7.4: no permitir inconsistencias de stock silenciosas.
+- §7.5: rendición / jornada.
+- §12: pruebas.
+
+### Implementación
+
+`apps/web/src/domain/cantidades.ts`
+- `MEDIAS_POR_PIEZA = 2`
+- `piezas_a_medias`
+- `medias_a_piezas`
+- `es_cantidad_valida`
+- `validar_cantidad`
+
+`apps/web/src/domain/rendicion.ts`
+- `EntradaEsperado`
+- `calcular_esperado`
+- `calcular_diferencia`
+
+### Contrato
+
+```
+1 pieza   = 2 medias piezas
+1/2 pieza = 1 media pieza
+```
+
+La cantidad canónica/almacenable es siempre un entero `>= 0` expresado en unidad mínima.
+
+`medias_a_piezas` es solo una conversión de representación y puede devolver fracciones: `1 -> 0.5`, `9 -> 4.5`. Su salida no es una cantidad almacenable.
+
+```
+esperado   = cargado - vendido - merma - otras_salidas
+diferencia = contado - esperado
+```
+
+Si `vendido + merma + otras_salidas > cargado`, `calcular_esperado` lanza `Error` y no devuelve un negativo silencioso: representa una inconsistencia que debe regularizarse de forma trazable (§7.4).
+
+La diferencia sí puede ser negativa: `< 0` faltante, `0` sin diferencia, `> 0` sobrante. No se agregó enum ni clasificación explícita porque no es necesario para esta tarea: el signo alcanza.
+
+### TDD
+
+**Fase RED (observada antes de implementar):**
+
+- Primera iteración: faltaban los módulos `apps/web/src/domain/cantidades.ts` y `rendicion.ts`; las dos suites fallaban con `Cannot find module './cantidades'` y `Cannot find module './rendicion'` (0 tests ejecutados).
+- Segunda iteración, al cambiar `medias_a_piezas` para que conserve la cantidad exacta: los tests nuevos fallaron antes de corregir la implementación (`AssertionError: expected +0 to be 0.5` y `AssertionError: expected true to be false`).
+
+**Fase GREEN final** (resultados exactos, desde `apps/web/`):
+
+| Verificación | Resultado |
+|---|---|
+| `npm test -- --run` | exit 0; `Test Files 4 passed (4)`; `Tests 37 passed (37)` (32 de dominio + 5 preexistentes) |
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm run build` | exit 0; `dist/assets/index-BKH7CK6R.js 394.04 kB │ gzip: 110.55 kB` |
+| `git diff --check` | exit 0; sin problemas de whitespace |
+
+Evidencia adicional: se comprobó por mutación que los tests detectan errores reales (quitar el guard de §7.4 en `calcular_esperado` → falla 1 prueba; `Math.floor` → `Math.round` en `medias_a_piezas` → fallan 2 pruebas), restaurando la implementación con hash idéntico al original.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `apps/web/src/domain/cantidades.ts` | nuevo; cantidades y unidad mínima |
+| `apps/web/src/domain/cantidades.test.ts` | nuevo; 18 pruebas |
+| `apps/web/src/domain/rendicion.ts` | nuevo; esperado y diferencia |
+| `apps/web/src/domain/rendicion.test.ts` | nuevo; 14 pruebas |
+| `docs/progress-log.md` | esta entrada |
+
+### Fuera de alcance
+
+- Integración con pantallas; `localStorage`; `movimientos_stock` reales; dinero; Supabase; migraciones; RLS; RPC; `SECURITY DEFINER` / `SECURITY INVOKER`; cualquier decisión P1–P20; cualquier PROPUESTA NO APROBADA.
+- **ADR-001 continúa PROPUESTA — NO APROBADA.**
+- **No existe persistencia ni seguridad de backend asociada a este dominio:** son funciones puras, sin efectos y sin escrituras. No se afirma que haya persistencia ni control de acceso.
+
+### Riesgos pendientes
+
+1. El dominio todavía no está integrado a pantallas ni a RPC, y no reemplaza la lógica demo existente (por ejemplo `cantidadValida` en `apps/web/src/pages/Rendicion.tsx`).
+2. Los identificadores nuevos están en **snake_case** por instrucción explícita de la tarea; `AGENTS.md` §7 fija camelCase en TypeScript (snake_case queda para SQL, Blueprint §8). Divergencia registrada y sin decisión formal todavía.
+3. `validar_cantidad(cantidad: number): void` no recibe el nombre del campo, así que el error no indica qué componente falló.
+4. `medias_a_piezas` devuelve fracciones: su salida nunca debe usarse como cantidad almacenable ni pasarse a `calcular_esperado` / `calcular_diferencia`.
+5. No se registra el hash del commit en esta entrada: el documento forma parte de ese mismo commit, así que el hash se reporta al cerrar la tarea y es el que debe auditarse.
+6. `npm run lint` pasa con 0 errores, mientras el incidente `docs/incidents/2026-10-12-lint-falla-en-main.md` registra 10 errores en `main`. No se reprodujo en esta base porque incluye la corrección de lint ya integrada (`chore/corregir-lint`); el incidente no se tocó (fuera de alcance).
+
+---
+
 ## 17/10/2026 — Integración de la corrección de lint con la línea documental, tooling y proceso de agentes
 
 **Rama:** `chore/integrar-base-desarrollo` · **Agente:** OpenCode · **Estado:** conflicto resuelto; merge pendiente de commit y auditoría; **ADR-001 continúa PROPUESTA — NO APROBADA**
