@@ -4,6 +4,40 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 17/10/2026 — Integración de la corrección de lint con la línea documental, tooling y proceso de agentes
+
+**Rama:** `chore/integrar-base-desarrollo` · **Agente:** OpenCode · **Estado:** conflicto resuelto; merge pendiente de commit y auditoría; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Objetivo
+
+Integrar la rama de corrección de lint (`chore/corregir-lint`) con la línea documental, de tooling de calidad y de proceso de agentes (`chore/formalizar-proceso-agentes`).
+
+### Qué se hizo
+
+- Origen: `chore/corregir-lint@28952871793363744d047fa28294c59b586f6e94` y `chore/formalizar-proceso-agentes@d80a09f1fdec220b01eabe92bbcc29317b6cf521`.
+- Único conflicto: `docs/progress-log.md`.
+- Resolución: unión semántica de ambas bitácoras, sin descartar historial.
+
+### Cómo se verificó
+
+Verificación ya ejecutada durante el merge:
+
+| Verificación | Resultado |
+|---|---|
+| `npm run lint` | OK |
+| `npm run typecheck` | OK |
+| Vitest | 5/5 |
+| `npm run build` | OK |
+| `npx playwright test` | 1/1 |
+
+### Riesgos pendientes
+
+1. La resolución del conflicto está **preparada**; el merge queda **pendiente de commit y auditoría**. No se registra el hash del merge porque todavía no existe.
+2. **ADR-001 continúa PROPUESTA — NO APROBADA.**
+3. No se autorizan migraciones ni cambios de seguridad funcional.
+
+---
+
 ## 17/10/2026 — Cierre del incidente de lint (`chore/corregir-lint`)
 
 **Rama:** `chore/corregir-lint` (creada desde `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agente:** agente de implementación · **Estado:** incidente **resuelto localmente** en esta rama; la rama queda **pendiente de revisión independiente por Codex/OpenCode**; **no hay aprobación de merge a main** — el merge queda reservado a decisión humana posterior a esa revisión.
@@ -54,6 +88,268 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 - ADR-001 permanece en estado `propuesta` y no fue tocada: sin migraciones, SQL, RLS, RPC, grants ni arquitectura de base de datos.
 - Sin nuevas dependencias; sin refactor de archivos no relacionados; sin cambios en reglas de negocio, roles ni lógica de stock/dinero.
+
+---
+
+## 17/10/2026 — Formalización del proceso de agentes en `AGENTS.md` y `CLAUDE.md`
+
+**Rama:** `chore/formalizar-proceso-agentes` (base `30b831650cf7108584052b13cc6c32b71a1b31b9`) · **Agente:** OpenCode · **Estado:** cambios preparados, pendientes de commit y auditoría; **ADR-001 sigue PROPUESTA — NO APROBADA**
+
+### Objetivo
+
+Formalizar en `AGENTS.md` y `CLAUDE.md` las convenciones operativas ya documentadas y auditadas en `docs/quality/` (ciclo de trabajo, reglas de auditoría, superficies de security review y tooling), **sin crear reglas funcionales nuevas**.
+
+### Qué se hizo
+
+- `AGENTS.md` §2 se amplía con el ciclo de trabajo, las reglas obligatorias del ciclo, las superficies que disparan security review y el tooling. Se conserva el flujo entre agentes y todas las reglas previas.
+- `CLAUDE.md`: se explicita que Claude es implementador y no auditor final, se ordena el procedimiento (Blueprint/ADR antes de implementar, rama propia, alcance autorizado, lint/typecheck/tests/build, Playwright, auditoría independiente, no autoaprobar, no merge/deploy, nuevo hash tras corregir), y se agregan las advertencias de superficies sensibles y de no aprobar ADR-001 ni resolver P1–P20.
+- `docs/quality/review-process.md`: corrección mínima en §3.7 para reflejar que el máximo de 3 ciclos y la security review obligatoria, nacidas como convenciones operativas, quedan además **formalizadas en `AGENTS.md`**; el documento sigue describiendo el proceso y no reemplaza `AGENTS.md`.
+- `docs/progress-log.md`: esta entrada.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `AGENTS.md` | §2 ampliada (ciclo, reglas del ciclo, superficies de security review y tooling) |
+| `CLAUDE.md` | procedimiento, superficies sensibles y límites del implementador |
+| `docs/quality/review-process.md` | §3.7: formalización de las dos convenciones operativas en `AGENTS.md` |
+| `docs/progress-log.md` | esta entrada |
+
+### Alcance: lo que esta tarea NO cambia
+
+- No se modifica `BLUEPRINT.md` (sigue v1.4).
+- **ADR-001 sigue PROPUESTA — NO APROBADA**; **P1–P20 siguen pendientes de aprobación humana**.
+- No se aprueba ni se implementa ninguna propuesta pendiente.
+- No se tocan ADR, `docs/PRD.md`, el resto de `docs/quality/**` (`security-review.md`, `browser-testing.md`), código, `package.json`/lockfiles, SQL, `supabase/migrations`, RLS, RPC, auth, grants ni workflows de CI.
+
+### Cómo se verificó
+
+- `git diff --check` (sin errores de whitespace), `git diff --stat` y `git status --short`: solo cambian las cuatro rutas autorizadas. No se ejecutaron typecheck, tests, Playwright ni build porque no hay cambios de código.
+
+### Riesgos pendientes
+
+1. Los cambios están **preparados y sin commitear**; el commit deberá auditarse sobre su propio hash antes de push y merge (`docs/quality/review-process.md` §3.3).
+2. **No se registra hash nuevo** porque el commit todavía no existe.
+3. **ADR-001 sigue PROPUESTA — NO APROBADA** y **P1–P20 siguen pendientes**.
+4. Claude `/code-review` y `/security-review` siguen **pendientes/opcionales por disponibilidad actual**: se documentan como tales, no como herramientas obligatoriamente disponibles.
+
+---
+
+## 17/10/2026 — Tooling de calidad ya auditado y corrección documental del proceso de revisión
+
+**Rama:** `chore/herramientas-calidad` · **Agente:** Claude Code · **Estado:** correcciones documentales **preparadas y pendientes de commit**; ADR-001 sigue **PROPUESTA — NO APROBADA**
+
+### Herramientas de calidad incorporadas (commit ya auditado y aprobado)
+
+Commit de tooling: `54f393490471a45214577d618034f3ea05a99518`
+
+Resultado de la auditoría del tooling: **APPROVED**.
+
+- Herramientas incorporadas: skill `grilling` y Playwright CLI `0.1.22`.
+- Observaciones de la auditoría del tooling `54f3934…`, todas **no bloqueantes** (no confundir con los `L-1…L-7` de la auditoría final, que figuran más abajo):
+  - **L-1:** preaprobación de comandos Playwright.
+  - **L-2:** `run-code` puede ejecutar JavaScript en el contexto del navegador.
+  - **L-3:** trazabilidad upstream/npm de `0.1.22` verificada, sin riesgo.
+
+### Documentación creada y auditoría final
+
+Commit documental: `9e589264fdd427ebe21d174d61b37c4c86e173cc`
+
+- `docs/PRD.md`
+- `docs/quality/review-process.md`
+- `docs/quality/security-review.md`
+- `docs/quality/browser-testing.md`
+
+Commit de corrección documental: `bec986e695e27dec6f0c1892c21a45061ce624a9`
+
+**Auditoría final de `bec986e…`: APPROVED WITH CORRECTIONS.** El conjunto documental no modificó `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md`, ADR-001, código, SQL, migraciones, RLS, RPC, grants ni workflows.
+
+### Qué se hizo en esta tarea
+
+Corrección documental mínima en `docs/quality/review-process.md`, §2.1: «ADR vigente a la fecha» pasa a «Versión documental actual de ADR-001»; se conserva el resto de la oración (v1.2, ronda 3, estado `propuesta` — NO APROBADA, P1–P20 pendientes, P19 y P20 primero según la propuesta, y P18 como decisión separada que no es requisito previo). Se agrega esta entrada de bitácora.
+
+**Correcciones de la auditoría final (preparadas, pendientes de commit).** El commit `bec986e695e27dec6f0c1892c21a45061ce624a9` fue auditado con veredicto **APPROVED WITH CORRECTIONS**. Sus hallazgos no bloqueantes **M-1, M-2 y L-1 a L-7 de la auditoría final** originan este commit documental de seguimiento:
+
+| Hallazgo | Corrección aplicada |
+|---|---|
+| **M-1** | `browser-testing.md` §2: se documenta `npm run dev -- --host 127.0.0.1 --port 4173 --strictPort` para usar 4173, y se aclara que `npm run dev` a secas sirve el puerto de Vite (5173 por defecto), que 4173 proviene del `webServer` del E2E y que en ese caso hay que reemplazar la URL en todos los comandos. |
+| **M-2** | `browser-testing.md` §7: la tabla deja de afirmar cobertura en CI. Dice «reproducible en cada corrida local» y que **hoy el CI no ejecuta Playwright**; se agrega nota: agregar Playwright al CI es una tarea separada y requiere autorización. |
+| **L-1** | `review-process.md`: el máximo de 3 ciclos y la obligatoriedad de la security review quedan identificados como **convenciones operativas de este proceso, aprobadas por el humano en esta tarea**, no heredadas de `AGENTS.md`/Blueprint (§2.8, §3.4 y nueva regla §3.7). `AGENTS.md` no se modifica. |
+| **L-2** | `PRD.md`: los identificadores tomados de Blueprint §8 (`movimientos_stock`, `auditoria`, `idempotency_key`, estados de nota) se marcan como **modelo de datos propuesto** con remisión a ADR-001 §3.2; no se presentan como DDL aprobado. |
+| **L-3** | `PRD.md` §17: el criterio «el wrapper rechaza `anon`…» se conserva como criterio heredado del Blueprint, con nota de que depende de **P1**, no implica aprobación de la topología wrapper y no autoriza implementación ni migraciones. |
+| **L-4** | `review-process.md` §2.7 y la cadena de §1: «code review (disponible)» pasa a «humana / independiente»; se aclara que `/code-review` de Claude está pendiente/opcional y que no existe una compuerta automática garantizada. |
+| **L-5** | `browser-testing.md`: el ignore de `.playwright-cli/` se cita por su fuente directa (`.gitignore:57-58`); `AGENTS.md` §5 se menciona solo por el principio de no versionar secretos/estado sensible. |
+| **L-6** | `PRD.md` RNF-11: cita corregida a `Blueprint §13, regla 4` + `AGENTS.md §6.4`, con la salvedad «aplicable cuando exista autorización de migraciones»; no insinúa que hoy corresponda migrar. |
+| **L-7** | Esta entrada: registra el hash auditado `bec986e…`, el veredicto y el origen de las correcciones de seguimiento. |
+
+Estas correcciones son **solo documentales**: no cambian reglas de negocio, no aprueban ADR-001 ni ninguna P1–P20 y no modifican el perfil de seguridad. No se registra el hash del commit de seguimiento porque **todavía no existe**.
+
+### Alcance: lo que esta tarea NO autoriza
+
+- no autoriza migraciones;
+- no aprueba RLS;
+- no aprueba RPC privilegiadas;
+- no cambia grants;
+- no cambia auth;
+- no cambia reglas de stock ni de dinero;
+- no modifica código de aplicación.
+
+### Revisiones de Claude pendientes
+
+- Claude `/code-review`: **pendiente/opcional** por falta de disponibilidad actual.
+- Claude `/security-review`: **pendiente/opcional** por falta de disponibilidad actual.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `docs/quality/review-process.md` | corrección de redacción en §2.1; §1, §2.7, §2.8, §3.4 y nueva §3.7 (convenciones operativas y code review sin ambigüedad) |
+| `docs/quality/browser-testing.md` | §2 (procedimiento de puerto), §7 (cobertura en CI) y cita del ignore de `.playwright-cli/` |
+| `docs/PRD.md` | RNF-11; marca de modelo de datos propuesto (§10, §14, §16); nota de dependencia P1 en §17; historial 0.3 |
+| `docs/progress-log.md` | esta entrada |
+
+Sin otros archivos modificados: no se tocaron `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md`, ADR-001, `docs/quality/security-review.md`, código, SQL, migraciones, workflows, `package.json` ni lockfiles.
+
+### Cómo se verificó
+
+- `git diff --check` (sin errores de whitespace), `git diff --stat` y `git status --short`: solo cambian las rutas documentales autorizadas. No se ejecutaron typecheck, tests, Playwright ni build porque no hay cambios de código.
+
+### Riesgos pendientes
+
+1. Las correcciones de este seguimiento están **preparadas y sin commitear**; el nuevo commit deberá auditarse sobre su propio hash antes de push y merge (`review-process.md` §3.3).
+2. **ADR-001 sigue PROPUESTA — NO APROBADA.** Esta tarea no cambia su estado.
+3. **P1–P20 siguen pendientes de aprobación humana.**
+4. **No se autoriza ningún cambio de base de datos ni de seguridad funcional**: migraciones, RLS, RPC, grants, auth, `empresa_id`, stock y dinero quedan fuera del alcance de esta tarea.
+5. No existe una compuerta automática de code/security review garantizada: `/code-review` y `/security-review` de Claude continúan **pendientes/opcionales** por falta de disponibilidad actual.
+
+---
+
+## 17/10/2026 — ADR-001, ronda 3: correcciones de la segunda revisión de Codex (sigue PROPUESTA — NO APROBADA)
+
+**Rama:** `docs/adr-001-revision` (base `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agente:** Claude Code · **Estado:** commiteado inicialmente como `405bf94810d8640059e7d50ea142e299138db2a4`; auditoría final realizada; pendiente de push y merge; **no existe aprobación humana de ADR-001**
+
+### Revisión de Codex sobre la ronda 2
+
+Veredicto: **CHANGES REQUIRED**, con 4 hallazgos (transmitidos por el usuario; el informe no está en el repositorio):
+
+1. La redacción podía leerse como si Supabase admitiera, con condiciones, una función `SECURITY DEFINER` en un esquema expuesto.
+2. La secuencia de gobernanza exigía P2–P18 antes de la validación controlada: incluía P18 (decisión futura separada) y omitía P19 y P20.
+3. `auth.uid()` dentro de `SECURITY DEFINER` y el rol `authenticated` de los usuarios anónimos figuraban como incertidumbres de la documentación, aunque Supabase los documenta.
+4. La ADR decía que Supabase no había confirmado la fecha del cambio de exposición automática.
+
+### Correcciones aplicadas (solo en `docs/decisions/001-rpc-privilegiadas.md`)
+
+1. **Secciones 4, 5 y 19:** la topología C coincide con el texto literal de `BLUEPRINT.md` §10:277, pero la guía vigente de Supabase (*Row Level Security*, "Never create one in a schema listed under 'Exposed schemas'") prohíbe explícitamente crear funciones `SECURITY DEFINER` en un esquema expuesto. C **no es un diseño recomendado por el proveedor**; sigue en la comparación solo porque el Blueprint apunta en esa dirección. Aceptar las advertencias 0028/0029 no implica aval de Supabase. El conflicto requiere decisión humana explícita (P1).
+2. **Secciones 15 y 18:** la secuencia empieza con un paso 0 de gobernanza (decidir P19, resolver P20 y alinear los documentos rectores). Solo después se enumeran las decisiones técnicas necesarias para una validación controlada local o en staging (P1–P17, según el alcance que se ensaye). P18 queda excluida como requisito previo. Se aclara que hoy no está autorizada ninguna implementación, ni siquiera controlada.
+3. **Sección 17.1:** `auth.uid()` en `SECURITY DEFINER` y el rol `authenticated` de los usuarios anónimos (claim `is_anonymous`) pasan a "comportamiento documentado por Supabase que igualmente debe probarse como regresión en nuestro entorno". `pg_graphql` queda como dependiente de la configuración del proyecto.
+4. **Sección 17.2:** fecha oficial del proveedor según el anuncio de Supabase (discusión n.º 45329): default en proyectos nuevos desde el 30/05/2026 y aplicación a todos los proyectos existentes el **30/10/2026**. Se separa de la verificación propia de esquemas expuestos, grants y comportamiento en cada entorno.
+
+También se actualizaron el encabezado (revisión 17/10/2026, ronda 3), el historial (sección 0) y las fuentes (sección 21). En `docs/decisions/README.md` solo cambió la referencia "ronda 2" → "ronda 3"; el estado sigue siendo PROPUESTA — NO APROBADA.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `docs/decisions/001-rpc-privilegiadas.md` | ronda 3 de correcciones documentales |
+| `docs/decisions/README.md` | referencia de ronda |
+| `docs/progress-log.md` | esta entrada |
+
+Sin SQL, migraciones, schemas, roles, grants, RLS, RPC ni cambios de seguridad. No se modificaron `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md` ni código de aplicación.
+
+### Cómo se verificó
+
+- Las cuatro afirmaciones se contrastaron el 17/10/2026 con las fuentes oficiales: *Row Level Security*, *Database Functions*, *Securing your API*, *Hardening the Data API*, *Anonymous Sign-Ins* y la discusión oficial n.º 45329 de Supabase. Las páginas de documentación no indican la fecha; esta surge del anuncio oficial.
+- `git diff --check`, `git status --short` y `git diff --stat`: solo cambian las tres rutas autorizadas. No se ejecutaron typecheck, tests, Playwright ni build porque no hay cambios de código.
+
+### Riesgos pendientes
+
+1. **ADR-001 sigue NO aprobada.** Esta ronda no autoriza ninguna implementación, ni siquiera local o en staging.
+2. Siguen pendientes las veinte decisiones P1–P20, con P19 y P20 primero.
+3. Hay que elegir entre el texto literal del Blueprint (C) y la guía explícita de Supabase (D u otra). Es una decisión humana.
+4. La ronda 3 necesita una nueva revisión independiente sobre el commit que se cree (`AGENTS.md` §2).
+
+
+### Auditoría final del commit documental
+
+Commit auditado: `405bf94810d8640059e7d50ea142e299138db2a4`
+
+Veredicto: **APPROVED WITH CORRECTIONS**.
+
+La auditoría confirmó que el commit contiene únicamente los tres archivos
+documentales autorizados, que ADR-001 continúa en estado
+**PROPUESTA — NO APROBADA**, y que no incorpora SQL, migraciones, RLS, RPC
+ni código de aplicación.
+
+Se detectaron dos observaciones menores y no bloqueantes:
+
+1. La bitácora todavía indicaba que la ronda 3 estaba “sin commitear”.
+   Esta entrada actualiza el estado real del trabajo.
+2. El historial de la ADR omitía la sección 18 en la enumeración de secciones
+   modificadas por la ronda 3. Se agregó esa referencia.
+
+Estas correcciones son exclusivamente documentales y no aprueban ninguna de
+las decisiones P1–P20 ni modifican el perfil de seguridad de la propuesta.
+
+---
+
+## 16/10/2026 — Revisión documental de ADR-001 (sigue PROPUESTA — NO APROBADA)
+
+**Rama:** `docs/adr-001-revision` (creada desde `4cdffb1c159cd17159ff2d0fe0180d391938d973`) · **Agentes:** OpenCode (ronda 1), Claude Code (ronda 2) · **Estado:** sin commitear; ronda 2 pendiente de nueva revisión independiente; **no existe aprobación humana de ADR-001**
+
+### Secuencia de la tarea
+
+1. **Ronda 1 (OpenCode):** ampliación documental de ADR-001 a v1.2 (detalle abajo, conservado como registro).
+2. **Revisión independiente de Codex** sobre la ronda 1: veredicto **CHANGES REQUIRED**, con 12 correcciones obligatorias (las transmitió el usuario; el informe de Codex no está en el repositorio).
+3. **Ronda 2 (Claude Code, actual):** aplica las 12 correcciones (detalle abajo).
+
+### Ronda 2 — correcciones aplicadas
+
+1. **Topología:** se reconoce el conflicto entre el wrapper `SECURITY DEFINER` expuesto de `BLUEPRINT.md` §10:277 y la guía vigente de Supabase (preferir `SECURITY INVOKER`; lints 0028/0029). Se comparan neutralmente A/B/C y una nueva alternativa D (fachada `SECURITY INVOKER` expuesta + implementación privilegiada en esquema no expuesto). C deja de figurar como recomendada; la única preferencia queda marcada **RECOMENDACIÓN NO VINCULANTE**.
+2. **Transacciones y Edge Functions:** varias llamadas independientes a la Data API no forman una transacción; con una única RPC, esa RPC es la unidad atómica; `service_role` solo como excepción justificada, porque elude RLS.
+3. **Gobernanza:** se documenta como propuesta la secuencia aprobación para prueba controlada → implementación local/staging → pruebas → segunda aceptación antes de producción. Requeriría alinear `BLUEPRINT.md` §10:279, §15:433 y la plantilla de estados de ADR si se aprueba.
+4. **Jerarquía:** se retira la "contradicción" Blueprint/AGENTS de la ronda 1. Rige la regla estricta del Blueprint; el alcance de §10:279 se registra como ambigüedad (P20).
+5. **Ownership y RLS:** se incorpora que el propietario de una tabla normalmente elude RLS aunque no tenga `BYPASSRLS`; ownership, `FORCE RLS` y RLS como defensa en profundidad o elusión deliberada quedan pendientes (P4).
+6. **Multiempresa:** invariante de que ninguna relación cruza empresas, restricciones verificables y pruebas con IDs mezclados entre empresas; sin DDL.
+7. **Auditoría e idempotencia:** la tabla `auditoria` y las columnas `idempotency_key` pasan a "modelo propuesto" (§8 se titula "Modelo de datos (propuesto)"); solo la trazabilidad y la idempotencia como propiedades quedan como aprobadas.
+8. **Contrato de idempotencia:** I1–I8 enumerados como pendientes.
+9. **Grants:** requisitos de diseño (USAGE, firma exacta, sobrecargas, PUBLIC, misma transacción, rol creador real). Se corrige el error técnico de v1.1: un `REVOKE` de privilegios por defecto hecho por esquema no elimina el `EXECUTE` global de `PUBLIC` (PostgreSQL 18, ALTER DEFAULT PRIVILEGES).
+10. **Verificación:** separada en comportamiento documentado a probar (incluye `search_path = ''`, ya no presentado como incógnita), propiedades dependientes del entorno y regresión; la concurrencia puede probarse primero en local.
+11. **Contexto:** la frase "La interfaz React usa la Supabase Data API" pasa a futuro ("usará").
+12. **Bitácora:** esta sección.
+
+Fuentes oficiales consultadas y citadas en la sección 21 de la ADR (PostgreSQL 18, Supabase y PostgREST v14).
+
+### Ronda 1 — qué se hizo (registro histórico)
+
+- Se revisó y amplió **solo la documentación** de ADR-001, que permanece en estado **PROPUESTA — NO APROBADA**.
+- Se incorporaron de forma explícita: requisitos ya aprobados por el Blueprint; alternativas A/B/C; propietario y relación con RLS; aislamiento multiempresa; autorización; idempotencia; concurrencia y locks; grants y default privileges; contrato de errores; auditoría; matriz de pruebas; verificaciones pendientes de staging; y consecuencias sobre `BLUEPRINT.md` si se aprobara una alternativa incompatible.
+- Toda decisión no definida por `BLUEPRINT.md` ni por una ADR aprobada quedó marcada **PENDIENTE DE APROBACIÓN HUMANA** (sección 5 de la ADR, puntos P1–P11), con recomendación **no vinculante**.
+- Lo no verificable documentalmente quedó como **A VERIFICAR EN STAGING** (sección 15 de la ADR).
+- **No se aprobó ADR-001** ni se implementó nada: sin código, SQL, migraciones, schemas, roles, grants, Supabase ni configuración de agentes.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `docs/decisions/001-rpc-privilegiadas.md` | revisión documental (v1.2, rondas 1 y 2); estado PROPUESTA — NO APROBADA |
+| `docs/decisions/README.md` | índice: versión 1.2, etiqueta de estado y referencia a P1–P20 (sección 18) |
+| `docs/progress-log.md` | esta entrada |
+
+No se modificó `BLUEPRINT.md`, `AGENTS.md`, `CLAUDE.md`, código de aplicación, SQL, migraciones, schemas, roles, grants ni Supabase.
+
+### Cómo se verificó
+
+- Ronda 1: cotejo de la ADR contra `BLUEPRINT.md` §3, §6, §7.3, §7.4, §7.5, §7.6, §8, §9, §10, §12, §13 y §15, y contra `AGENTS.md` §3 y §5; `git diff --check`.
+- Ronda 2: citas de línea del Blueprint revisadas contra `BLUEPRINT.md` v1.4; afirmaciones de PostgreSQL, Supabase y PostgREST contrastadas con la documentación oficial (sección 21 de la ADR); `git diff --check` sin observaciones; `git status` confirma que solo cambiaron las tres rutas autorizadas. No se ejecutaron typecheck, tests ni build: no hay cambios de código.
+
+### Riesgos pendientes
+
+1. **ADR-001 sigue NO aprobada** y no existe aprobación humana en ninguna de sus formas. Rige la lectura estricta de `BLUEPRINT.md` §10:279: ninguna migración hasta aprobar ADR-001 y pasar las pruebas de autorización.
+2. *(Retirado en la ronda 2.)* La ronda 1 registraba una "contradicción" entre `BLUEPRINT.md` §10:279 y `AGENTS.md` §3. Se reclasifica como **ambigüedad de alcance** del texto del Blueprint (P20 de la ADR); el Blueprint, de mayor jerarquía, rige.
+3. Veinte decisiones quedan **PENDIENTE DE APROBACIÓN HUMANA** (P1–P20, sección 18 de la ADR), entre ellas la topología (P1) y la propuesta de gobernanza (P19).
+4. Fuentes oficiales que difieren: la guía *Hardening the Data API* de Supabase muestra un `REVOKE ... FROM PUBLIC` por esquema que, según PostgreSQL 18, no tiene efecto. Hay que resolverlo con una prueba de catálogo cuando se autorice.
+5. El informe de Codex (CHANGES REQUIRED) no está archivado en el repositorio; la ronda 2 se basó en las 12 correcciones transmitidas por el usuario.
+6. La ronda 2 requiere una nueva revisión independiente sobre el commit que se cree (`AGENTS.md` §2).
 
 ---
 

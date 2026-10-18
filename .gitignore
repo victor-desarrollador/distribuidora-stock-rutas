@@ -54,3 +54,5 @@ playwright-report/
 test-results/
 blob-report/
 *.backup
+# Playwright CLI output (may contain credentials)
+.playwright-cli/

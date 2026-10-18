@@ -13,11 +13,70 @@ Antes de modificar código:
 
 ## 2. Flujo de trabajo entre agentes
 
-1. **Claude Code implementa** la tarea autorizada en su propia rama.
-2. **Codex y OpenCode auditan de forma independiente el mismo commit.** Cada auditoría se hace sobre un hash concreto, sin modificar archivos (en OpenCode, subagente `auditor`, `.opencode/agents/auditor.md`). Un auditor no corrige el código: reporta hallazgo, severidad, archivo y línea, regla del Blueprint afectada, riesgo y corrección propuesta.
-3. **El usuario aprueba.** Decide sobre los hallazgos y autoriza commit, push, merge y deploy. Ningún agente aprueba su propio trabajo ni el de otro agente.
+### 2.1 Ciclo de trabajo
 
-Si después de una auditoría se cambia el código, el nuevo commit vuelve a auditarse.
+```
+definición / requisitos
+  → grilling (cuando haya decisiones abiertas)
+  → plan humano autorizado
+  → implementación
+  → lint / typecheck / tests / build
+  → Playwright (cuando corresponda)
+  → code review (humana / independiente)
+  → security review (cuando corresponda)
+  → auditoría independiente (Codex / OpenCode)
+  → aprobación humana
+```
+
+Cada eslabón es una compuerta: no se avanza al siguiente sin cerrar el anterior. Las etapas y su detalle están en `docs/quality/review-process.md`, que **detalla** este proceso; no lo reemplaza ni amplía su alcance.
+
+### 2.2 Flujo entre agentes
+
+1. **Claude Code implementa** la tarea autorizada en su propia rama.
+2. **Codex y OpenCode auditan de forma independiente el mismo commit.** Cada auditoría se hace sobre un hash concreto, sin modificar archivos (en OpenCode, subagente `auditor`, `.opencode/agents/auditor.md`). Un auditor no corrige el código: reporta el hallazgo.
+3. **El usuario aprueba.** Decide sobre los hallazgos y autoriza commit, push, merge y deploy.
+
+### 2.3 Reglas obligatorias del ciclo
+
+1. **Ningún agente aprueba su propio trabajo ni el de otro agente.** La aprobación es humana.
+2. **El auditor opera en modo solo lectura.** No modifica archivos ni corrige: reporta. (El subagente `auditor` corre con `edit: deny` y `bash: deny`.)
+3. **Cada auditoría se refiere a un commit/hash concreto cuando sea posible.** Sin hash la auditoría no es reproducible.
+4. **Si cambia cualquier archivo después de una auditoría, el nuevo hash vuelve a auditarse.** No se reutiliza la auditoría anterior.
+5. **Máximo 3 ciclos `implementar → auditar → corregir`.** Al tercer ciclo sin cierre se detiene el trabajo y se convoca intervención humana; no se encadenan ciclos indefinidos.
+6. **Revisión de seguridad obligatoria** cuando el cambio toca alguna superficie sensible (§2.4). Cuando corresponde, es previa a la auditoría independiente.
+7. **Revisión humana final** antes de merge y deploy.
+8. **Ningún agente hace merge ni deploy por cuenta propia.**
+9. **Cada hallazgo se reporta completo:** severidad (crítica / alta / media / baja), archivo y línea, evidencia, regla del Blueprint o ADR afectada, riesgo, corrección propuesta y bloqueo (sí / no). Formato en `docs/quality/review-process.md` §4.
+
+### 2.4 Superficies que disparan security review
+
+La revisión de seguridad es obligatoria cuando el cambio toca alguna de estas superficies:
+
+- Supabase;
+- autenticación (auth);
+- `empresa_id` o cualquier filtrado multiempresa;
+- roles y permisos;
+- RLS;
+- RPC / funciones SQL;
+- `SECURITY DEFINER` / `SECURITY INVOKER`;
+- grants (`GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES`);
+- `service_role` o credenciales de privilegio amplio;
+- `movimientos_stock`;
+- ventas;
+- pagos;
+- retiros;
+- cierres;
+- idempotencia;
+- concurrencia;
+- secretos.
+
+Criterios y detalle en `docs/quality/security-review.md`. Si el cambio no toca ninguna de estas superficies la revisión no es exigible, aunque puede pedirse.
+
+### 2.5 Tooling
+
+- **grilling** — entrevista por rondas para requisitos, decisiones abiertas, ADR y PRD. **No reemplaza** al Blueprint ni a la aprobación humana; las respuestas que cambien reglas del Blueprint se canalizan como decisión en `docs/decisions/` con estado `propuesta`. Skill fijada en `.agents/skills/grilling/`.
+- **Playwright CLI** — validación de navegador cuando corresponda; es apoyo a la verificación funcional. **No reemplaza** a Vitest ni a las pruebas E2E versionadas (`npx playwright test`). El estado local `.playwright-cli/` **no se versiona**. Detalle en `docs/quality/browser-testing.md`.
+- **Claude `/code-review` y `/security-review`** — **pendientes / opcionales por disponibilidad actual**. Mientras sigan en ese estado no son requisitos del proceso ni compuertas garantizadas, y **no deben describirse como herramientas obligatoriamente disponibles**. La obligación es la revisión (humana e independiente), no una herramienta concreta.
 
 ## 3. Prohibición expresa: propuestas no aprobadas
 
