@@ -5,6 +5,62 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 19/10/2026 — Bloque 2: consistencia categoría ↔ unidad en la pantalla Productos
+
+**Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `91078a5331db54684f2d83be4d32067e7dea7d69` · **Agente:** OpenCode · **Estado:** implementación parcial verificada en local, con validación defensiva también en la frontera de persistencia (localStorage v2); **sin commit ni push**; **la migración del prototipo todavía no está completa**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Qué se hizo
+
+Regla vigente (BLUEPRINT.md v1.6 §7.1): la categoría determina la unidad de venta. `Lácteos` → `"unidad"`; `Fiambres` → `"pieza"`. Toda otra combinación es inválida.
+
+- `apps/web/src/domain/productos.ts` (nuevo, lógica pura sin React; creado originalmente como `apps/web/src/pages/productos_validacion.ts` y movido a `domain/` antes del commit, sin dejar duplicados):
+  - `unidad_para_categoria(categoria)`: devuelve `"unidad"` para Lácteos y `"pieza"` para Fiambres.
+  - `validar_combinacion_categoria_unidad(categoria, unidad_medida)`: devuelve `{ valido, mensaje? }`; rechaza `Lácteos + pieza` y `Fiambres + unidad` con mensaje visible.
+  - Los tipos se reutilizan de `../data/mockProductos` (sin unions duplicadas).
+- `apps/web/src/hooks/useProductos.ts` (ajuste mínimo autorizado, en la frontera de persistencia):
+  - Al sanear/leer localStorage v2, también valida la combinación categoría ↔ unidad con `validar_combinacion_categoria_unidad`; un producto con combinación inválida **no** se incorpora al estado válido de la app.
+  - Semántica previa sin cambiar: como ya ocurría con cualquier campo inválido, un elemento inválido **rechaza todo el payload** y el hook arranca desde los mocks canónicos. No se corrige categoría, no se cambia unidad, no se multiplica/divide stock y no se reinterpretan cantidades. No se inventó ninguna estrategia de recuperación nueva.
+- `apps/web/src/pages/Productos.tsx`:
+  - **Alta:** al cambiar la categoría, `unidadMedida` se deriva automáticamente (`unidad_para_categoria`); no queda ningún estado intermedio inválido.
+  - **Selector de unidad:** ahora presenta la unidad derivada de la categoría como **valor no editable** (única opción, siempre deshabilitado). Ya no se elige unidad manualmente ni se ofrecen opciones incompatibles; no se agregaron opciones nuevas.
+  - **Validación defensiva antes de guardar:** se revalida la combinación aunque la UI la restrinja; una combinación inválida falla cerrado con alerta visible y **no se persiste**.
+  - **Edición:** la categoría ya no es editable durante la edición (además de la unidad, que tampoco lo era), con explicación visible de que cambiarlas alteraría la interpretación de las cantidades existentes. El guardado de edición actualiza solo `nombre`, `precio` y `stockMinimo`; **no** se toca `categoria`, **no** se convierte o multiplica stock, **no** se reinterpreta unidad ↔ medias piezas.
+  - Cantidades: `stock` y `stockMinimo` siguen exigiéndose enteros ≥ 0 (en Fiambres ya representan medias piezas canónicas). No se agregó UX "pieza + media pieza".
+- `apps/web/src/domain/productos.test.ts` (nuevo, 8 pruebas; creado originalmente como `apps/web/src/pages/productos_validacion.test.ts` y movido a `domain/`): `unidad_para_categoria` por categoría; combinaciones válidas (Lácteos+unidad, Fiambres+pieza) e inválidas (Lácteos+pieza, Fiambres+unidad); `kg` no es unidad aceptada.
+- `apps/web/src/hooks/persistencia-v2.test.ts` (+4 pruebas de frontera de persistencia): `Lácteos + pieza` y `Fiambres + unidad` en v2 **no** se aceptan (el payload íntegro se rechaza y se vuelve a los mocks canónicos); `Lácteos + unidad` y `Fiambres + pieza` siguen aceptándose.
+- `docs/progress-log.md`: esta entrada.
+
+### Limitación de testing
+
+No existe infraestructura de component testing (Vitest corre en node, sin jsdom/@testing-library) y no `se agregaron dependencias`. Por eso los tests cubren la lógica pura (`productos_validacion.ts`); la derivación en el handler de categoría y el bloqueo en la UI se verifican por typecheck + revisión manual del flujo del formulario (mismo enfoque que los bloques anteriores del prototipo).
+
+### Cómo se verificó
+
+| Verificación | Resultado |
+|--------------|-----------|
+| `npm test -- --run` | exit 0; 8 archivos, 89 pruebas (77 previas + 8 de dominio + 4 de frontera de persistencia) |
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0; 0 errores, 0 advertencias |
+| `npm run build` | exit 0 (`index-D4-8Jzna.js`) |
+| `npx playwright test` | exit 0; 1 prueba pasa |
+| `git diff --check` | sin espacios en blanco problemáticos |
+
+### Riesgos y pendientes
+
+1. **Cerrada la defensa en la frontera de persistencia:** `useProductos.ts` también valida la combinación categoría ↔ unidad al leer localStorage v2, con la semántica previa intacta (elemento inválido invalida todo el payload → mocks canónicos). No se corrigen datos ni se reinterpreta stock.
+2. **Jornadas:** queda pendiente implementar la UX de pieza/media pieza.
+3. **Autoventa:** queda pendiente implementar la UX de pieza/media pieza.
+4. **Movimientos:** queda pendiente implementar la UX de pieza/media pieza.
+5. **Retornos:** queda pendiente implementar la UX de pieza/media pieza.
+6. **Rendición:** queda pendiente retirar el bloqueo `pieza_legacy` cuando toda la cadena use la representación canónica en medias piezas.
+7. **`v1` preservada:** las claves `*_demo_v1` siguen intactas y no son leídas por v2.
+8. **ADR-001** continúa **PROPUESTA — NO APROBADA**; esta tarea no la toca.
+9. **Pendiente de auditoría independiente y aprobación humana** antes de commit, push, merge y deploy.
+
+Por estos pendientes, el Bloque 2 es una **implementación parcial** y **no completa la migración de unidades del prototipo**.
+
+---
+
 ## 19/10/2026 — Bloques 1 + 1B: base demo canónica y eliminación técnica de `kg`
 
 **Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `187a8d38c76746f4686f3a41647d3eb3292edd36` · **Agente:** OpenCode · **Estado:** bloque intermedio 1 + 1B listo para precommit; **la migración del prototipo todavía no está completa**; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**

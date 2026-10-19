@@ -4,7 +4,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 
 import { cargarProductos } from "./useProductos";
-import type { Producto, UnidadMedida } from "../data/mockProductos";
+import {
+  productosIniciales,
+  type Producto,
+  type UnidadMedida,
+} from "../data/mockProductos";
 import { leerJornadas } from "./useJornadas";
 import { cargarVentas } from "./useVentas";
 import { leerMovimientos } from "./useMovimientos";
@@ -196,5 +200,91 @@ describe("v2 ya existe: se respeta y no se reinicializa", () => {
     expect(productos).toEqual(datosV2);
     expect(productos[0].id).toBe(777);
     expect(productos).toHaveLength(1);
+  });
+});
+
+describe("Frontera de persistencia: combinación categoría ↔ unidad", () => {
+  it("Lácteos + pieza en v2 no se acepta como producto válido", () => {
+    mockLS._store.set(
+      "distribuidora_productos_demo_v2",
+      JSON.stringify([
+        {
+          id: 9001,
+          nombre: "Producto inválido Lácteos + pieza",
+          categoria: "Lácteos",
+          unidadMedida: "pieza",
+          stock: 4,
+          precio: 1000,
+          stockMinimo: 1,
+        },
+      ])
+    );
+
+    // Semántica vigente del hook: si un elemento del payload es
+    // inválido, todo el payload se rechaza y se arranca desde los
+    // mocks canónicos. El producto inválido no se incorpora al
+    // estado válido de la app.
+    expect(cargarProductos()).toEqual(productosIniciales);
+  });
+
+  it("Fiambres + unidad en v2 no se acepta como producto válido", () => {
+    mockLS._store.set(
+      "distribuidora_productos_demo_v2",
+      JSON.stringify([
+        {
+          id: 9002,
+          nombre: "Producto inválido Fiambres + unidad",
+          categoria: "Fiambres",
+          unidadMedida: "unidad",
+          stock: 4,
+          precio: 1000,
+          stockMinimo: 1,
+        },
+      ])
+    );
+
+    expect(cargarProductos()).toEqual(productosIniciales);
+  });
+
+  it("Lácteos + unidad en v2 sigue aceptándose", () => {
+    const datosV2: Producto[] = [
+      {
+        id: 9003,
+        nombre: "Producto válido Lácteos + unidad",
+        categoria: "Lácteos",
+        unidadMedida: "unidad",
+        stock: 4,
+        precio: 1000,
+        stockMinimo: 1,
+      },
+    ];
+
+    mockLS._store.set(
+      "distribuidora_productos_demo_v2",
+      JSON.stringify(datosV2)
+    );
+
+    expect(cargarProductos()).toEqual(datosV2);
+  });
+
+  it("Fiambres + pieza en v2 sigue aceptándose", () => {
+    const datosV2: Producto[] = [
+      {
+        id: 9004,
+        nombre: "Producto válido Fiambres + pieza",
+        categoria: "Fiambres",
+        unidadMedida: "pieza",
+        stock: 8,
+        precio: 9900,
+        stockMinimo: 2,
+      },
+    ];
+
+    mockLS._store.set(
+      "distribuidora_productos_demo_v2",
+      JSON.stringify(datosV2)
+    );
+
+    expect(cargarProductos()).toEqual(datosV2);
   });
 });

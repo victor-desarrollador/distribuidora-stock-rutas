@@ -5,6 +5,7 @@ import {
   productosIniciales,
   type Producto,
 } from "../data/mockProductos";
+import { validar_combinacion_categoria_unidad } from "../domain/productos";
 
 const STORAGE_KEY = "distribuidora_productos_demo_v2";
 
@@ -26,6 +27,15 @@ export function cargarProductos(): Producto[] {
         typeof producto.nombre === "string" &&
         ["Lácteos", "Fiambres"].includes(producto.categoria) &&
         ["unidad", "pieza"].includes(producto.unidadMedida) &&
+        // Frontera de persistencia: la combinación categoría ↔ unidad
+        // debe ser la canónica (Lácteos -> unidad; Fiambres -> pieza).
+        // Nada se corrige aquí (no se cambia categoría ni unidad ni se
+        // reinterpreta stock): un dato inválido invalida el payload
+        // igual que cualquier otro campo inválido.
+        validar_combinacion_categoria_unidad(
+          producto.categoria,
+          producto.unidadMedida
+        ).valido &&
         Number.isFinite(producto.precio) &&
         producto.precio >= 0 &&
         Number.isFinite(producto.stock) &&

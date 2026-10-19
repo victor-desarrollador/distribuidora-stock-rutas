@@ -4,6 +4,10 @@ import { Package, Plus, Search, Pencil, CheckCircle2 } from "lucide-react";
 
 import { type Producto, type UnidadMedida } from "../data/mockProductos";
 import { useProductos } from "../hooks/useProductos";
+import {
+  unidad_para_categoria,
+  validar_combinacion_categoria_unidad,
+} from "../domain/productos";
 
 // Formato de moneda argentina.
 const formatoMoneda = (valor: number) =>
@@ -122,20 +126,37 @@ export default function Productos() {
     const cantidadesValidas =
       Number.isInteger(stock) && Number.isInteger(stockMinimo);
 
-    if (!camposCompletos || !numerosValidos || !cantidadesValidas) {
-      alert("Revisá los datos del producto.");
+    // Validación defensiva: la combinación categoría ↔ unidad debe ser
+    // canónica (Lácteos -> unidad; Fiambres -> pieza) aunque la UI ya
+    // derive la unidad de la categoría. Si llega algo inválido, falla
+    // cerrado y no se persiste.
+    const combinacion = validar_combinacion_categoria_unidad(
+      nuevoProducto.categoria,
+      nuevoProducto.unidadMedida
+    );
+
+    if (
+      !camposCompletos ||
+      !numerosValidos ||
+      !cantidadesValidas ||
+      !combinacion.valido
+    ) {
+      alert(combinacion.valido
+        ? "Revisá los datos del producto."
+        : combinacion.mensaje);
       return;
     }
 
     if (productoEditando !== null) {
-      // Editar información comercial sin alterar el stock.
+      // Editar información comercial sin alterar el stock ni la
+      // interpretación de las cantidades existentes: categoría y
+      // unidadMedida se preservan tal como están.
       setProductos((actuales) =>
         actuales.map((producto) =>
           producto.id === productoEditando
             ? {
                 ...producto,
                 nombre: nuevoProducto.nombre.trim(),
-                categoria: nuevoProducto.categoria,
                 precio,
                 stockMinimo,
               }
@@ -236,43 +257,59 @@ export default function Productos() {
 
               <select
                 value={nuevoProducto.categoria}
-                onChange={(e) =>
+                disabled={productoEditando !== null}
+                onChange={(e) => {
+                  const categoria =
+                    e.target.value as Producto["categoria"];
+
                   setNuevoProducto({
                     ...nuevoProducto,
-                    categoria: e.target.value as Producto["categoria"],
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3"
+                    categoria,
+                    // La unidad se deriva de la categoría: Lácteos ->
+                    // unidad; Fiambres -> pieza. Nunca queda un estado
+                    // intermedio inválido.
+                    unidadMedida: unidad_para_categoria(categoria),
+                  });
+                }}
+                className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="Lácteos">Lácteos</option>
                 <option value="Fiambres">Fiambres</option>
               </select>
+
+              {productoEditando !== null && (
+                <p className="text-xs font-normal text-slate-500">
+                  La categoría no puede cambiarse durante la edición:
+                  alteraría la interpretación de las cantidades
+                  existentes.
+                </p>
+              )}
             </label>
 
-            {/* Unidad de medida */}
+            {/* Unidad de medida: derivada de la categoría */}
             <label className="space-y-1 text-sm font-medium">
               <span>Unidad de medida</span>
 
               <select
                 value={nuevoProducto.unidadMedida}
-                disabled={productoEditando !== null}
-                onChange={(e) =>
-                  setNuevoProducto({
-                    ...nuevoProducto,
-                    unidadMedida: e.target.value as UnidadMedida,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100 disabled:text-slate-500"
+                onChange={() => {
+                  // La unidad siempre es la derivada de la categoría;
+                  // no hay otra opción válida que elegir.
+                }}
+                className="w-full rounded-lg border border-slate-300 p-3 bg-slate-100 text-slate-500"
               >
-                <option value="unidad">Unidad</option>
-                <option value="pieza">Pieza</option>
+                <option value={nuevoProducto.unidadMedida}>
+                  {nuevoProducto.unidadMedida === "unidad"
+                    ? "Unidad"
+                    : "Pieza"}
+                </option>
               </select>
 
-              {productoEditando !== null && (
-                <p className="text-xs font-normal text-slate-500">
-                  La unidad no puede cambiarse durante la edición.
-                </p>
-              )}
+              <p className="text-xs font-normal text-slate-500">
+                La unidad se determina por la categoría: Lácteos se
+                controlan por unidad entera y fiambres por pieza. No
+                se elige manualmente.
+              </p>
             </label>
 
             {/* Precio */}
