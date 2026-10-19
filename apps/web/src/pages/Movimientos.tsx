@@ -55,7 +55,6 @@ const etiquetas = {
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 
 export default function Movimientos() {
@@ -157,10 +156,7 @@ export default function Movimientos() {
     setMensaje("");
   }
 
-  function cantidadValida(
-    texto: string,
-    unidad: "unidad" | "pieza" | "kg"
-  ) {
+  function cantidadValida(texto: string) {
     if (!texto.trim()) return false;
 
     const cantidad = Number(texto);
@@ -168,9 +164,7 @@ export default function Movimientos() {
     return (
       Number.isFinite(cantidad) &&
       cantidad > 0 &&
-      (unidad === "kg" || Number.isInteger(cantidad)) &&
-      (unidad !== "kg" ||
-        Math.round(cantidad * 1000) === cantidad * 1000)
+      Number.isInteger(cantidad)
     );
   }
 
@@ -199,10 +193,7 @@ export default function Movimientos() {
     }
 
     if (
-      !cantidadValida(
-        formulario.cantidad,
-        productoDevuelto.unidadMedida
-      )
+      !cantidadValida(formulario.cantidad)
     ) {
       setError("La cantidad del producto no es válida.");
       return;
@@ -211,10 +202,7 @@ export default function Movimientos() {
     if (
       formulario.tipo === "cambio" &&
       (!productoEntregado ||
-        !cantidadValida(
-          formulario.cantidadEntregada,
-          productoEntregado.unidadMedida
-        ))
+        !cantidadValida(formulario.cantidadEntregada))
     ) {
       setError("Completá el producto de reemplazo y su cantidad.");
       return;
@@ -499,11 +487,7 @@ export default function Movimientos() {
                 <input
                   type="number"
                   min="0"
-                  step={
-                    productoDevuelto?.unidadMedida === "kg"
-                      ? "0.001"
-                      : "1"
-                  }
+                  step="1"
                   value={formulario.cantidad}
                   onChange={(e) =>
                     setFormulario({
@@ -564,11 +548,7 @@ export default function Movimientos() {
                     <input
                       type="number"
                       min="0"
-                      step={
-                        productoEntregado?.unidadMedida === "kg"
-                          ? "0.001"
-                          : "1"
-                      }
+                      step="1"
                       value={formulario.cantidadEntregada}
                       onChange={(e) =>
                         setFormulario({

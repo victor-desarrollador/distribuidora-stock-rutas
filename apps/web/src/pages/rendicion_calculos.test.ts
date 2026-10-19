@@ -208,11 +208,14 @@ describe("pieza legacy · no conciliable", () => {
 });
 
 describe("kg legacy · no soportado", () => {
+  // Fixture deliberadamente inválido: "kg" ya no es un valor válido de
+  // UnidadMedida. Se usa solo para verificar robustez ante datos legacy
+  // que aún pudieran existir en localStorage v1.
   it("no se concilia con el dominio y bloquea el cierre", () => {
     const fila = calcularFilaMercaderia({
       item: item({
         productoId: 3,
-        unidadMedida: "kg",
+        unidadMedida: "kg" as unknown as ItemCarga["unidadMedida"],
         cantidad: 2.5,
       }),
       vendido: 0,

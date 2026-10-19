@@ -7,7 +7,7 @@ export type EstadoJornada =
 export interface ItemCarga {
   productoId: number;
   nombreProducto: string;
-  unidadMedida: "unidad" | "pieza" | "kg";
+  unidadMedida: "unidad" | "pieza";
   cantidad: number;
   precioReferencia: number;
 }

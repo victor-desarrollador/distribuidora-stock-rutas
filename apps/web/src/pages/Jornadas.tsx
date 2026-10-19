@@ -24,7 +24,6 @@ const moneda = (valor: number) =>
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 export default function Jornadas() {
   const { camiones } = useCamiones();
@@ -171,8 +170,7 @@ export default function Jornadas() {
       const cantidadValida =
         Number.isFinite(cantidad) &&
         cantidad >= 0 &&
-        (producto.unidadMedida === "kg" ||
-          Number.isInteger(cantidad));
+        Number.isInteger(cantidad);
       if (!cantidadValida) {
         setError(`Cantidad inválida: ${producto.nombre}`);
         return;
@@ -373,11 +371,7 @@ export default function Jornadas() {
                       type="number"
                       min="0"
                       max={disponible}
-                      step={
-                        producto.unidadMedida === "kg"
-                          ? "0.001"
-                          : "1"
-                      }
+                      step="1"
                       value={cantidades[producto.id] ?? ""}
                       onChange={(e) =>
                         setCantidades((actuales) => ({

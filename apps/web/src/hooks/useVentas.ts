@@ -2,9 +2,9 @@
 import { useState } from "react";
 import type { Venta } from "../data/mockVentas";
 
-const STORAGE_KEY = "distribuidora_ventas_demo_v1";
+const STORAGE_KEY = "distribuidora_ventas_demo_v2";
 
-function cargarVentas(): Venta[] {
+export function cargarVentas(): Venta[] {
   try {
     const guardado = localStorage.getItem(STORAGE_KEY);
 
@@ -38,7 +38,7 @@ function cargarVentas(): Venta[] {
             item !== null &&
             Number.isSafeInteger(item.productoId) &&
             typeof item.nombreProducto === "string" &&
-            ["unidad", "pieza", "kg"].includes(item.unidadMedida) &&
+            ["unidad", "pieza"].includes(item.unidadMedida) &&
             Number.isFinite(item.cantidad) &&
             item.cantidad > 0 &&
             Number.isFinite(item.precioUnitario) &&

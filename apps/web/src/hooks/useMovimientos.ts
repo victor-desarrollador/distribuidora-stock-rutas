@@ -7,7 +7,7 @@ import {
 } from "../data/mockMovimientos";
 import type { UnidadMedida } from "../data/mockProductos";
 
-const STORAGE_KEY = "distribuidora_movimientos_demo_v1";
+const STORAGE_KEY = "distribuidora_movimientos_demo_v2";
 
 export function leerMovimientos(): MovimientoReparto[] {
   try {
@@ -32,7 +32,7 @@ export function leerMovimientos(): MovimientoReparto[] {
       return (
         Number.isSafeInteger(productoId) &&
         typeof nombreProducto === "string" &&
-        ["unidad", "pieza", "kg"].includes(
+        ["unidad", "pieza"].includes(
           unidadMedida as UnidadMedida
         ) &&
         Number.isFinite(cantidad) &&

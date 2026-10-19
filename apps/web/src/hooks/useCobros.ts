@@ -3,8 +3,8 @@ import { useState } from "react";
 import type { Cobro } from "../data/mockCobros";
 import type { Venta } from "../data/mockVentas";
 
-const CLAVE_COBROS = "distribuidora_cobros_demo_v1";
-const CLAVE_VENTAS = "distribuidora_ventas_demo_v1";
+const CLAVE_COBROS = "distribuidora_cobros_demo_v2";
+const CLAVE_VENTAS = "distribuidora_ventas_demo_v2";
 
 function redondearDinero(valor: number) {
   return Math.round(valor * 100) / 100;

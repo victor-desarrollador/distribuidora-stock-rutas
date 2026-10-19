@@ -17,7 +17,6 @@ const formatoMoneda = (valor: number) =>
 const unidades: Record<UnidadMedida, string> = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 
 type FormularioProducto = {
@@ -121,8 +120,7 @@ export default function Productos() {
 
     // Para piezas y unidades solamente aceptamos cantidades enteras.
     const cantidadesValidas =
-      nuevoProducto.unidadMedida === "kg" ||
-      (Number.isInteger(stock) && Number.isInteger(stockMinimo));
+      Number.isInteger(stock) && Number.isInteger(stockMinimo);
 
     if (!camposCompletos || !numerosValidos || !cantidadesValidas) {
       alert("Revisá los datos del producto.");
@@ -268,7 +266,6 @@ export default function Productos() {
               >
                 <option value="unidad">Unidad</option>
                 <option value="pieza">Pieza</option>
-                <option value="kg">Kilogramo</option>
               </select>
 
               {productoEditando !== null && (
@@ -307,7 +304,7 @@ export default function Productos() {
                   required
                   type="number"
                   min="0"
-                  step={nuevoProducto.unidadMedida === "kg" ? "0.001" : "1"}
+                  step="1"
                   value={nuevoProducto.stock}
                   onChange={(e) =>
                     setNuevoProducto({
@@ -328,7 +325,7 @@ export default function Productos() {
                 required
                 type="number"
                 min="0"
-                step={nuevoProducto.unidadMedida === "kg" ? "0.001" : "1"}
+                step="1"
                 value={nuevoProducto.stockMinimo}
                 onChange={(e) =>
                   setNuevoProducto({

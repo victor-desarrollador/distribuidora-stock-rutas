@@ -5,22 +5,13 @@ import type {
   ItemRetorno,
 } from "../data/mockRetornos";
 
-const STORAGE_KEY = "distribuidora_retornos_demo_v1";
+const STORAGE_KEY = "distribuidora_retornos_demo_v2";
 
-function esCantidadValida(
-  cantidad: number,
-  unidad: ItemRetorno["unidadMedida"]
-) {
+export function esCantidadValida(cantidad: number) {
   return (
     Number.isFinite(cantidad) &&
-    cantidad >= 0 &&
-    (
-      unidad === "kg"
-        ? Math.abs(
-            cantidad * 1000 - Math.round(cantidad * 1000)
-          ) < 0.000001
-        : Number.isInteger(cantidad)
-    )
+    Number.isInteger(cantidad) &&
+    cantidad >= 0
   );
 }
 
@@ -49,15 +40,9 @@ export function leerRetornos(): RetornoDeposito[] {
           item !== null &&
           Number.isSafeInteger(item.productoId) &&
           typeof item.nombreProducto === "string" &&
-          ["unidad", "pieza", "kg"].includes(item.unidadMedida) &&
-          esCantidadValida(
-            item.cantidadContada,
-            item.unidadMedida
-          ) &&
-          esCantidadValida(
-            item.cantidadAprobada,
-            item.unidadMedida
-          ) &&
+          ["unidad", "pieza"].includes(item.unidadMedida) &&
+          esCantidadValida(item.cantidadContada) &&
+          esCantidadValida(item.cantidadAprobada) &&
           item.cantidadAprobada <=
             item.cantidadContada + 0.000001
         )
@@ -97,14 +82,8 @@ export function useRetornos() {
         new Set(ids).size !== ids.length ||
         retorno.items.some(
           (item) =>
-            !esCantidadValida(
-              item.cantidadContada,
-              item.unidadMedida
-            ) ||
-            !esCantidadValida(
-              item.cantidadAprobada,
-              item.unidadMedida
-            ) ||
+            !esCantidadValida(item.cantidadContada) ||
+            !esCantidadValida(item.cantidadAprobada) ||
             item.cantidadAprobada >
               item.cantidadContada + 0.000001
         )

@@ -2,9 +2,74 @@
 
 Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, archivos modificados, cómo se verificó y riesgos pendientes.
 
+
 ---
 
-## 18/10/2026 — Decisiones humanas aprobadas: separación del queso cremoso demo y versionado de `localStorage` demo v1 → v2 (solo documentación)
+## 19/10/2026 — Bloques 1 + 1B: base demo canónica y eliminación técnica de `kg`
+
+**Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `187a8d38c76746f4686f3a41647d3eb3292edd36` · **Agente:** OpenCode · **Estado:** bloque intermedio 1 + 1B listo para precommit; **la migración del prototipo todavía no está completa**; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Qué se hizo (Bloque 1 — TIPOS + MOCKS + LOCALSTORAGE V2)
+
+**Tipo canónico (`UnidadMedida`):**
+- `apps/web/src/data/mockProductos.ts:1`: `UnidadMedida = "unidad" | "pieza"` (se eliminó `"kg"`).
+- Los tipos duplicados inline en `mockJornadas.ts:10`, `mockVentas.ts:10` y `mockRetornos.ts:5` ahora usan `"unidad" | "pieza"`.
+- `mockMovimientos.ts` reusa `UnidadMedida` desde `mockProductos` (se actualiza automáticamente).
+
+**Mock productos (`mockProductos.ts`):**
+- Separado `Queso cremoso` (inválido: Lácteos + pieza) en dos productos por decisión humana:
+  - `Queso cremoso en bote` → Lácteos / `unidad`, stock 20 (entero).
+  - `Queso cremoso en pieza` → Fiambres / `pieza`, stock 36 (18 piezas × 2 medias).
+- `Jamón cocido`: Fiambres / `pieza`, stock 36 (era 18 piezas enteras → ahora 36 medias piezas).
+- `Salame milán`: Fiambres / `pieza`, stock 12 (era 6 piezas enteras → ahora 12 medias piezas).
+- `stockMinimo` de fiambres expresado en medias piezas.
+- Sin `"kg"` en ningún producto demo.
+
+**localStorage v2 (claves `_demo_v1` → `_demo_v2`):**
+- `useProductos.ts`, `useJornadas.ts`, `useVentas.ts`, `useMovimientos.ts`, `useRetornos.ts`, `useCamiones.ts`, `useClientes.ts`, `useCobros.ts`: STORAGE_KEY actualizada a `*_demo_v2`.
+- `ConfiguracionDemo.tsx:16-20`: CLAVES_OPERACIONES actualizadas a `*_demo_v2`.
+- Todas las validaciones de `["unidad", "pieza", "kg"]` cambiadas a `["unidad", "pieza"]`.
+- Ramas de `=== "kg"` eliminadas de `useJornadas.ts` y `useRetornos.ts` (incluida `esCantidadValida` simplificada).
+- Funciones de carga exportadas (`cargarProductos`, `cargarVentas`, `cargarCamiones`, `cargarClientes`) para permitir tests de inicialización.
+- Las claves `*_demo_v1` **no se borran ni se reinterpretan**: v2 arranca desde mocks canónicos; si v2 ya existe, se respeta.
+
+### Tests agregados
+
+- `apps/web/src/data/mockProductos.test.ts`: verifica que ningún producto usa `kg`; Lácteos→unidad, Fiambres→pieza; stocks enteros >= 0; fiambres en medias piezas (casos concretos: 18→36, 6→12).
+- `apps/web/src/hooks/persistencia-v2.test.ts`: verifica inicialización v2 sin datos v2 (mocks canónicos); v1 no se migra (dato v1 con `kg` no contamina v2); v1 no se elimina; v2 existente se respeta.
+
+### Qué se hizo (Bloque 1B — eliminación técnica de `kg`)
+
+- `Productos.tsx`, `Jornadas.tsx`, `Autoventa.tsx`, `Movimientos.tsx` y `Retornos.tsx`: se eliminaron las ramas, etiquetas, validaciones y formatos específicos de `kg` que habían quedado incompatibles con el tipo canónico.
+- `rendicion_calculos.test.ts`: el fixture que caracteriza una unidad legacy no soportada usa un valor fuera del tipo canónico sin reintroducir `kg` en `UnidadMedida`.
+- Este bloque sólo cierra la eliminación técnica necesaria para que la base canónica compile. No incorpora todavía la UX funcional de pieza/media pieza ni declara terminada la migración.
+
+### Cómo se verificó
+
+| Verificación | Resultado |
+|--------------|-----------|
+| `npm test -- --run` | exit 0; 7 archivos, 77 pruebas pasan |
+| `npm run lint` | exit 0; 0 errores, 0 advertencias |
+| `npm run typecheck` | exit 0 |
+| `npm run build` | exit 0 |
+| `npx playwright test` | exit 0; 1 prueba pasa |
+| `git diff --check` | exit 0 (sin problemas de whitespace) |
+| Alcance | revisado mediante `git diff --stat`, `git diff --name-status` y `git status --short` |
+
+### Riesgos y pendientes
+
+1. **Productos:** queda pendiente implementar la validación categoría ↔ unidad.
+2. **Jornadas:** queda pendiente implementar la UX de pieza/media pieza.
+3. **Autoventa:** queda pendiente implementar la UX de pieza/media pieza.
+4. **Movimientos:** queda pendiente implementar la UX de pieza/media pieza.
+5. **Retornos:** queda pendiente implementar la UX de pieza/media pieza.
+6. **Rendición:** queda pendiente eliminar el bloqueo `pieza_legacy` una vez que el flujo use la representación canónica en medias piezas.
+7. **`v1` preservada:** las claves `*_demo_v1` siguen intactas y no son leídas por v2.
+8. **ADR-001** continúa **PROPUESTA — NO APROBADA**; esta tarea no la toca.
+
+Por estos pendientes, los Bloques 1 + 1B son un **bloque intermedio** y **no completan la migración de unidades del prototipo**.
+
+---
 
 **Rama:** `refactor/migrar-unidades-prototipo` · **Agente:** OpenCode · **Estado:** documentación actualizada; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
 

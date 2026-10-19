@@ -44,7 +44,6 @@ const moneda = (valor: number) =>
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 
 // --------------------------------------------------
@@ -233,12 +232,8 @@ export default function Autoventa() {
       Math.min(nuevaCantidad, producto.disponible)
     );
 
-    // Los kg admiten hasta 3 decimales.
     // Las unidades y piezas se manejan como enteros.
-    const cantidadFinal =
-      producto.unidadMedida === "kg"
-        ? Math.round(cantidad * 1000) / 1000
-        : Math.floor(cantidad);
+    const cantidadFinal = Math.floor(cantidad);
 
     setCantidades((actuales) => ({
       ...actuales,
@@ -354,14 +349,7 @@ export default function Autoventa() {
           const cantidadValida =
             Number.isFinite(item.cantidad) &&
             item.cantidad > 0 &&
-            (
-              item.unidadMedida === "kg"
-                ? Math.abs(
-                    item.cantidad * 1000 -
-                    Math.round(item.cantidad * 1000)
-                  ) < 0.000001
-                : Number.isInteger(item.cantidad)
-            );
+            Number.isInteger(item.cantidad);
 
           if (!cantidadValida) {
             return (
@@ -572,10 +560,7 @@ export default function Autoventa() {
                 const cantidad =
                   cantidades[producto.productoId] ?? 0;
 
-                const incremento =
-                  producto.unidadMedida === "kg"
-                    ? 0.5
-                    : 1;
+                const incremento = 1;
 
                 return (
                   <div
@@ -624,11 +609,7 @@ export default function Autoventa() {
                           type="number"
                           min="0"
                           max={producto.disponible}
-                          step={
-                            producto.unidadMedida === "kg"
-                              ? "0.001"
-                              : "1"
-                          }
+                          step="1"
                           value={cantidad}
                           aria-label={`Cantidad de ${producto.nombreProducto}`}
                           onChange={(e) =>

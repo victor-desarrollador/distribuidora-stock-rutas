@@ -6,9 +6,9 @@ import {
   type Camion,
 } from "../data/mockCamiones";
 
-const STORAGE_KEY = "distribuidora_camiones_demo_v1";
+const STORAGE_KEY = "distribuidora_camiones_demo_v2";
 
-function cargarCamiones(): Camion[] {
+export function cargarCamiones(): Camion[] {
   try {
     const guardados = localStorage.getItem(STORAGE_KEY);
 

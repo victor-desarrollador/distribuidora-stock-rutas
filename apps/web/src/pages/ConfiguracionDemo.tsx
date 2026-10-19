@@ -13,11 +13,11 @@ import { useAuth } from "../auth/useAuth";
 // Claves de las operaciones que vamos a reiniciar.
 // No incluir productos, clientes, camiones ni sesión.
 const CLAVES_OPERACIONES = [
-  "distribuidora_jornadas_demo_v1",
-  "distribuidora_ventas_demo_v1",
-  "distribuidora_movimientos_demo_v1",
-  "distribuidora_retornos_demo_v1",
-  "distribuidora_cobros_demo_v1",
+  "distribuidora_jornadas_demo_v2",
+  "distribuidora_ventas_demo_v2",
+  "distribuidora_movimientos_demo_v2",
+  "distribuidora_retornos_demo_v2",
+  "distribuidora_cobros_demo_v2",
 ] as const;
 
 const nombresModulos = [

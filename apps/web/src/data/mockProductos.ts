@@ -1,4 +1,4 @@
-export type UnidadMedida = "unidad" | "pieza" | "kg";
+export type UnidadMedida = "unidad" | "pieza";
 
 export interface Producto {
   id: number;
@@ -22,33 +22,42 @@ export const productosIniciales: Producto[] = [
   },
   {
     id: 2,
-    nombre: "Queso cremoso",
+    nombre: "Queso cremoso en bote",
     categoria: "Lácteos",
-    unidadMedida: "pieza",
-    stock: 35,
+    unidadMedida: "unidad",
+    stock: 20,
     precio: 8500,
-    stockMinimo: 10,
-  },
-  {
-    id: 3,
-    nombre: "Jamón cocido",
-    categoria: "Fiambres",
-    unidadMedida: "pieza",
-    stock: 18,
-    precio: 12500,
     stockMinimo: 5,
   },
   {
-    id: 4,
-    nombre: "Salame milán",
+    id: 3,
+    nombre: "Queso cremoso en pieza",
     categoria: "Fiambres",
     unidadMedida: "pieza",
-    stock: 6,
-    precio: 9800,
-    stockMinimo: 8,
+    stock: 36,
+    precio: 12500,
+    stockMinimo: 10,
+  },
+  {
+    id: 4,
+    nombre: "Jamón cocido",
+    categoria: "Fiambres",
+    unidadMedida: "pieza",
+    stock: 36,
+    precio: 12500,
+    stockMinimo: 10,
   },
   {
     id: 5,
+    nombre: "Salame milán",
+    categoria: "Fiambres",
+    unidadMedida: "pieza",
+    stock: 12,
+    precio: 9800,
+    stockMinimo: 16,
+  },
+  {
+    id: 6,
     nombre: "Leche entera 1 L",
     categoria: "Lácteos",
     unidadMedida: "unidad",

@@ -6,7 +6,7 @@ import {
   type CierreJornada,
 } from "../data/mockJornadas";
 
-const STORAGE_KEY = "distribuidora_jornadas_demo_v1";
+const STORAGE_KEY = "distribuidora_jornadas_demo_v2";
 
 function cierreValido(cierre: unknown): cierre is CierreJornada {
   if (!cierre || typeof cierre !== "object") return false;
@@ -75,7 +75,7 @@ export function leerJornadas(): Jornada[] {
           item !== null &&
           Number.isSafeInteger(item.productoId) &&
           typeof item.nombreProducto === "string" &&
-          ["unidad", "pieza", "kg"].includes(item.unidadMedida) &&
+          ["unidad", "pieza"].includes(item.unidadMedida) &&
           Number.isFinite(item.cantidad) &&
           item.cantidad > 0 &&
           Number.isFinite(item.precioReferencia) &&
@@ -186,14 +186,8 @@ export function useJornadas() {
         return (
           typeof cantidad === "number" &&
           Number.isFinite(cantidad) &&
-          cantidad >= 0 &&
-          (
-            item.unidadMedida === "kg"
-              ? Math.abs(
-                  cantidad * 1000 - Math.round(cantidad * 1000)
-                ) < 0.000001
-              : Number.isInteger(cantidad)
-          )
+          Number.isInteger(cantidad) &&
+          cantidad >= 0
         );
       })
     ) {

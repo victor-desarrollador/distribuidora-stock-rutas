@@ -6,9 +6,9 @@ import {
   type Producto,
 } from "../data/mockProductos";
 
-const STORAGE_KEY = "distribuidora_productos_demo_v1";
+const STORAGE_KEY = "distribuidora_productos_demo_v2";
 
-function cargarProductos(): Producto[] {
+export function cargarProductos(): Producto[] {
   try {
     const guardados = localStorage.getItem(STORAGE_KEY);
 
@@ -25,7 +25,7 @@ function cargarProductos(): Producto[] {
         Number.isSafeInteger(producto.id) &&
         typeof producto.nombre === "string" &&
         ["Lácteos", "Fiambres"].includes(producto.categoria) &&
-        ["unidad", "pieza", "kg"].includes(producto.unidadMedida) &&
+        ["unidad", "pieza"].includes(producto.unidadMedida) &&
         Number.isFinite(producto.precio) &&
         producto.precio >= 0 &&
         Number.isFinite(producto.stock) &&

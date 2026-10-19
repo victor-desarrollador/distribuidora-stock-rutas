@@ -6,9 +6,9 @@ import {
   type Cliente,
 } from "../data/mockClientes";
 
-const STORAGE_KEY = "distribuidora_clientes_demo_v1";
+const STORAGE_KEY = "distribuidora_clientes_demo_v2";
 
-function cargarClientes(): Cliente[] {
+export function cargarClientes(): Cliente[] {
   try {
     const guardados = localStorage.getItem(STORAGE_KEY);
 

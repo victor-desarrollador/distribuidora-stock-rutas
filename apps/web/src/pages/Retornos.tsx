@@ -23,23 +23,13 @@ import type {
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 
-function cantidadValida(
-  valor: number,
-  unidad: ItemRetorno["unidadMedida"]
-) {
+function cantidadValida(valor: number) {
   return (
     Number.isFinite(valor) &&
     valor >= 0 &&
-    (
-      unidad === "kg"
-        ? Math.abs(
-            valor * 1000 - Math.round(valor * 1000)
-          ) < 0.000001
-        : Number.isInteger(valor)
-    )
+    Number.isInteger(valor)
   );
 }
 
@@ -185,7 +175,7 @@ export default function Retornos() {
       const cantidad = Number(texto);
 
       if (
-        !cantidadValida(cantidad, fila.unidadMedida) ||
+        !cantidadValida(cantidad) ||
         cantidad > fila.contado + 0.000001
       ) {
         setError(
@@ -447,11 +437,7 @@ export default function Retornos() {
                       type="number"
                       min="0"
                       max={fila.contado}
-                      step={
-                        fila.unidadMedida === "kg"
-                          ? "0.001"
-                          : "1"
-                      }
+                      step="1"
                       disabled={Boolean(retornoExistente)}
                       value={
                         aprobados[String(fila.productoId)] ?? ""

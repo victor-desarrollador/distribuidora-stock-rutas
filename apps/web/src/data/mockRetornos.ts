@@ -2,7 +2,7 @@
 export interface ItemRetorno {
   productoId: number;
   nombreProducto: string;
-  unidadMedida: "unidad" | "pieza" | "kg";
+  unidadMedida: "unidad" | "pieza";
 
   // Cantidad vendible contada en el cierre.
   cantidadContada: number;
