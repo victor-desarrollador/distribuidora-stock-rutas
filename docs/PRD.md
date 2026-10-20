@@ -1,15 +1,16 @@
 # PRD — Sistema de Control de Stock y Rendición
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 18/10/2026
-**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v1.6; **no lo reemplaza**.
+**Fecha:** 20/10/2026
+**Versión:** 0.6
+**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v1.7; **no lo reemplaza**.
 **Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
 
 ---
 
 ## 0. Cómo leer este documento
 
-- **Fuente de verdad:** `BLUEPRINT.md` v1.6, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR **aprobadas** y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
+- **Fuente de verdad:** `BLUEPRINT.md` v1.7, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR **aprobadas** y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
 - **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
 - **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
 - **ADR:** hoy la única ADR es **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas**, en **versión 1.2 (ronda 3 de correcciones documentales)** y estado **`propuesta` — NO APROBADA** (`docs/decisions/001-rpc-privilegiadas.md`; `docs/decisions/README.md`). Sus **veinte puntos P1–P20** (sección 18 de la ADR) son **decisiones pendientes de aprobación humana**; sus recomendaciones son **no vinculantes**. Este PRD la trata como dependencia pendiente, nunca como decisión vigente, y **no convierte en requisito ninguna de sus recomendaciones**.
@@ -154,7 +155,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 | RNF-10 | **Dependencias.** Versión exacta, preferentemente publicadas hace al menos dos semanas. | AGENTS.md §6.8 |
 | RNF-11 | **Una migración por cambio de base**, versionada en `supabase/migrations/`; nunca cambios manuales. Regla **aplicable cuando exista autorización de migraciones** (ver la nota de esta sección y §22); **no** implica que hoy corresponda generar migraciones. | Blueprint §13, regla 4; AGENTS.md §6.4 |
 
-> **Dependencia de arquitectura (no vigente):** el patrón concreto de RPC privilegiadas para las escrituras críticas y su topología son objeto de **ADR-001, versión 1.2 (ronda 3), en estado `propuesta` — NO APROBADA**. Hasta su aprobación y prueba, no se generan migraciones ni se adopta ningún patrón (Blueprint §10, viñeta «SECURITY INVOKER…» (regla «No generar migraciones hasta aprobar ADR-001»); `docs/decisions/001-rpc-privilegiadas.md`). Sus **P1–P20** son decisiones pendientes de aprobación humana.
+> **Dependencia de arquitectura (no vigente):** el patrón concreto de RPC privilegiadas para las escrituras críticas y su topología son objeto de **ADR-001, versión 1.2 (ronda 3), en estado `propuesta` — NO APROBADA**. Hasta su aprobación y prueba, no se generan migraciones ni se adopta ningún patrón (Blueprint §10, viñeta «SECURITY INVOKER…» (regla «No generar migraciones hasta aprobar ADR-001»); `docs/decisions/001-rpc-privilegiadas.md`). Esos puntos figuran como **decisiones pendientes P1–P20**, cuyas recomendaciones son **no vinculantes**; este PRD **no las adopta como requisitos**. El detalle operativo de esta revisión está en `docs/quality/security-review.md`.
 
 ---
 
@@ -162,7 +163,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 
 - **El stock nunca se edita a mano.** Todo cambio es un movimiento registrado: quién, cuándo, por qué, cuánto, desde dónde y hacia dónde (Blueprint §3.1, §7.4).
 - **El stock de cada ubicación es la suma de sus movimientos.** Puede existir una tabla/vista de saldos mantenida por la misma transacción, pero el libro de movimientos es la verdad (Blueprint §7.4).
-- **Ubicaciones** (Blueprint §7.2): `deposito`, `cuarentena` (no vendible, no se puede cargar a un camión), `camion:<id>` (jornada abierta), `merma`.
+- **Ubicaciones** (Blueprint §7.2): `deposito`, `cuarentena` (no vendible, no se puede cargar a un camión), `camion:<id>` (jornada abierta). **`merma` no es ubicación interna**; es una salida terminal (`tipo_movimiento = merma`). El cliente tampoco es ubicación interna; es contraparte comercial.
 - **Cantidades enteras en la unidad mínima.** **Lácteos** por **unidad entera**; **fiambres** por **pieza/media**, con representación canónica en **medias piezas** (entero); nunca decimales y **sin `kg` en Fase 1** (Blueprint §7.1). Ejemplo de consistencia categoría/unidad *(no es una regla de nombres)*: `Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`. Precio por pieza; el de media queda pendiente (Blueprint §7.1, §15).
 - **Tipos de movimiento** (Blueprint §7.4): `ingreso`, `carga_camion`, `venta`, `retorno_camion`, `devolucion_cliente`, `a_cuarentena`, `cuarentena_apta`, `merma`, `faltante_rendicion`, `sobrante_rendicion`, `ajuste`.
 - **No se permiten saldos negativos silenciosos.** Si una venta en papel aún no registrada hace que una venta posterior exceda el saldo informático, se registra una **incidencia de conciliación** y se exige regularización trazable por dueño/encargado; la venta física nunca se borra ni se inventa stock (Blueprint §7.4).
@@ -192,6 +193,7 @@ Reglas:
 - **Gastos en ruta:** categoría separada de los retiros, con autorización y comprobante/motivo (Blueprint §7.6).
 - **Diferencias:** requieren revisión, motivo y aprobación de dueño/encargado; no asignan automáticamente responsabilidad económica al vendedor (Blueprint §7.8).
 - **Congelamiento de totales:** se conservan total original, componentes de pago, precios históricos, conteos y cálculo congelado al cerrar (Blueprint §7.8).
+- **Dinero:** **NO se crea ledger financiero separado en Fase 1**. La fuente documental son: `ventas`, `pagos/cobros` (`venta_pagos`), `retiros_efectivo`, `rendiciones`. El saldo de caja se deriva. **Monto:** `numeric(14,2)`, nunca float. Registros financieros confirmados: sin UPDATE/DELETE destructivo; correcciones mediante operación compensatoria auditada cuando corresponda. Stock y dinero nunca se corrigen automáticamente entre sí (Blueprint §8).
 
 > **PROPUESTA NO APROBADA:** que un retiro que supera el saldo registrado **avise y requiera explicación sin bloquear automáticamente el retiro físico** (puede haber notas de papel pendientes) (Blueprint §7.6, §15). **No implementar.**
 
@@ -205,8 +207,10 @@ Reglas:
 - **Escrituras críticas por RPC en la base** con autorización comprobada en el servidor (Blueprint §6, primera viñeta sobre la lógica en RPC; Blueprint §10, viñetas de RLS, escrituras directas e idempotencia).
 - **Lecturas y ediciones ordinarias** con grants y RLS apropiados; las Edge Functions solo si aparece lógica externa no conveniente en SQL (Blueprint §10, viñeta «SECURITY INVOKER…»).
 - **El frontend nunca mueve stock ni dinero** y nunca usa credenciales administrativas en el navegador (Blueprint §6; AGENTS.md §5).
+- **Auditoría (Fase 1):** **no se crea una tabla genérica `auditoria`**. La trazabilidad surge de `operaciones`, los ledgers (`movimientos_stock`), los documentos, el actor, los timestamps, los motivos, la jornada y las relaciones (Blueprint §8, §10).
 
 > **DEPENDENCIA — ADR-001 v1.2 (ronda 3), PROPUESTA — NO APROBADA:** el **patrón concreto** de la puerta de entrada privilegiada, la **topología** (A, B, C o D) y la **cadena exacta de validaciones** (por ejemplo, `auth.uid()`, membresía vigente, `empresa_id` derivado del servidor, rol, estado, cantidades y permisos) son objeto de ADR-001, en estado `propuesta`. **No se implementan ni se generan migraciones** hasta que la ADR se apruebe y pase las pruebas de autorización (Blueprint §10, viñeta «SECURITY INVOKER…» (regla «No generar migraciones hasta aprobar ADR-001»); `docs/decisions/001-rpc-privilegiadas.md`). Esos puntos figuran como **decisiones pendientes P1–P20**, cuyas recomendaciones son **no vinculantes**; este PRD **no las adopta como requisitos**. El detalle operativo de esta revisión está en `docs/quality/security-review.md`.
+> **Contradicción documental pendiente (no resuelta en este PRD).** ADR-001 §4 registra que el texto de la viñeta ADR-001 de Blueprint §10 (RPC pública `SECURITY DEFINER` como puerta de entrada) **contradice** la guía vigente de Supabase, que indica **no crear nunca** funciones `SECURITY DEFINER` en un esquema expuesto («Never create one in a schema listed under *Exposed schemas*»). La elección entre seguir el texto literal del Blueprint o la guía del proveedor es la **decisión pendiente P1**; ningún agente puede resolverla (ADR-001 §4 y §5). Este PRD **no la resuelve** ni adopta una topología.
 
 ---
 
@@ -261,7 +265,8 @@ Recuperación general: las correcciones sobre registros confirmados se hacen con
 
 ## 16. Auditoría y trazabilidad
 
-- **Libro de movimientos de stock** (`movimientos_stock`) y **tabla de auditoría** (`auditoria`) con usuario, acción, tabla, registro, datos antes/después y fecha (Blueprint §8). **[Modelo de datos propuesto]** Estos nombres de tabla y columna provienen de `BLUEPRINT.md` §8 («Modelo de datos (propuesto)»); su forma final está **pendiente de aprobación humana** junto con el modelo (ADR-001 §3.2). **No son DDL aprobado** y aquí se citan solo como referencia.
+- **Libro de movimientos de stock** (`movimientos_stock`) y documentos (`ventas`, `rendiciones`, `conteos`, `retiros_efectivo`, `operaciones`) con usuario, acción, tabla, registro, datos antes/después y fecha (Blueprint §8). **[Modelo de datos propuesto]** Estos nombres de tabla y columna provienen de `BLUEPRINT.md` §8 («Modelo de datos (propuesto)»); su forma final está **pendiente de aprobación humana** junto con el modelo (ADR-001 §3.2). **No son DDL aprobado** y aquí se citan solo como referencia.
+- **No hay tabla genérica `auditoria` en Fase 1** (Blueprint §10). La trazabilidad surge de los ledgers, documentos, actor, timestamps, motivos, jornada y relaciones.
 - Toda operación crítica registra **quién hizo cada paso**, con timestamp del servidor UTC y zona horaria operativa explícita (Blueprint §3.2, §10).
 - Los registros confirmados son inmutables; la rectificación es por compensación auditada (Blueprint §6, §10).
 - La auditoría es central para el objetivo: «estos son los responsables de cada paso» (Blueprint §1).
@@ -378,3 +383,4 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 | 0.3 | 17/10/2026 | Correcciones documentales de la auditoría final: se marca como **modelo de datos propuesto** todo identificador tomado de Blueprint §8 (`movimientos_stock`, `auditoria`, `idempotency_key`, estados de nota) con remisión a ADR-001 §3.2; nota en los criterios de Seguridad que dependen de P1 y no implican aprobación de la topología wrapper; RNF-11 cita `Blueprint §13, regla 4` y queda condicionada a autorización de migraciones. Sin cambios de reglas de negocio ni de seguridad. |
 | 0.4 | 18/10/2026 | Acompaña a `BLUEPRINT.md` v1.5: refleja como **requisito aprobado** la decisión humana de unidades (lácteos por unidad entera; fiambres por pieza/media pieza, canónico en medias piezas; sin `kg` en Fase 1) en RF-01 y §9, y señala que el prototipo legacy requiere migración (`docs/requirements/migracion-unidades-prototipo.md`). Sin cambios de reglas no aprobadas; ADR-001 sigue `propuesta`. |
 | 0.5 | 18/10/2026 | Acompaña a `BLUEPRINT.md` v1.6: agrega en §9 el **ejemplo de consistencia categoría/unidad** (`Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`) y registra en §13 que el versionado de `localStorage` **v1 → v2** (sin migración automática) es una **decisión humana aprobada**, pendiente de ejecución. ADR-001 sigue `propuesta`. |
+| 0.6 | 20/10/2026 | **Acompaña a `BLUEPRINT.md` v1.7**: refleja decisiones arquitectónicas aprobadas conceptualmente — operaciones (Alternativa B: tabla `operaciones` mínima), ubicaciones (merma = salida terminal, no ubicación interna), cierres (derivado: jornada + rendición + operación tipo cierre), roles funcionales sin tabla `roles`, conteos separados de movimientos, `movimientos_stock` como ledger append-only sin `saldo_actual`, dinero sin ledger financiero separado, saldos derivados, auditoría sin tabla genérica, idempotencia centralizada en `operaciones`, concurrencia solo garantías funcionales. Actualiza modelo de datos (§8/§9), tabla de entidades, §7.2, §7.9, §10, §16. |

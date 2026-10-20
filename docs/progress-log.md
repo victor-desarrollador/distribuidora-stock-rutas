@@ -4,6 +4,87 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 
 ---
+## 20/10/2026 — Actualización documental: Blueprint v1.7, PRD v0.6, research, arquitectura y bitácora
+
+**Rama:** `docs/actualizar-blueprint-v17-prd-v06` · **Base:** `86e58b36d252b5c1b8e31d5bd7d3e9910f94186a` · **Agente:** OpenCode · **Estado:** cambios **solo documentales** preparados **sin commit**, pendientes de revisión humana; **sin push, sin merge, sin deploy**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Qué se hizo
+
+Actualización de la documentación del proyecto para reflejar las **decisiones arquitectónicas aprobadas conceptualmente con ajustes** (autorización humana del 20/10/2026). No se tocó código, ni configuración de agentes, ni CI, ni skills.
+
+Principales actualizaciones:
+
+1. **`BLUEPRINT.md` → v1.7** (sección 17: historial):
+   - §7.2: `merma` confirmada como **salida terminal** (`tipo_movimiento = merma`), NO ubicación interna. `cliente` confirmado como contraparte comercial, no ubicación.
+   - §7.9: Sección nueva completa con decisiones aprobadas: operaciones (Alternativa B: tabla `operaciones` mínima), conteos separados, regularización explícita, **cierre derivado sin tabla propia** (jornada + rendición + operación tipo cierre), idempotencia centralizada en `operaciones`, concurrencia solo garantías funcionales, separación mercadería/dinero.
+   - §8 (Modelo de datos): tabla de entidades actualizada con categorías corregidas:
+     - `operaciones`: **APROBADA CONCEPTUALMENTE**
+     - `ubicaciones`: **APROBADA CONCEPTUALMENTE** (merma NO interna)
+     - `conteos`/`conteos_items`: **APROBADA CONCEPTUALMENTE**
+     - `movimientos_stock`: **APROBADA CONCEPTUALMENTE** (ledger append-only, sin `saldo_actual`)
+     - `cierres`: **DERIVADA / SIN TABLA EN FASE 1**
+     - `roles` funcionales: **APROBADOS**; tabla `roles`: **PROPUESTA TÉCNICA**
+     - `auditoria`: **DERIVADA / SIN TABLA**
+     - `saldos_stock`: **DERIVADA**
+     - `ledger financiero`: **DERIVADA / SIN TABLA EN FASE 1**
+     - `rendicion_items`: **PROPUESTA TÉCNICA**
+   - §9: Roles funcionales aprobados; tabla `roles` = PROPUESTA TÉCNICA.
+   - §10: Auditoría sin tabla genérica; ADR-001 sigue PROPUESTA.
+   - §13: Estructura de repositorio actualizada (apps/web en lugar de src/).
+   - §15: Pendientes actualizados; nota de que decisiones §7.9 y §8 están aprobadas conceptualmente.
+
+2. **`docs/PRD.md` → v0.6** (historial actualizado):
+   - Acompaña a Blueprint v1.7; refleja mismas decisiones arquitectónicas.
+   - §7: RF-03 y RF-04 actualizados con ubicaciones y cierre derivado.
+   - §9: Ubicaciones actualizadas; merma = salida terminal.
+   - §10: Dinero sin ledger financiero separado; `numeric(14,2)`.
+   - §11: Auditoría sin tabla genérica; contradicción ADR-001/guía Supabase documentada como P1 pendiente.
+   - §16: Auditoría actualizada (sin tabla `auditoria`).
+   - §21/§22: Dependencias ADR actualizadas.
+
+3. **`docs/research/referencias-open-source-stock.md`** (actualizado):
+   - Matriz de correspondencia (§7) y síntesis (§8) actualizadas para reflejar decisiones aprobadas: tabla `operaciones` = APROBADA CONCEPTUALMENTE, tabla `cierres` = DERIVADA/SIN TABLA, merma = salida terminal (resuelto), auditoría sin tabla propia.
+   - Categorías clarificadas: REFERENCIA EXTERNA vs DECISIÓN DEL PROYECTO vs PROPUESTA DEL PROYECTO.
+
+4. **`docs/architecture/analisis-base-datos.md`** (nuevo, v0.1):
+   - Consolidación del análisis de arquitectura de BD para Fase 1.
+   - Clasificación de entidades (§2) con categorías vigentes.
+   - Relaciones conceptuales (§3).
+   - Detalle de entidades clave: `operaciones`, `movimientos_stock`, `ubicaciones`, `conteos`/`conteos_items`, `rendiciones`, `jornadas`, `retiros_efectivo` (§4).
+   - Flujo de datos por operación crítica (§5).
+   - Consultas derivadas (§6).
+   - Reglas de seguridad pendientes ADR-001 (§7).
+   - Decisiones abiertas para diseño SQL/RPC (§8).
+   - Riesgos y próximos pasos (§9-10).
+
+5. **`docs/progress-log.md`**: esta entrada.
+
+### Archivos modificados/creados
+
+- `BLUEPRINT.md` (v1.6 → v1.7)
+- `docs/PRD.md` (v0.5 → v0.6)
+- `docs/research/referencias-open-source-stock.md` (actualizado)
+- `docs/architecture/analisis-base-datos.md` (nuevo)
+- `docs/progress-log.md` (esta entrada)
+
+### Cómo se verificó
+
+Cambio **exclusivamente documental**. Verificación previa al commit:
+- `git diff --check` — sin espacios en blanco problemáticos.
+- `git diff --stat` y `git status --short` — solo los 5 archivos previstos.
+- Lectura cruzada: BLUEPRINT §7.2, §7.9, §8, §9, §10, §13, §15, §17 coherentes con PRD §7, §9, §10, §11, §16, §21, §22 y research §7, §8.
+- No se ejecutaron pruebas de aplicación porque no hubo cambios de código.
+
+### Riesgos y pendientes
+
+1. **Implementación bloqueada:** ADR-001 sigue **PROPUESTA — NO APROBADA** (v1.2, ronda 3); P1–P20 pendientes. No se generan migraciones ni RPC hasta aprobación y pruebas de autorización.
+2. **Decisiones PROPUESTA TÉCNICA pendientes** (requieren diseño SQL/RPC y aprobación): esquema exacto de `perfiles`/membresías/rol, `idempotency_key`, `ubicaciones` (fila por camión vs. genérica), `rendicion_items`, `retornos`/`mermas`, `gastos_ruta`/`talonarios`/`notas_talonario`, estrategia de concurrencia.
+3. **Propuestas NO APROBADADAS que NO se implementan:** stock negativo transitorio, anulación por vendedor, prohibición descuentos, retiro sin bloqueo, vencimientos por partida/`partidas_ingreso`.
+4. **Fase 2 confirmada fuera de alcance:** proveedores/compras, preventa, cuentas corrientes, lotes/FEFO.
+5. **Commit pendiente:** requiere revisión humana, autorización de commit, auditoría independiente del hash, aprobación humana final, push/merge/deploy con autorizaciones explícitas por paso.
+6. Los 10 archivos `docs/propuesta_v2_*.md` siguen siendo **BORRADORES DE TRABAJO**; no se comitean como documentación final. Al terminar la documentación definitiva, se propondrá su eliminación antes del commit final.
+
+---
 
 ## 20/10/2026 — Saneamiento documental del proceso (previo a Blueprint v1.7)
 
