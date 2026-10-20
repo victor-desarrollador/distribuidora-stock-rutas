@@ -5,9 +5,44 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 ---
 
+## 20/10/2026 — Saneamiento documental del proceso (previo a Blueprint v1.7)
+
+**Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `86e58b36d252b5c1b8e31d5bd7d3e9910f94186a` · **Agente:** Claude Code · **Estado:** cambios **solo documentales** preparados **sin commit**, pendientes de revisión humana; **sin push, sin merge, sin deploy**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Qué se hizo
+
+Corrección de las inconsistencias documentales detectadas por la auditoría integral del 20/10/2026. No se tocó código, `BLUEPRINT.md`, `.claude/settings.json`, `opencode.json`, CI, skills ni worktrees.
+
+- **Lint:** `docs/incidents/2026-10-12-lint-falla-en-main.md` pasa a `resuelto` (se conserva como histórico); `docs/incidents/README.md`, `AGENTS.md` §9, `CLAUDE.md`, `docs/quality/review-process.md` §2.5 y `docs/PRD.md` §18 dejan de hablar de «errores preexistentes» / «incidente abierto»; regla vigente: `npm run lint` debe terminar con exit 0.
+- **Blueprint sin versión hardcodeada:** `AGENTS.md` §3 ya no cita «Blueprint v1.4»; remite a Blueprint §15 y a las secciones citadas.
+- **Referencias por línea:** `docs/quality/security-review.md` (§3 y §4) reemplaza `§10:279`, `§10:277`, `§10:274-276` y `§6:97` por referencias a sección y viñeta. La regla de seguridad no cambia.
+- **Auditor de OpenCode:** `AGENTS.md` §2.3.2 y `docs/quality/review-process.md` §2.9 documentan que es auditoría estática de solo lectura y que no puede verificar por sí mismo hash, diff, estado del árbol, tests, typecheck, lint, build ni Playwright; esa evidencia viene de CI o de ejecución humana reproducible. Permisos sin cambios.
+- **Flujo de commit/auditoría:** `AGENTS.md` nuevo §2.2.1 formaliza la secuencia (implementación sin commit → revisión humana → autorización de commit → verificación reproducible → auditoría del hash → corrección + nuevo hash → aprobación humana → push/merge/deploy con autorización). Se eliminó «cuando sea posible» en `AGENTS.md` §2.3.3 y `review-process.md` §3.5.
+- **Bitácora:** entradas del 18 y 19/10 que decían «sin commit ni push» ahora indican que en ese momento aún no había commit y el hash en que se consolidaron; la entrada de Bloque 2 suma «Estado posterior» con commit, parent, auditoría APPROVED, verificación y ausencia de push/merge/deploy.
+- **Convención de nombres (decisión humana aprobada el 20/10/2026):** `AGENTS.md` §7 pasa a «Idioma y convención de nombres»: dominio TypeScript nuevo y SQL en español `snake_case`; tipos, interfaces y componentes React en `PascalCase`; código React/UI existente sin renombre masivo. Decisión documental: no se modificó código fuente.
+- **Referencias por línea en `docs/PRD.md`:** `§10:279`, `§10:277`, `§10:274-276` y `§6:97` reemplazadas por referencias a sección y viñeta, sin cambiar requisitos, alcance ni estado de ADR-001 ni versión del PRD.
+- **`CLAUDE.md`:** alineado con `AGENTS.md` (implementación sin commit, autorización humana por paso, lint exit 0, alcance del auditor). Se corrigió además la referencia cruzada de `review-process.md` a «Procedimiento 5».
+
+### Archivos modificados
+
+`AGENTS.md`, `CLAUDE.md`, `docs/PRD.md`, `docs/progress-log.md`, `docs/incidents/README.md`, `docs/incidents/2026-10-12-lint-falla-en-main.md`, `docs/quality/review-process.md`, `docs/quality/security-review.md`, `docs/PRD.md`.
+
+### Cómo se verificó
+
+Cambio exclusivamente documental. `git diff --check`, `git diff --stat` y `git status --short` revisados antes de pedir revisión; búsqueda de las expresiones eliminadas sin resultados en los archivos autorizados.
+
+### Pendiente (no se tocó)
+
+1. ~~Convención de nombres~~ y ~~citas por línea en `PRD.md`~~: resueltas con aprobación humana en esta misma tarea (ver arriba).
+2. Auditoría independiente del bloque 1+1B (`91078a5`): no hay registro versionado.
+3. Push de la rama e integración de las ramas pendientes a `main`.
+4. `.claude/settings.json` (reglas `deny`), CI (Playwright, `timeout-minutes`, `.nvmrc`), notas de uso en skills, archivo de `INVENTARIO_ETAPA_0.md` y retiro del worktree `-skills`.
+
+---
+
 ## 19/10/2026 — Bloque 2: consistencia categoría ↔ unidad en la pantalla Productos
 
-**Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `91078a5331db54684f2d83be4d32067e7dea7d69` · **Agente:** OpenCode · **Estado:** implementación parcial verificada en local, con validación defensiva también en la frontera de persistencia (localStorage v2); **sin commit ni push**; **la migración del prototipo todavía no está completa**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+**Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `91078a5331db54684f2d83be4d32067e7dea7d69` · **Agente:** OpenCode · **Estado:** implementación parcial con validación defensiva también en la frontera de persistencia (localStorage v2); **en el momento de redactar esta entrada aún sin commit; luego consolidada en el commit `86e58b36d252b5c1b8e31d5bd7d3e9910f94186a`** (parent `91078a5331db54684f2d83be4d32067e7dea7d69`; ver «Estado posterior» abajo); **sin push, sin merge, sin deploy**; **la migración del prototipo todavía no está completa**; **ADR-001 continúa PROPUESTA — NO APROBADA**
 
 ### Qué se hizo
 
@@ -55,15 +90,30 @@ No existe infraestructura de component testing (Vitest corre en node, sin jsdom/
 6. **Rendición:** queda pendiente retirar el bloqueo `pieza_legacy` cuando toda la cadena use la representación canónica en medias piezas.
 7. **`v1` preservada:** las claves `*_demo_v1` siguen intactas y no son leídas por v2.
 8. **ADR-001** continúa **PROPUESTA — NO APROBADA**; esta tarea no la toca.
-9. **Pendiente de auditoría independiente y aprobación humana** antes de commit, push, merge y deploy.
+9. *(Estado al redactar la entrada; ver «Estado posterior».)* Pendiente de auditoría independiente y aprobación humana antes de commit, push, merge y deploy.
 
 Por estos pendientes, el Bloque 2 es una **implementación parcial** y **no completa la migración de unidades del prototipo**.
+
+### Estado posterior (actualizado el 20/10/2026)
+
+| Dato | Valor |
+|---|---|
+| Commit | `86e58b36d252b5c1b8e31d5bd7d3e9910f94186a` (`feat: validar unidades por categoria en productos`) |
+| Parent | `91078a5331db54684f2d83be4d32067e7dea7d69` |
+| Auditoría independiente | **APPROVED** sobre ese hash (dato informado por el usuario; el informe de la auditoría no está versionado en el repositorio) |
+| Findings | Ninguno (sin hallazgos H/M/L) |
+| Verificación asociada | Vitest 89/89 · typecheck OK · lint OK · build OK · Playwright 1/1 |
+| Push | **No realizado.** La rama no existe en `origin` |
+| Merge / deploy | **No realizados** |
+| Aprobación humana final | Pendiente |
+
+Nota: `lint` (exit 0) y Vitest (89/89) fueron re-ejecutados el 20/10/2026 sobre este hash durante la auditoría integral del proceso; typecheck, build y Playwright se toman de la verificación asociada informada arriba.
 
 ---
 
 ## 19/10/2026 — Bloques 1 + 1B: base demo canónica y eliminación técnica de `kg`
 
-**Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `187a8d38c76746f4686f3a41647d3eb3292edd36` · **Agente:** OpenCode · **Estado:** bloque intermedio 1 + 1B listo para precommit; **la migración del prototipo todavía no está completa**; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+**Rama:** `refactor/migrar-unidades-prototipo` · **Base:** `187a8d38c76746f4686f3a41647d3eb3292edd36` · **Agente:** OpenCode · **Estado:** bloque intermedio 1 + 1B; **la migración del prototipo todavía no está completa**; **en ese momento aún sin commit; luego consolidado en el commit `91078a5331db54684f2d83be4d32067e7dea7d69`**; **sin push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
 
 ### Qué se hizo (Bloque 1 — TIPOS + MOCKS + LOCALSTORAGE V2)
 
@@ -127,7 +177,7 @@ Por estos pendientes, los Bloques 1 + 1B son un **bloque intermedio** y **no com
 
 ---
 
-**Rama:** `refactor/migrar-unidades-prototipo` · **Agente:** OpenCode · **Estado:** documentación actualizada; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+**Rama:** `refactor/migrar-unidades-prototipo` · **Agente:** OpenCode · **Estado:** documentación actualizada; **en ese momento aún sin commit; luego consolidada en la rama (commit `187a8d3`, `docs: definir migracion canonica de unidades`, junto con la definición del 18/10)**; **sin push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
 
 ### Decisiones humanas aprobadas
 
@@ -155,7 +205,7 @@ Cambio **exclusivamente documental**; no se modificó código. `git diff --check
 
 ## 18/10/2026 — Definición documental de unidades (lácteos por unidad entera; fiambres por pieza/media; sin `kg`) y requisito de migración del prototipo
 
-**Rama:** `refactor/migrar-unidades-prototipo` (base `3c0c005c785e8b163493f46b74f0938774d1b7a4`) · **Agente:** OpenCode · **Estado:** definición documental; **sin commit ni push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+**Rama:** `refactor/migrar-unidades-prototipo` (base `3c0c005c785e8b163493f46b74f0938774d1b7a4`) · **Agente:** OpenCode · **Estado:** definición documental; **en ese momento aún sin commit; luego consolidada en el commit `187a8d3` (`docs: definir migracion canonica de unidades`)**; **sin push**; **ADR-001 continúa PROPUESTA — NO APROBADA**
 
 ### Contexto
 

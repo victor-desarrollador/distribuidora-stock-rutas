@@ -19,8 +19,8 @@ Implementador principal del sistema. **Claude sigue siendo implementador, no aud
 7. Implementá **solo lo autorizado**, respetando el alcance de la tarea.
 8. Ejecutá las verificaciones aplicables: `lint`, `typecheck`, `tests` y `build` (AGENTS.md §9).
 9. Usá Playwright cuando corresponda (AGENTS.md §2.5).
-10. Presentá un resumen y el diff, y **solicitá/aceptá auditoría independiente**. No apruebes tu propio commit.
-11. Si corregís un hallazgo, generá un **nuevo commit/hash** para la re-auditoría (AGENTS.md §2.3.4).
+10. Dejá la implementación **sin commit**, presentá un resumen y el diff, y esperá la revisión humana. Solo con **autorización humana** creá el commit; después **solicitá/aceptá auditoría independiente de ese hash** (AGENTS.md §2.2.1). No apruebes tu propio commit.
+11. Si corregís un hallazgo, generá un **nuevo commit/hash** (con autorización humana) para la re-auditoría (AGENTS.md §2.3.4).
 12. **No hagas merge ni deploy** (AGENTS.md §2.3.7 y §2.3.8).
 
 ## Superficies sensibles
@@ -40,7 +40,7 @@ Claude `/security-review` es **opcional/pendiente**: la obligación es la revisi
 
 ## Permisos y acciones
 
-- No hagas commits, push, merges ni despliegues sin aprobación.
+- No hagas commits, push, merges ni despliegues sin autorización humana explícita para cada paso (AGENTS.md §2.2.1).
 - No ejecutes SQL remoto ni modifiques producción: nada de `supabase db push`, `supabase migration up`, `vercel --prod` ni comandos contra la base o el deploy de producción.
 - No hagas `git push --force` ni `git reset --hard` sobre trabajo ajeno.
 - No leas ni imprimas archivos `.env*` reales ni credenciales; si hacen falta valores, pedilos o usá `.env.example`.
@@ -55,7 +55,8 @@ Claude `/security-review` es **opcional/pendiente**: la obligación es la revisi
 ## Verificación
 
 - Ejecutá `npm run typecheck`, `npm test`, `npx playwright test` y `npm run build` en `apps/web/` y citá la salida real en el resumen. Si algo falla, decilo; no declares éxito sin evidencia.
-- Compará la salida de `npm run lint` con la lista de errores preexistentes del incidente abierto; no introduzcas errores nuevos.
+- `npm run lint` debe terminar con exit 0 (AGENTS.md §9). El incidente de lint está resuelto; no introduzcas errores nuevos.
+- El auditor de OpenCode no ejecuta comandos: la evidencia de hash, diff, estado del árbol y verificaciones debe salir de tu ejecución reproducible o de CI (AGENTS.md §2.3.2).
 
 ## Idioma
 

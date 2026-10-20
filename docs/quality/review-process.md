@@ -31,7 +31,7 @@ Cada eslabón es una compuerta: no se avanza al siguiente sin cerrar el anterior
 - Leer `BLUEPRINT.md` completo, `AGENTS.md`, `CLAUDE.md`, las ADR **aprobadas** y las últimas entradas de `docs/progress-log.md` (AGENTS.md §1).
 - **Versión documental actual de ADR-001:** ADR-001 — Puerta de entrada SQL para operaciones privilegiadas, **versión 1.2 (ronda 3)**, estado **`propuesta` — NO APROBADA**. Sus **P1–P20** son decisiones pendientes de aprobación humana y sus recomendaciones son **no vinculantes**; la propia ADR propone decidir **P19 y P20 primero**, y **P18** es una decisión futura separada que **no** es requisito previo (`docs/decisions/001-rpc-privilegiadas.md` §15 y §18; `docs/decisions/README.md`).
 - Identificar qué reglas del Blueprint siguen **pendientes de aprobación**.
-- Si la tarea depende de una regla `PROPUESTA NO APROBADA` / `PROPUESTA TÉCNICA NO APROBADA` o de una ADR en estado `propuesta`: **detener esa parte, informar el bloqueo y pedir aprobación expresa** (AGENTS.md §3; `CLAUDE.md`, Procedimiento 4). No elegir «la opción más razonable» por cuenta propia.
+- Si la tarea depende de una regla `PROPUESTA NO APROBADA` / `PROPUESTA TÉCNICA NO APROBADA` o de una ADR en estado `propuesta`: **detener esa parte, informar el bloqueo y pedir aprobación expresa** (AGENTS.md §3; `CLAUDE.md`, Procedimiento 5). No elegir «la opción más razonable» por cuenta propia.
 
 ### 2.2 Grilling (cuando haya decisiones abiertas)
 Se usa cuando hay decisiones abiertas que conviene stress-testear antes de implementar: requisitos, alcance, ADR, PRD, ambigüedades.
@@ -57,10 +57,10 @@ Desde `apps/web/` (AGENTS.md §9):
 |---|---|
 | `npm run typecheck` | Verificación de tipos (`tsc -b`). |
 | `npm test` | Unitarias (Vitest, una pasada). |
-| `npm run lint` | ESLint. Comparar contra el incidente abierto (`docs/incidents/2026-10-12-lint-falla-en-main.md`); **no introducir errores nuevos**. |
+| `npm run lint` | ESLint. Debe terminar con **exit 0**. El incidente `docs/incidents/2026-10-12-lint-falla-en-main.md` está resuelto (histórico). |
 | `npm run build` | Build de producción. |
 
-Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar, y no deben aparecer errores de lint nuevos respecto del incidente abierto (AGENTS.md §9).
+Antes de pedir revisión: `lint`, `typecheck`, `test`, Playwright y `build` deben pasar; `npm run lint` debe terminar con exit 0 (AGENTS.md §9).
 
 ### 2.6 Playwright (cuando corresponda)
 - E2E versionado (`npx playwright test`) para recorridos críticos.
@@ -81,6 +81,8 @@ Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar,
 - **Claude Code implementa** la tarea autorizada en su rama (AGENTS.md §2).
 - **Codex y OpenCode auditan de forma independiente el mismo commit** (AGENTS.md §2).
 - La auditoría no modifica archivos. En OpenCode se hace con el subagente de solo lectura `auditor` (`.opencode/agents/auditor.md`).
+- **Alcance real del auditor de OpenCode.** Tiene `edit: deny` y `bash: deny`: es **auditoría estática de solo lectura**. **No puede verificar por sí mismo** el hash, el diff ni el estado del árbol (`git hash`, `git diff`, `git status`), ni ejecutar tests, typecheck, lint, build ni Playwright. Esa evidencia debe provenir de **CI o de una ejecución humana reproducible** y se entrega junto con el hash a auditar. Sus permisos no se modifican por este documento.
+- **Secuencia de commit y auditoría** (AGENTS.md §2.2.1): implementación sin commit → revisión humana previa → autorización humana para crear el commit → ejecución/verificación reproducible → auditoría independiente del hash → corrección + nuevo hash si corresponde → aprobación humana → push/merge/deploy solo con autorización.
 
 ### 2.10 Aprobación humana
 - El usuario decide sobre los hallazgos y autoriza commit, push, merge y deploy (AGENTS.md §2, §11).
@@ -94,7 +96,7 @@ Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar,
 2. **El auditor no modifica archivos.** Reporta; no corrige. El subagente `auditor` corre con `edit: deny` y `bash: deny` (`.opencode/agents/auditor.md`).
 3. **Si cambia el código después de una auditoría, el nuevo commit (nuevo hash) vuelve a auditarse.** No se reutiliza la auditoría anterior (AGENTS.md §2).
 4. **Máximo 3 ciclos `implementar → auditar → corregir`** (**convención operativa de este proceso**; ver §3.7). Al tercer ciclo sin cierre, se detiene y se **convoca intervención humana**. No se encadenan ciclos indefinidos.
-5. **Auditorías siempre sobre un commit/hash concreto** cuando sea posible. Cada auditoría se identifica por el hash auditado; sin hash, la auditoría no es reproducible.
+5. **Auditorías siempre sobre un commit/hash concreto.** Cada auditoría se identifica por el hash auditado; la auditoría del cambio final siempre lo tiene. Sin hash, la auditoría no es reproducible.
 6. **Hallazgos con formato completo y bloqueo explícito.** Cada hallazgo incluye:
    - **severidad** (crítico / alto / medio / bajo);
    - **archivo y línea**;

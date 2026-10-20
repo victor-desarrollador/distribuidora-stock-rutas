@@ -39,4 +39,4 @@ Ejecutadas el 17/10/2026 sobre `chore/corregir-lint`: `npm run lint` → exit 0 
 Cómo evitar que vuelva a pasar:
 El job `lint` de CI ahora es bloqueante: cualquier fallo futuro rompe el pipeline.
 
-Estado: cerrado (17/10/2026, rama `chore/corregir-lint`)
+Estado: resuelto (17/10/2026, rama `chore/corregir-lint`). Incidente histórico conservado como registro. Regla vigente: `npm run lint` debe terminar con exit 0 (re-verificado el 20/10/2026 sobre `86e58b3`: exit 0).

@@ -8,7 +8,7 @@ Un incidente solo pasa a `resuelto` con una prueba (test automatizado o verifica
 
 | Fecha | Incidente | Estado |
 |---|---|---|
-| 2026-10-12 | [Lint falla en `main` (errores preexistentes)](2026-10-12-lint-falla-en-main.md) | abierto |
+| 2026-10-12 | [Lint falla en `main` (errores preexistentes)](2026-10-12-lint-falla-en-main.md) | resuelto |
 
 ## Plantilla
 

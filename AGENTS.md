@@ -32,15 +32,32 @@ Cada eslabón es una compuerta: no se avanza al siguiente sin cerrar el anterior
 
 ### 2.2 Flujo entre agentes
 
-1. **Claude Code implementa** la tarea autorizada en su propia rama.
+1. **Claude Code implementa** la tarea autorizada en su propia rama, **sin crear commit**.
 2. **Codex y OpenCode auditan de forma independiente el mismo commit.** Cada auditoría se hace sobre un hash concreto, sin modificar archivos (en OpenCode, subagente `auditor`, `.opencode/agents/auditor.md`). Un auditor no corrige el código: reporta el hallazgo.
 3. **El usuario aprueba.** Decide sobre los hallazgos y autoriza commit, push, merge y deploy.
+
+### 2.2.1 Secuencia de commit y auditoría
+
+```
+implementación sin commit
+  → revisión humana previa
+  → autorización humana para crear el commit
+  → ejecución/verificación reproducible (humano o CI)
+  → auditoría independiente del hash
+  → corrección + nuevo hash, si corresponde
+  → aprobación humana
+  → push / merge / deploy solo con autorización humana
+```
+
+- El commit se crea **solo después** de la autorización humana. Sin esa autorización no se commitea.
+- La auditoría del cambio final **siempre identifica un hash concreto**.
+- Push, merge y deploy requieren cada uno una autorización humana explícita; la autorización de un paso no se extiende al siguiente.
 
 ### 2.3 Reglas obligatorias del ciclo
 
 1. **Ningún agente aprueba su propio trabajo ni el de otro agente.** La aprobación es humana.
-2. **El auditor opera en modo solo lectura.** No modifica archivos ni corrige: reporta. (El subagente `auditor` corre con `edit: deny` y `bash: deny`.)
-3. **Cada auditoría se refiere a un commit/hash concreto cuando sea posible.** Sin hash la auditoría no es reproducible.
+2. **El auditor opera en modo solo lectura.** No modifica archivos ni corrige: reporta. (El subagente `auditor` corre con `edit: deny` y `bash: deny`.) Por eso su función es **auditoría estática de solo lectura**: **no puede verificar por sí mismo** el hash, el diff ni el estado del árbol (`git hash`, `git diff`, `git status`), ni ejecutar tests, typecheck, lint, build ni Playwright. Esa evidencia debe provenir de **CI o de una ejecución humana reproducible** y se le entrega al auditor junto con el hash.
+3. **Cada auditoría se refiere a un commit/hash concreto.** Sin hash la auditoría no es reproducible y no cuenta como auditoría del cambio final.
 4. **Si cambia cualquier archivo después de una auditoría, el nuevo hash vuelve a auditarse.** No se reutiliza la auditoría anterior.
 5. **Máximo 3 ciclos `implementar → auditar → corregir`.** Al tercer ciclo sin cierre se detiene el trabajo y se convoca intervención humana; no se encadenan ciclos indefinidos.
 6. **Revisión de seguridad obligatoria** cuando el cambio toca alguna superficie sensible (§2.4). Cuando corresponde, es previa a la auditoría independiente.
@@ -82,7 +99,7 @@ Criterios y detalle en `docs/quality/security-review.md`. Si el cambio no toca n
 
 **Está prohibido implementar, total o parcialmente, cualquier regla marcada en el Blueprint como `PROPUESTA NO APROBADA` o `PROPUESTA TÉCNICA NO APROBADA`, y cualquier ADR cuyo estado no sea `aprobada`.**
 
-Esto incluye, a la fecha (Blueprint v1.4):
+Esto incluye, según lo marcado en el Blueprint (ver Blueprint §15 y las secciones citadas abajo):
 
 - Stock negativo transitorio en camión / marca `excede_stock` (sección 7.4).
 - Reglas de anulación de ventas por el vendedor (sección 7.5).
@@ -137,9 +154,16 @@ Tampoco se implementa nada de la sección 5 del Blueprint (fuera de alcance / Fa
 9. Registrar decisiones e incidentes relevantes.
 10. Pedir aprobación antes de hacer merge o deploy.
 
-## 7. Idioma
+## 7. Idioma y convención de nombres
 
-Documentación, commits y mensajes al usuario en español (Argentina). Identificadores de código siguiendo la convención existente (español, camelCase en TS; snake_case en SQL según Blueprint sección 8).
+Documentación, commits y mensajes al usuario en español (Argentina). Identificadores en español, según esta convención (aprobada por el usuario el 20/10/2026):
+
+- **Código nuevo de dominio TypeScript** (`apps/web/src/domain/`): español `snake_case`.
+- **SQL/PostgreSQL:** español `snake_case` (Blueprint §8).
+- **Tipos, interfaces y componentes React:** `PascalCase` cuando corresponda.
+- **Código React/UI existente:** se conserva el `camelCase`/`PascalCase` actual. **No se hacen renombres masivos por motivos cosméticos.**
+
+Ejemplos de dominio válidos que no se renombran: `piezas_a_medias`, `medias_a_piezas`, `calcular_esperado`, `unidad_para_categoria`, `validar_combinacion_categoria_unidad`. Identificadores de UI/legado como `unidadMedida`, `stockMinimo` o `productoEditando` tampoco se renombran por esta regla.
 
 ## 8. Estructura del repositorio
 
@@ -172,10 +196,10 @@ El Blueprint muestra `src/` en la raíz; en este repositorio el frontend vive en
 | `npm run typecheck` | Verificación de tipos (`tsc -b`) |
 | `npm test` | Pruebas unitarias (Vitest, una pasada; `src/**/*.test.ts(x)`) |
 | `npx playwright test` | Pruebas end-to-end (Playwright, `tests/`; requiere `npx playwright install chromium` la primera vez) |
-| `npm run lint` | ESLint (hoy falla por errores preexistentes; ver `docs/incidents/2026-10-12-lint-falla-en-main.md`) |
+| `npm run lint` | ESLint (debe terminar con exit 0; el incidente histórico `docs/incidents/2026-10-12-lint-falla-en-main.md` está resuelto) |
 | `npm run build` | Build de producción |
 
-Antes de pedir revisión: `typecheck`, `test`, Playwright y `build` deben pasar, y no deben aparecer errores de lint nuevos respecto del incidente abierto.
+Antes de pedir revisión: `lint`, `typecheck`, `test`, Playwright y `build` deben pasar. `npm run lint` debe terminar con exit 0.
 
 ## 10. Reglas de negocio confirmadas
 
