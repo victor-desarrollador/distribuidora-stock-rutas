@@ -1,9 +1,9 @@
 # PRD — Sistema de Control de Stock y Rendición
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 20/10/2026
-**Versión:** 0.7
-**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v1.8; **no lo reemplaza**.
+**Fecha:** 21/10/2026
+**Versión:** 0.8
+**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v1.9; **no lo reemplaza**.
 **Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
 
 ---
@@ -110,7 +110,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 
 | ID | Requisito | Entrega | Fuente |
 |---|---|---|---|
-| RF-01 | **Productos:** alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad`/`pieza`), precio, stock mínimo. **Lácteos por unidad entera; fiambres por pieza/media pieza; sin `kg` en Fase 1.** **Fiambres: precio de pieza completa y precio de media pieza, independientes (ADR-002).** | 1A | Blueprint §4, §7.1 |
+| RF-01 | **Productos:** alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad`/`pieza`), precio, stock mínimo. **Lácteos por unidad entera; fiambres por pieza/media pieza; sin `kg` en Fase 1.** **Fiambres: solo se configura el precio de pieza completa; el de media pieza se deriva (mitad, redondeada al peso entero, `.50` sube) y no es configurable (ADR-003 — Precio derivado de media pieza).** | 1A | Blueprint §4, §7.1 |
 | RF-02 | **Clientes:** consultar y buscar; **alta por vendedor** desde celular; dueño/encargado editan y validan. Historial básico. | 1A; altas móviles 1B | Blueprint §4, §7.5 |
 | RF-03 | **Depósito y camiones:** stock por ubicación, carga por jornada, movimientos auditados, cuarentena y retornos. | 1A | Blueprint §4, §7.2 |
 | RF-04 | **Jornadas:** una por camión y fecha, asignación de vendedor, preparación, salida, carga final de ventas, conteo por tercero, rendición y cierre. | 1A | Blueprint §4, §7.5 |
@@ -277,7 +277,7 @@ Recuperación general: las correcciones sobre registros confirmados se hacen con
 
 Un módulo se considera terminado cuando cumple las **pruebas obligatorias** de Blueprint §12 y «nada se da por terminado sin prueba» (Blueprint §3.5). Criterios por área (no exhaustivos; el detalle está en Blueprint §12):
 
-- **Stock:** cargar descuenta depósito y suma camión por el mismo importe; no se carga más que lo disponible; no se carga cuarentena; media pieza guarda y vende en medias y se cobra con su precio propio (ADR-002); el saldo de cada ubicación coincide con la suma de movimientos.
+- **Stock:** cargar descuenta depósito y suma camión por el mismo importe; no se carga más que lo disponible; no se carga cuarentena; media pieza guarda y vende en medias y se cobra con su precio derivado (ADR-003: con pieza = 21, `c=1 → 11`, `c=2 → 21`, `c=3 → 32`); la venta histórica conserva la media aplicada; el saldo de cada ubicación coincide con la suma de movimientos.
 - **Jornada:** no hay dos jornadas por camión y fecha (aunque una esté cerrada); el vendedor no registra el conteo de regreso; las notas de papel pendientes bloquean el conteo formal; no se cierra sin conteo; una jornada cerrada rechaza toda modificación.
 - **Rendición:** pago mixto suma el total; `a_cuenta` no suma al efectivo esperado; retiro confirmado por ambos descuenta caja exactamente una vez; dos solicitudes del mismo retiro producen una sola operación; gastos no autorizados no reducen la caja; devoluciones no se duplican; al cerrar, el stock del camión queda en 0.
 - **Ventas en papel:** número duplicado en cualquier jornada de la misma empresa/serie se rechaza; un salto de numeración genera aviso.
@@ -356,7 +356,7 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 10. **Gastos de ruta** — tipos, quién solicita/autoriza, comprobante, momento y efecto en la rendición.
 11. **Devoluciones por producto** — criterios documentables de aptitud apto/no apto.
 12. **Vencimientos** — fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. *(PROPUESTA NO APROBADA.)*
-13. ~~**Precio media pieza**~~ — **resuelto por ADR-002 (20/10/2026):** dos precios independientes; sin relación obligatoria ni redondeo derivado.
+13. ~~**Precio media pieza**~~ — **resuelto por ADR-003 (21/10/2026)**, que supera a ADR-002 (dos precios independientes, hoy histórica): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube).
 14. **Fechas** — día operativo, zona horaria del negocio y corte de jornada.
 
 **Prioridad media — antes de entrega:** verificación de transferencias en Fase 1; manejo de cobros de deudas anteriores (cuenta corriente integral es Fase 2); valuación de faltantes y responsabilidades; cantidad exacta de camiones/usuarios/catálogo y conectividad.
@@ -385,3 +385,4 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 | 0.5 | 18/10/2026 | Acompaña a `BLUEPRINT.md` v1.6: agrega en §9 el **ejemplo de consistencia categoría/unidad** (`Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`) y registra en §13 que el versionado de `localStorage` **v1 → v2** (sin migración automática) es una **decisión humana aprobada**, pendiente de ejecución. ADR-001 sigue `propuesta`. |
 | 0.6 | 20/10/2026 | **Acompaña a `BLUEPRINT.md` v1.7**: refleja decisiones arquitectónicas aprobadas conceptualmente — operaciones (Alternativa B: tabla `operaciones` mínima), ubicaciones (merma = salida terminal, no ubicación interna), cierres (derivado: jornada + rendición + operación tipo cierre), roles funcionales sin tabla `roles`, conteos separados de movimientos, `movimientos_stock` como ledger append-only sin `saldo_actual`, dinero sin ledger financiero separado, saldos derivados, auditoría sin tabla genérica, idempotencia centralizada en `operaciones`, concurrencia solo garantías funcionales. Actualiza modelo de datos (§8/§9), tabla de entidades, §7.2, §7.9, §10, §16. |
 | 0.7 | 20/10/2026 | **Acompaña a `BLUEPRINT.md` v1.8**: refleja ADR-002 (aprobada) — fiambres con precio de pieza completa y precio de media pieza independientes, cantidad canónica vs presentación comercial, máximo 2 decimales y cierre de la pregunta abierta 13. Sin cambios en ADR-001. |
+| 0.8 | 21/10/2026 | **Acompaña a `BLUEPRINT.md` v1.9**: refleja ADR-003 — Precio derivado de media pieza (aprobada; supera a ADR-002 solo en la política de precio de media): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube), cantidad canónica en medias sin cambios, snapshot histórico con la media aplicada. RF-01, criterios de Stock y pregunta 13. Sin cambios en ADR-001 ni SQL aprobado. |

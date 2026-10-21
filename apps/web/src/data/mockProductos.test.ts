@@ -1,8 +1,8 @@
 // Pruebas del modelo de productos tras la migración a unidades canónicas
-// (BLUEPRINT.md v1.6 §7.1 y docs/requirements/migracion-unidades-prototipo.md).
+// (BLUEPRINT.md v1.7 §7.1 y docs/requirements/migracion-unidades-prototipo.md).
 import { describe, expect, it } from "vitest";
 import { productosIniciales, type UnidadMedida } from "./mockProductos";
-import { precios_producto_validos } from "../domain/precios";
+import { precio_valido } from "../domain/precios";
 
 describe("UnidadMedida sin kg", () => {
   it("ningún producto demo usa unidadMedida 'kg'", () => {
@@ -92,42 +92,22 @@ describe("Fiambres expresados en medias piezas", () => {
   });
 });
 
-describe("Precios de los productos demo (ADR-002)", () => {
-  it("todo fiambre tiene precioMediaPieza válido", () => {
-    const fiambres = productosIniciales.filter((p) => p.categoria === "Fiambres");
-    expect(fiambres.length).toBeGreaterThan(0);
-    fiambres.forEach((p) => {
-      expect(p.precioMediaPieza).toBeDefined();
-      expect(
-        precios_producto_validos({
-          unidad_medida: p.unidadMedida,
-          precio: p.precio,
-          precio_media_pieza: p.precioMediaPieza,
-        })
-      ).toBe(true);
+describe("Precios de los productos demo (ADR-003)", () => {
+  it("precios válidos según ADR-003", () => {
+    productosIniciales.forEach((p) => {
+      expect(precio_valido(p.precio)).toBe(true);
     });
   });
 
-  it("ningún lácteo tiene precioMediaPieza", () => {
-    productosIniciales
-      .filter((p) => p.categoria === "Lácteos")
-      .forEach((p) => {
-        expect(p.precioMediaPieza).toBeUndefined();
-        expect(
-          precios_producto_validos({
-            unidad_medida: p.unidadMedida,
-            precio: p.precio,
-          })
-        ).toBe(true);
-      });
-  });
-
-  it("valores demo aprobados (sin fórmula entre precios)", () => {
+  it("valores demo aprobados", () => {
     const por_nombre = new Map(
-      productosIniciales.map((p) => [p.nombre, [p.precio, p.precioMediaPieza]])
+      productosIniciales.map((p) => [p.nombre, p.precio])
     );
-    expect(por_nombre.get("Queso cremoso en pieza")).toEqual([12500, 7000]);
-    expect(por_nombre.get("Jamón cocido")).toEqual([12500, 7500]);
-    expect(por_nombre.get("Salame milán")).toEqual([9800, 6000]);
+    expect(por_nombre.get("Yogur bebible 1 L")).toBe(2300);
+    expect(por_nombre.get("Queso cremoso en bote")).toBe(8500);
+    expect(por_nombre.get("Queso cremoso en pieza")).toBe(12500);
+    expect(por_nombre.get("Jamón cocido")).toBe(12500);
+    expect(por_nombre.get("Salame milán")).toBe(9800);
+    expect(por_nombre.get("Leche entera 1 L")).toBe(1600);
   });
 });

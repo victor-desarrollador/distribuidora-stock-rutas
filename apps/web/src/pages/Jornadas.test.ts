@@ -106,25 +106,26 @@ describe("Jornadas — límite de stock en pieza / media (§7.4)", () => {
   });
 });
 
-describe("Jornadas — valor de carga con precios independientes (ADR-002)", () => {
+describe("Jornadas — valor de carga con precio de media derivado (ADR-003)", () => {
   // Misma forma de ítem que usa Jornadas.tsx (ItemCarga); el cálculo es la
   // función de dominio, no una fórmula local.
+  // precio = 12500 → media = 6250 (12500/2 = 6250)
   const item = {
     unidad_medida: "pieza",
     cantidad: 9,
     precio: 12500,
-    precio_media_pieza: 7000,
   } as const;
 
   it("4 piezas + media (c=9) no se infla ×2", () => {
     const valor = subtotal_linea(item);
-    expect(valor).toBe(4 * 12500 + 7000);
+    // 4 piezas * 12500 + 1 media * 6250 = 50000 + 6250 = 56250
+    expect(valor).toBe(4 * 12500 + 6250);
     expect(valor).not.toBe(9 * 12500);
   });
 
   it("el total de la carga suma lácteos y fiambres sin error binario", () => {
     const fiambre = subtotal_linea(item);
     const lacteo = subtotal_linea({ unidad_medida: "unidad", cantidad: 3, precio: 0.1 });
-    expect(sumar_importes([fiambre, lacteo])).toBe(57000.3);
+    expect(sumar_importes([fiambre, lacteo])).toBe(56250.3);
   });
 });

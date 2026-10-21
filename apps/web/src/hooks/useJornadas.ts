@@ -1,8 +1,7 @@
-
 import { useState } from "react";
 
 import { CLAVES_STORAGE } from "../data/clavesStorage";
-import { precios_producto_validos } from "../domain/precios";
+import { precio_valido } from "../domain/precios";
 
 import {
   type Jornada,
@@ -79,13 +78,12 @@ export function leerJornadas(): Jornada[] {
           Number.isSafeInteger(item.productoId) &&
           typeof item.nombreProducto === "string" &&
           ["unidad", "pieza"].includes(item.unidadMedida) &&
+          // Validación canónica: cantidad entera, finita, >= 0
           Number.isFinite(item.cantidad) &&
+          Number.isInteger(item.cantidad) &&
           item.cantidad > 0 &&
-          precios_producto_validos({
-            unidad_medida: item.unidadMedida,
-            precio: item.precioReferencia,
-            precio_media_pieza: item.precioMediaPieza,
-          })
+          // Precios: solo precioReferencia (precioMediaPieza se deriva)
+          precio_valido(item.precioReferencia)
         );
 
       if (!baseValida) return false;

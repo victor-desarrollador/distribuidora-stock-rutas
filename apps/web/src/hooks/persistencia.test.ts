@@ -1,6 +1,7 @@
 // Pruebas del versionado de persistencia localStorage: v1 → v2
 // (docs/requirements/migracion-unidades-prototipo.md §7-bis y §8) y claves
-// operativas v3 del modelo de precios (docs/decisions/002-...md). Ninguna
+// operativas v4 del precio derivado de media pieza
+// (docs/decisions/003-precio-derivado-media-pieza.md). Ninguna
 // clave anterior se lee, copia, reinterpreta ni borra.
 // Vitest corre en entorno node: se simula localStorage sobre globalThis.
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
@@ -86,8 +87,8 @@ const productoV1PiezasEnteras: Producto[] = [
   },
 ];
 
-describe("Inicialización v3: sin datos v3 → usa mocks canónicos", () => {
-  it("productos: sin clave v3 devuelve productosIniciales (sin kg)", () => {
+describe("Inicialización v4: sin datos v4 → usa mocks canónicos", () => {
+  it("productos: sin clave v4 devuelve productosIniciales (sin kg)", () => {
     const productos = cargarProductos();
     expect(productos.length).toBe(6);
     expect(
@@ -97,23 +98,23 @@ describe("Inicialización v3: sin datos v3 → usa mocks canónicos", () => {
     ).toBe(true);
   });
 
-  it("jornadas: sin clave v3 devuelve arreglo vacío", () => {
+  it("jornadas: sin clave v4 devuelve arreglo vacío", () => {
     expect(leerJornadas()).toEqual([]);
   });
 
-  it("ventas: sin clave v3 devuelve arreglo vacío", () => {
+  it("ventas: sin clave v4 devuelve arreglo vacío", () => {
     expect(cargarVentas()).toEqual([]);
   });
 
-  it("movimientos: sin clave v3 devuelve arreglo vacío", () => {
+  it("movimientos: sin clave v4 devuelve arreglo vacío", () => {
     expect(leerMovimientos()).toEqual([]);
   });
 
-  it("retornos: sin clave v3 devuelve arreglo vacío", () => {
+  it("retornos: sin clave v4 devuelve arreglo vacío", () => {
     expect(leerRetornos()).toEqual([]);
   });
 
-  it("camiones: sin clave v3 devuelve camionesIniciales", () => {
+  it("camiones: sin clave v4 devuelve camionesIniciales", () => {
     const camiones = cargarCamiones();
     expect(camiones.length).toBeGreaterThan(0);
   });
@@ -123,13 +124,13 @@ describe("Inicialización v3: sin datos v3 → usa mocks canónicos", () => {
     expect(clientes.length).toBeGreaterThan(0);
   });
 
-  it("cobros: sin clave v3 devuelve arreglo vacío", () => {
+  it("cobros: sin clave v4 devuelve arreglo vacío", () => {
     expect(leerCobros()).toEqual([]);
   });
 });
 
-describe("v1 NO se migra: datos v1 incompatibles no se leen como v3", () => {
-  it("productos: clave v1 con 'kg' no contamina v3", () => {
+describe("v1 NO se migra: datos v1 incompatibles no se leen como v4", () => {
+  it("productos: clave v1 con 'kg' no contamina v4", () => {
     // Hay datos v1 pero no v2: se usan los mocks canónicos (v2), no el v1.
     mockLS._store.set(
       "distribuidora_productos_demo_v1",
@@ -138,7 +139,7 @@ describe("v1 NO se migra: datos v1 incompatibles no se leen como v3", () => {
 
     const productos = cargarProductos();
 
-    // v3 se inicializa desde productosIniciales (sin kg)
+    // v4 se inicializa desde productosIniciales (sin kg)
     expect(productos.length).toBe(6);
     expect(
       productos.every(
@@ -156,7 +157,7 @@ describe("v1 NO se migra: datos v1 incompatibles no se leen como v3", () => {
 
     const productos = cargarProductos();
 
-    // Jamón cocido en v3 tiene 36 medias piezas (18 piezas × 2), no 18.
+    // Jamón cocido en v4 tiene 36 medias piezas (18 piezas × 2), no 18.
     const jamon = productos.find((p) => p.nombre === "Jamón cocido");
     expect(jamon?.stock).toBe(36);
     // El dato v1 con id 998 no aparece.
@@ -164,8 +165,8 @@ describe("v1 NO se migra: datos v1 incompatibles no se leen como v3", () => {
   });
 });
 
-describe("v1 NO se elimina: la clave v1 sigue intacta tras inicializar v3", () => {
-  it("productos: la clave v1 permanece después de leer v3", () => {
+describe("v1 NO se elimina: la clave v1 sigue intacta tras inicializar v4", () => {
+  it("productos: la clave v1 permanece después de leer v4", () => {
     mockLS._store.set(
       "distribuidora_productos_demo_v1",
       JSON.stringify(productoV1ConKg)
@@ -179,9 +180,9 @@ describe("v1 NO se elimina: la clave v1 sigue intacta tras inicializar v3", () =
   });
 });
 
-describe("v3 ya existe: se respeta y no se reinicializa", () => {
-  it("productos: si existe clave v3, se usa ese dato y no productosIniciales", () => {
-    const datosV3: Producto[] = [
+describe("v4 ya existe: se respeta y no se reinicializa", () => {
+  it("productos: si existe clave v4, se usa ese dato y no productosIniciales", () => {
+    const datosV4: Producto[] = [
       {
         id: 777,
         nombre: "Producto ya guardado en v2",
@@ -195,19 +196,19 @@ describe("v3 ya existe: se respeta y no se reinicializa", () => {
 
     mockLS._store.set(
       CLAVES_STORAGE.productos,
-      JSON.stringify(datosV3)
+      JSON.stringify(datosV4)
     );
 
     const productos = cargarProductos();
 
-    expect(productos).toEqual(datosV3);
+    expect(productos).toEqual(datosV4);
     expect(productos[0].id).toBe(777);
     expect(productos).toHaveLength(1);
   });
 });
 
 describe("Frontera de persistencia: combinación categoría ↔ unidad", () => {
-  it("Lácteos + pieza en v3 no se acepta como producto válido", () => {
+  it("Lácteos + pieza en v4 no se acepta como producto válido", () => {
     mockLS._store.set(
       CLAVES_STORAGE.productos,
       JSON.stringify([
@@ -230,7 +231,7 @@ describe("Frontera de persistencia: combinación categoría ↔ unidad", () => {
     expect(cargarProductos()).toEqual(productosIniciales);
   });
 
-  it("Fiambres + unidad en v3 no se acepta como producto válido", () => {
+  it("Fiambres + unidad en v4 no se acepta como producto válido", () => {
     mockLS._store.set(
       CLAVES_STORAGE.productos,
       JSON.stringify([
@@ -249,8 +250,8 @@ describe("Frontera de persistencia: combinación categoría ↔ unidad", () => {
     expect(cargarProductos()).toEqual(productosIniciales);
   });
 
-  it("Lácteos + unidad en v3 sigue aceptándose", () => {
-    const datosV3: Producto[] = [
+  it("Lácteos + unidad en v4 sigue aceptándose", () => {
+    const datosV4: Producto[] = [
       {
         id: 9003,
         nombre: "Producto válido Lácteos + unidad",
@@ -264,14 +265,14 @@ describe("Frontera de persistencia: combinación categoría ↔ unidad", () => {
 
     mockLS._store.set(
       CLAVES_STORAGE.productos,
-      JSON.stringify(datosV3)
+      JSON.stringify(datosV4)
     );
 
-    expect(cargarProductos()).toEqual(datosV3);
+    expect(cargarProductos()).toEqual(datosV4);
   });
 
-  it("Fiambres + pieza en v3 sigue aceptándose", () => {
-    const datosV3: Producto[] = [
+  it("Fiambres + pieza en v4 sigue aceptándose", () => {
+    const datosV4: Producto[] = [
       {
         id: 9004,
         nombre: "Producto válido Fiambres + pieza",
@@ -279,17 +280,16 @@ describe("Frontera de persistencia: combinación categoría ↔ unidad", () => {
         unidadMedida: "pieza",
         stock: 8,
         precio: 9900,
-        precioMediaPieza: 5500,
         stockMinimo: 2,
       },
     ];
 
     mockLS._store.set(
       CLAVES_STORAGE.productos,
-      JSON.stringify(datosV3)
+      JSON.stringify(datosV4)
     );
 
-    expect(cargarProductos()).toEqual(datosV3);
+    expect(cargarProductos()).toEqual(datosV4);
   });
 });
 
@@ -303,19 +303,77 @@ const CLAVES_V2_ANTERIORES = {
   camiones: "distribuidora_camiones_demo_v2",
 } as const;
 
-describe("v2 NO se lee, copia ni borra: las siete claves operativas pasan a v3", () => {
-  it("las siete claves compartidas terminan en _v3 y difieren de v2", () => {
+// Claves v3 de ADR-002 (superada por ADR-003). Solo existen en esta prueba,
+// para demostrar que los hooks no las leen, copian ni borran.
+const CLAVES_V3_ANTERIORES = {
+  productos: "distribuidora_productos_demo_v3",
+  jornadas: "distribuidora_jornadas_demo_v3",
+  ventas: "distribuidora_ventas_demo_v3",
+  cobros: "distribuidora_cobros_demo_v3",
+  movimientos: "distribuidora_movimientos_demo_v3",
+  retornos: "distribuidora_retornos_demo_v3",
+  camiones: "distribuidora_camiones_demo_v3",
+} as const;
+
+describe("v3 (ADR-002) NO se lee, copia ni borra", () => {
+  const dato_v3 = JSON.stringify([{ id: 1, dato: "v3" }]);
+
+  it("las siete claves compartidas difieren de v3", () => {
+    for (const [nombre, clave] of Object.entries(CLAVES_STORAGE)) {
+      expect(clave).not.toBe(
+        CLAVES_V3_ANTERIORES[nombre as keyof typeof CLAVES_V3_ANTERIORES]
+      );
+    }
+  });
+
+  it("con datos v3 presentes y sin v4, cada hook arranca limpio y v3 queda intacta", () => {
+    for (const clave of Object.values(CLAVES_V3_ANTERIORES)) {
+      mockLS._store.set(clave, dato_v3);
+    }
+
+    expect(cargarProductos()).toEqual(productosIniciales);
+    expect(leerJornadas()).toEqual([]);
+    expect(cargarVentas()).toEqual([]);
+    expect(leerCobros()).toEqual([]);
+    expect(leerMovimientos()).toEqual([]);
+    expect(leerRetornos()).toEqual([]);
+    expect(cargarCamiones().length).toBeGreaterThan(0);
+
+    for (const clave of Object.values(CLAVES_V3_ANTERIORES)) {
+      expect(mockLS.getItem(clave)).toBe(dato_v3);
+    }
+    // Nada se copió a v4.
+    for (const clave of Object.values(CLAVES_STORAGE)) {
+      expect(mockLS.setItem).not.toHaveBeenCalledWith(clave, expect.anything());
+    }
+  });
+});
+
+describe("v2 NO se lee, copia ni borra: las siete claves operativas pasan a v4", () => {
+  it("las siete claves compartidas terminan en _v4 y difieren de v2", () => {
     const claves = Object.entries(CLAVES_STORAGE);
     expect(claves).toHaveLength(7);
     for (const [nombre, clave] of claves) {
-      expect(clave).toMatch(/_demo_v3$/);
+      expect(clave).toMatch(/_demo_v4$/);
       expect(clave).not.toBe(
         CLAVES_V2_ANTERIORES[nombre as keyof typeof CLAVES_V2_ANTERIORES]
       );
     }
   });
 
-  it("con datos v2 presentes y sin v3, cada hook arranca limpio", () => {
+  it("las siete claves son exactamente las de ADR-003", () => {
+    expect(CLAVES_STORAGE).toEqual({
+      productos: "distribuidora_productos_demo_v4",
+      jornadas: "distribuidora_jornadas_demo_v4",
+      ventas: "distribuidora_ventas_demo_v4",
+      cobros: "distribuidora_cobros_demo_v4",
+      movimientos: "distribuidora_movimientos_demo_v4",
+      retornos: "distribuidora_retornos_demo_v4",
+      camiones: "distribuidora_camiones_demo_v4",
+    });
+  });
+
+  it("con datos v2 presentes y sin v4, cada hook arranca limpio", () => {
     for (const clave of Object.values(CLAVES_V2_ANTERIORES)) {
       mockLS._store.set(clave, JSON.stringify([{ id: 1, dato: "v2" }]));
     }
@@ -329,7 +387,7 @@ describe("v2 NO se lee, copia ni borra: las siete claves operativas pasan a v3",
     expect(cargarCamiones().length).toBeGreaterThan(0);
   });
 
-  it("las claves v2 quedan intactas tras inicializar v3", () => {
+  it("las claves v2 quedan intactas tras inicializar v4", () => {
     for (const clave of Object.values(CLAVES_V2_ANTERIORES)) {
       mockLS._store.set(clave, JSON.stringify([{ id: 1, dato: "v2" }]));
     }
@@ -347,7 +405,7 @@ describe("v2 NO se lee, copia ni borra: las siete claves operativas pasan a v3",
         JSON.stringify([{ id: 1, dato: "v2" }])
       );
     }
-    // Nada se copió a v3.
+    // Nada se copió a v4.
     for (const clave of Object.values(CLAVES_STORAGE)) {
       expect(mockLS.setItem).not.toHaveBeenCalledWith(clave, expect.anything());
     }
@@ -365,7 +423,7 @@ describe("v2 NO se lee, copia ni borra: las siete claves operativas pasan a v3",
   });
 });
 
-describe("Frontera de persistencia: precios (ADR-002)", () => {
+describe("Frontera de persistencia: precios (ADR-003)", () => {
   const fiambre = {
     id: 9100,
     nombre: "Fiambre de prueba",
@@ -373,7 +431,6 @@ describe("Frontera de persistencia: precios (ADR-002)", () => {
     unidadMedida: "pieza",
     stock: 8,
     precio: 10000,
-    precioMediaPieza: 6000,
     stockMinimo: 2,
   };
   const lacteo = {
@@ -390,29 +447,15 @@ describe("Frontera de persistencia: precios (ADR-002)", () => {
     mockLS._store.set(CLAVES_STORAGE.productos, JSON.stringify(productos));
   }
 
-  it("acepta fiambre con ambos precios y lácteo sin precio de media", () => {
+  it("acepta fiambre con precio válido y lácteo con precio válido", () => {
     guardarProductos([fiambre, lacteo]);
     expect(cargarProductos()).toEqual([fiambre, lacteo]);
-  });
-
-  it("rechaza pieza sin precioMediaPieza", () => {
-    const { precioMediaPieza: _omitido, ...sinMedia } = fiambre;
-    void _omitido;
-    guardarProductos([sinMedia]);
-    expect(cargarProductos()).toEqual(productosIniciales);
-  });
-
-  it("rechaza unidad con precioMediaPieza", () => {
-    guardarProductos([{ ...lacteo, precioMediaPieza: 100 }]);
-    expect(cargarProductos()).toEqual(productosIniciales);
   });
 
   it("rechaza precios negativos y con más de 2 decimales", () => {
     for (const mala of [
       { ...fiambre, precio: -1 },
-      { ...fiambre, precioMediaPieza: -1 },
       { ...fiambre, precio: 10000.001 },
-      { ...fiambre, precioMediaPieza: 5999.999 },
       { ...lacteo, precio: 0.005 },
     ]) {
       guardarProductos([mala]);
@@ -431,7 +474,6 @@ describe("Frontera de persistencia: precios (ADR-002)", () => {
     unidadMedida: "pieza",
     cantidad: 3,
     precioReferencia: 10000,
-    precioMediaPieza: 6000,
   };
   const jornadaBase = {
     id: "j-1",
@@ -443,20 +485,12 @@ describe("Frontera de persistencia: precios (ADR-002)", () => {
     estado: "preparacion",
   };
 
-  it("jornadas: acepta ítem pieza con ambos precios y rechaza pieza sin media", () => {
+  it("jornadas: acepta ítem pieza con precio válido", () => {
     mockLS._store.set(
       CLAVES_STORAGE.jornadas,
       JSON.stringify([{ ...jornadaBase, items: [itemJornada] }])
     );
     expect(leerJornadas()).toHaveLength(1);
-
-    const { precioMediaPieza: _omitido, ...sinMedia } = itemJornada;
-    void _omitido;
-    mockLS._store.set(
-      CLAVES_STORAGE.jornadas,
-      JSON.stringify([{ ...jornadaBase, items: [sinMedia] }])
-    );
-    expect(leerJornadas()).toEqual([]);
   });
 
   const itemVenta = {
@@ -465,8 +499,8 @@ describe("Frontera de persistencia: precios (ADR-002)", () => {
     unidadMedida: "pieza",
     cantidad: 3,
     precioUnitario: 10000,
-    precioMediaPieza: 6000,
-    subtotal: 16000,
+    precioMediaPieza: 5000,
+    subtotal: 15000,
   };
   const ventaBase = {
     id: "v-1",
@@ -476,7 +510,7 @@ describe("Frontera de persistencia: precios (ADR-002)", () => {
     nombreCliente: "Cliente",
     fecha: "2026-10-20T10:00:00.000Z",
     medioPago: "efectivo",
-    total: 16000,
+    total: 15000,
   };
 
   it("ventas: conserva el historial de precios y exige subtotal consistente", () => {
@@ -499,6 +533,245 @@ describe("Frontera de persistencia: precios (ADR-002)", () => {
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
       JSON.stringify([{ ...ventaBase, items: [sinMedia] }])
+    );
+    expect(cargarVentas()).toEqual([]);
+
+    // Unidad con precio de media en el snapshot: no aplica, se rechaza.
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([
+        {
+          ...ventaBase,
+          total: 4600,
+          items: [
+            {
+              productoId: 1,
+              nombreProducto: "Leche",
+              unidadMedida: "unidad",
+              cantidad: 2,
+              precioUnitario: 2300,
+              precioMediaPieza: 1150,
+              subtotal: 4600,
+            },
+          ],
+        },
+      ])
+    );
+    expect(cargarVentas()).toEqual([]);
+  });
+
+  it("ventas: usa la media del snapshot aunque la regla vigente daría otra", () => {
+    // Regla vigente para pieza 10000 → media 5000; el snapshot guardó 6000.
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([
+        {
+          ...ventaBase,
+          total: 16000,
+          items: [{ ...itemVenta, precioMediaPieza: 6000, subtotal: 16000 }],
+        },
+      ])
+    );
+    expect(cargarVentas()).toHaveLength(1);
+  });
+});
+
+describe("L2A — Frontera de persistencia: useJornadas fail closed en cantidad", () => {
+  const jornadaInvalidaBase = {
+    id: "j-test",
+    camionId: 1,
+    chofer: "Chofer",
+    zona: "Zona",
+    fechaCreacion: "2026-10-20T10:00:00.000Z",
+    fechaSalida: null,
+    estado: "preparacion",
+  };
+
+  const itemValido = {
+    productoId: 3,
+    nombreProducto: "Queso cremoso en pieza",
+    unidadMedida: "pieza",
+    cantidad: 3,
+    precioReferencia: 10000,
+  };
+
+  it("rechaza cantidad no entera (1.5)", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.jornadas,
+      JSON.stringify([{ ...jornadaInvalidaBase, items: [{ ...itemValido, cantidad: 1.5 }] }])
+    );
+    expect(leerJornadas()).toEqual([]);
+  });
+
+  it("rechaza cantidad NaN", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.jornadas,
+      JSON.stringify([{ ...jornadaInvalidaBase, items: [{ ...itemValido, cantidad: Number.NaN }] }])
+    );
+    expect(leerJornadas()).toEqual([]);
+  });
+
+  it("rechaza cantidad Infinity", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.jornadas,
+      JSON.stringify([{ ...jornadaInvalidaBase, items: [{ ...itemValido, cantidad: Number.POSITIVE_INFINITY }] }])
+    );
+    expect(leerJornadas()).toEqual([]);
+  });
+
+  it("rechaza cantidad negativa", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.jornadas,
+      JSON.stringify([{ ...jornadaInvalidaBase, items: [{ ...itemValido, cantidad: -1 }] }])
+    );
+    expect(leerJornadas()).toEqual([]);
+  });
+});
+
+describe("L2B — Frontera de persistencia: useVentas total histórico", () => {
+  const itemVenta = {
+    productoId: 3,
+    nombreProducto: "Queso cremoso en pieza",
+    unidadMedida: "pieza",
+    cantidad: 3,
+    precioUnitario: 10000,
+    precioMediaPieza: 5000,
+    subtotal: 15000,
+  };
+  // cantidad=2 (2 medias = 1 pieza) → subtotal = 1 * 12500 = 12500
+  const itemVenta2 = {
+    productoId: 4,
+    nombreProducto: "Jamón cocido",
+    unidadMedida: "pieza",
+    cantidad: 2,
+    precioUnitario: 12500,
+    precioMediaPieza: 6250,
+    subtotal: 12500,
+  };
+  const ventaBase = {
+    id: "v-test",
+    jornadaId: "j-1",
+    camionId: 1,
+    clienteId: 1,
+    nombreCliente: "Cliente Test",
+    fecha: "2026-10-20T10:00:00.000Z",
+    medioPago: "efectivo",
+  };
+
+  it("total histórico coincide con suma de subtotales (enteros)", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([
+        {
+          ...ventaBase,
+          id: "v-1",
+          items: [itemVenta, itemVenta2],
+          total: 27500, // 15000 + 12500
+        },
+      ])
+    );
+    expect(cargarVentas()).toHaveLength(1);
+  });
+
+  it("total histórico .01 menos → inválido", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([
+        {
+          ...ventaBase,
+          id: "v-1",
+          items: [itemVenta, itemVenta2],
+          total: 27499.99, // 27500 - 0.01
+        },
+      ])
+    );
+    expect(cargarVentas()).toEqual([]);
+  });
+
+  it("total histórico .01 más → inválido", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([
+        {
+          ...ventaBase,
+          id: "v-1",
+          items: [itemVenta, itemVenta2],
+          total: 27500.01, // 27500 + 0.01
+        },
+      ])
+    );
+    expect(cargarVentas()).toEqual([]);
+  });
+
+  it("total con 3 decimales → inválido (más de 2 decimales)", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([
+        {
+          ...ventaBase,
+          id: "v-1",
+          items: [itemVenta, itemVenta2],
+          total: 27500.001, // más de 2 decimales
+        },
+      ])
+    );
+    expect(cargarVentas()).toEqual([]);
+  });
+
+  it("total con centavos coincide usando aritmética compartida", () => {
+    const itemConCentavos1 = {
+      productoId: 1,
+      nombreProducto: "Producto 1",
+      unidadMedida: "unidad",
+      cantidad: 3,
+      precioUnitario: 100.5,
+      subtotal: 301.5,
+    };
+    const itemVentaConCentavos2 = {
+      productoId: 2,
+      nombreProducto: "Producto 2",
+      unidadMedida: "unidad",
+      cantidad: 2,
+      precioUnitario: 50.25,
+      subtotal: 100.5,
+    };
+    const ventaConCentavos = {
+      ...ventaBase,
+      id: "v-centavos",
+      items: [itemConCentavos1, itemVentaConCentavos2],
+      total: 402.00, // 301.5 + 100.5
+      medioPago: "transferencia",
+      jornadaId: "j-1",
+      camionId: 1,
+      clienteId: 1,
+      nombreCliente: "Cliente Test",
+      fecha: "2026-10-20T10:00:00.000Z",
+    };
+
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([ventaConCentavos])
+    );
+    expect(cargarVentas()).toHaveLength(1);
+
+    // Total .01 menos falla
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([{ ...ventaConCentavos, total: 401.99 }])
+    );
+    expect(cargarVentas()).toEqual([]);
+
+    // Total .01 más falla
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([{ ...ventaConCentavos, total: 402.01 }])
+    );
+    expect(cargarVentas()).toEqual([]);
+
+    // Total con 3 decimales falla
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([{ ...ventaConCentavos, total: 402.001 }])
     );
     expect(cargarVentas()).toEqual([]);
   });

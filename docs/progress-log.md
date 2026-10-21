@@ -3,11 +3,39 @@
 Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, archivos modificados, cómo se verificó y riesgos pendientes.
 
 
+---
+## 21/10/2026 — ADR-003: precio derivado de media pieza, storage v4 y snapshot fail closed
+
+**Rama:** `feat/precios-presentaciones` · **HEAD:** `a1ff9f9baf4c393113e14d0c923e1a3fdc38fdae` · **Estado:** cambios **sin commit**, sin push, sin merge, sin deploy; pendiente de revisión humana, revisión de seguridad del cálculo monetario y auditoría independiente del hash que se cree; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Decisión humana (21/10/2026)
+
+ADR-003 — Precio derivado de media pieza, **APROBADA** por el dueño del proyecto. Supera a ADR-002 solo en la política de precio de media pieza (ADR-002 queda histórica y SUPERADA): media no configurable; mitad del precio de pieza redondeada al peso entero (`.50` sube, `< .50` baja), calculada en centavos enteros; cantidad canónica sigue en medias; snapshot de venta conserva la media aplicada; storage operativo v4; sin SQL aprobado.
+
+### Qué se hizo
+
+- **Documentación:** se crea `docs/decisions/003-precio-derivado-media-pieza.md` (el archivo **no existía** pese a que el código ya lo citaba); ADR-002 marcada SUPERADA (contenido histórico intacto); `docs/decisions/README.md`; `BLUEPRINT.md` v1.9 (§4, §7.1, §8 `productos`/`venta_items`, §12, §15, historial); `docs/PRD.md` v0.8 (RF-01, criterio de Stock, pregunta 13, historial); `docs/requirements/migracion-unidades-prototipo.md` (viñeta v4; la de v3 marcada histórica).
+- **Dominio (`precios.ts`):** `precio_media_pieza` parte de `precio_a_centavos` y calcula `floor((centavos + 100) / 200)` restando el resto (sin división flotante), con `asegurar_entero_seguro`. Reemplaza `Math.round(precio_pieza / 2)`. `subtotal_linea_historica` rechaza `unidad` con `precio_media_pieza` (antes lo ignoraba) y sigue exigiéndolo en `pieza`; no re-deriva.
+- **Tests:** `precios.test.ts` — un único `describe("subtotal de unidad")`; pieza 21 → `c=1 → 11`, `c=2 → 21` (y `not.toBe(22)`), `c=3 → 32`; media 20,98/20,99/21,00/21,01/21,02/20/21/25 → 10/10/11/11/11/10/11/13; equivalencia con `BigInt` para 0–100.000 centavos; desborde fail closed; snapshot unidad±media / pieza±media. `persistencia.test.ts` — v3 presente no se lee, copia ni borra; las 7 claves exactas v4; venta `unidad` con media rechazada; venta con media de snapshot distinta de la regla vigente aceptada; descripciones "v3" que se referían a la clave vigente pasan a "v4"; **corrige L2B**: los totales ±0,01 / 3 decimales se calculaban sobre 28.500 en lugar del total real 27.500 (pasaban por el motivo equivocado).
+- **UI (`Productos.tsx`):** la vista previa de la media derivada ya no rompe el render si el precio tipeado es inválido (p. ej. `10.001`): muestra vacío.
+- **Storage:** sin cambios de claves: las siete ya eran `_demo_v4` completas en disco; la truncación reportada era de visualización.
+- **No se tocó `Autoventa.tsx`**, ni Auth, SQL, Supabase ni migraciones.
+
+### Cómo se verificó
+
+Ejecutado desde `apps/web/`: `npm run typecheck` exit 0 · `npm test -- --run` 10 archivos, **179 tests** passed · `npm run lint` exit 0 · `npm run build` exit 0 · `npx playwright test` 1 passed. `grep -Rni "_demo_v" apps/web/src` revisado línea por línea (sin claves truncadas ni lectura de v3 en hooks).
+
+### Riesgos y pendientes
+
+1. **Autoventa sigue sin adaptar** (Bloque 4): debe construir el snapshot con `precio_media_pieza` derivado; bloquea merge/deploy.
+2. La vista previa de `Productos.tsx` no tiene test de componente (no hay infraestructura de render React en Vitest); verificado por lectura de código.
+3. **Superficies sensibles (AGENTS.md §2.4):** ventas y dinero (cálculo monetario local). Corresponde revisión de seguridad/humana y auditoría independiente del hash.
+4. Forma SQL de `venta_items` y precio `> 0`: siguen pendientes.
 
 ---
 ## 20/10/2026 — ADR-002 y Bloque 3b: precios independientes de pieza y media pieza
 
-**Rama:** `feat/precios-medias-piezas` · **Base:** `c188b8230029166c508dfb801b0a92c68b789263` · **Estado:** implementación y documentación completas y verificadas localmente; **sin commit, sin push, sin merge, sin deploy**, pendiente de revisión humana; **ADR-001 continúa PROPUESTA — NO APROBADA**
+**Rama:** `feat/precios-presentaciones` · **Base:** `c188b8230029166c508dfb801b0a92c68b789263` · **Estado:** commit inicial del Bloque 3b `a1ff9f9baf4c393113e14d0c923e1a3fdc38fdae` **creado**; correcciones L1/L2A/L2B/L3 **pendientes de commit** (sin commit, sin push, sin merge, sin deploy); pendiente de revisión humana y auditoría; **ADR-001 continúa PROPUESTA — NO APROBADA**
 
 ### Decisión humana (20/10/2026)
 
@@ -25,7 +53,7 @@ Los fiambres vendidos por pieza tienen **dos precios comerciales independientes*
 
 ### Cómo se verificó
 
-Ejecutado desde `apps/web/`: `npm run typecheck` exit 0 · `npm test -- --run` 10 archivos, **143 tests** (107 → 143, +36: `precios.test.ts` 20, `persistencia.test.ts` +11, `mockProductos.test.ts` +3, `Jornadas.test.ts` +2) · `npm run lint` exit 0 · `npm run build` exit 0 · `npx playwright test` 1 passed. `persistencia-v2.test.ts` se renombró a `persistencia.test.ts`.
+Ejecutado desde `apps/web/`: `npm run typecheck` exit 0 · `npm test -- --run` 10 archivos, **151 tests** (107 → 151, +44: `precios.test.ts` 20, `persistencia.test.ts` +17, `mockProductos.test.ts` +3, `Jornadas.test.ts` +2) · `npm run lint` exit 0 · `npm run build` exit 0 · `npx playwright test` 1 passed. `persistencia-v2.test.ts` se renombró a `persistencia.test.ts`.
 
 ### Riesgos y pendientes
 
@@ -35,6 +63,8 @@ Ejecutado desde `apps/web/`: `npm run typecheck` exit 0 · `npm test -- --run` 1
 4. Los importes del prototipo se persisten como números en pesos (con 2 decimales exactos); la base futura usará `numeric(14,2)`.
 5. Forma SQL exacta de `venta_items` y exigir precio `> 0`: decisiones pendientes.
 6. **Superficies sensibles (AGENTS.md §2.4):** toca ventas, dinero e idempotencia de datos locales (sin auth, RLS, RPC ni Supabase). Corresponde revisión de seguridad/humana del cálculo monetario y auditoría independiente del hash; no se considera cerrado sin ellas.
+7. **Autoventa (M1) diferido al Bloque 4** y bloquea merge/deploy hasta entonces.
+8. **L1/L2A/L2B/L3 pendientes de commit** (sin commit, sin push, sin merge, sin deploy): validación de cantidad en `useJornadas`, validación de total histórico en `useVentas`, tests explícitos de `precio_a_centavos` para 0.01, 0.1, 0.2, 0.29, 1.01, 12.34 y rechazos. Requieren commit separado y nueva auditoría.
 
 ---
 ## 20/10/2026 — Bloque 3: UX canónica de pieza / media pieza en Jornadas

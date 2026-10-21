@@ -1,4 +1,3 @@
-
 export type EstadoJornada =
   | "preparacion"
   | "abierta"
@@ -9,10 +8,8 @@ export interface ItemCarga {
   nombreProducto: string;
   unidadMedida: "unidad" | "pieza";
   cantidad: number;
-  // unidad: precio unitario. pieza: precio de pieza completa.
+  // unidad: precio unitario snapshot. pieza: precio de pieza completa snapshot.
   precioReferencia: number;
-  // Solo pieza (ADR-002): precio de media pieza de referencia.
-  precioMediaPieza?: number;
 }
 
 // Rendición registrada cuando el camión regresa.

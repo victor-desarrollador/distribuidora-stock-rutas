@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 
 import {
@@ -7,17 +6,17 @@ import {
 } from "../data/mockProductos";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 import { validar_combinacion_categoria_unidad } from "../domain/productos";
-import { precios_producto_validos } from "../domain/precios";
+import { precio_valido } from "../domain/precios";
 
 const STORAGE_KEY = CLAVES_STORAGE.productos;
 
 export function cargarProductos(): Producto[] {
   try {
-    const guardados = localStorage.getItem(STORAGE_KEY);
+    const guardado = localStorage.getItem(STORAGE_KEY);
 
-    if (!guardados) return productosIniciales;
+    if (!guardado) return productosIniciales;
 
-    const datos: unknown = JSON.parse(guardados);
+    const datos: unknown = JSON.parse(guardado);
 
     if (!Array.isArray(datos)) return productosIniciales;
 
@@ -38,13 +37,9 @@ export function cargarProductos(): Producto[] {
           producto.categoria,
           producto.unidadMedida
         ).valido &&
-        // Precios (ADR-002): máximo 2 decimales; pieza exige precio de media
-        // pieza y unidad no lo admite. Nada se completa ni se deriva.
-        precios_producto_validos({
-          unidad_medida: producto.unidadMedida,
-          precio: producto.precio,
-          precio_media_pieza: producto.precioMediaPieza,
-        }) &&
+        // Precios (ADR-003): máximo 2 decimales; NO hay precioMediaPieza configurable.
+        // pieza: solo precio; unidad: solo precio.
+        precio_valido(producto.precio) &&
         Number.isFinite(producto.stock) &&
         producto.stock >= 0 &&
         Number.isFinite(producto.stockMinimo) &&

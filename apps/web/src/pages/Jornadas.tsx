@@ -35,14 +35,13 @@ const unidades = {
   pieza: "pzas.",
 };
 // Valor de referencia de un ítem de carga. La fórmula vive en el dominio de
-// precios (ADR-002): la cantidad canónica está en medias piezas y no se
+// precios (ADR-003): la cantidad canónica está en medias piezas y no se
 // multiplica por el precio de pieza.
 function valorItem(item: ItemCarga): number {
   return subtotal_linea({
     unidad_medida: item.unidadMedida,
     cantidad: item.cantidad,
     precio: item.precioReferencia,
-    precio_media_pieza: item.precioMediaPieza,
   });
 }
 
@@ -184,7 +183,6 @@ export default function Jornadas() {
         unidadMedida: producto.unidadMedida,
         cantidad: obtenerCantidadCanonica(producto.id),
         precioReferencia: producto.precio,
-        precioMediaPieza: producto.precioMediaPieza,
       }));
   }, [productos, hayCantidadPositiva, obtenerCantidadCanonica]);
   const valorCarga = sumar_importes(itemsSeleccionados.map(valorItem));

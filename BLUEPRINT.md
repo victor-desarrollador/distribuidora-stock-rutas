@@ -1,8 +1,8 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 1.8 (documento de trabajo controlado; propuestas no aprobadas identificadas)
-**Fecha:** 20/10/2026 (hora local Argentina)
+**Versión:** 1.9 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Fecha:** 21/10/2026 (hora local Argentina)
 **Estado:** Apto para inventario técnico de solo lectura y planificación de tareas independientes. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
 > Este documento es la fuente de referencia del proyecto. Todo agente (Claude Code, OpenCode, Codex) y toda persona que trabaje en el repositorio debe leerlo antes de escribir código. Si algo del código contradice este documento, el documento manda hasta que se registre una decisión que lo cambie (ver sección 13: ADR).
@@ -53,7 +53,7 @@ Todo lo que no sirva a ese objetivo queda fuera de la Fase 1.
 
 | Módulo | Entrega propuesta | Incluye |
 |---|---|---|
-| Productos | 1A | Alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta, precio de venta (en fiambres: precio de pieza y precio de media pieza, independientes; ADR-002) y stock mínimo. Fiambre por pieza/media pieza. Alertas orientativas de vencimiento por fecha de cada ingreso (**propuesta pendiente de aprobación**, sin FEFO). |
+| Productos | 1A | Alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta, precio de venta (en fiambres: precio de pieza; el de media pieza se deriva y no se configura; ADR-003) y stock mínimo. Fiambre por pieza/media pieza. Alertas orientativas de vencimiento por fecha de cada ingreso (**propuesta pendiente de aprobación**, sin FEFO). |
 | Clientes | 1A; altas desde celular en 1B | Consultar y buscar; alta inicial por vendedor; dueño/encargado editan y validan. Historial básico. |
 | Depósito y camiones | 1A | Stock por ubicación, carga por jornada, movimientos auditados, cuarentena y retornos. |
 | Jornadas | 1A | Una jornada por camión y fecha, asignación de vendedor, preparación, salida, carga final de ventas, conteo por tercero, rendición, cierre. |
@@ -113,11 +113,12 @@ Backend:   Supabase — Auth · PostgreSQL · RLS · RPC (funciones SQL) · Stor
   - En pantalla se muestra como "4 piezas + 1 media" (= 9 en la base).
 - **Nunca se usan decimales para cantidades.** Todas las cantidades en la base son enteros en la unidad mínima: **unidad entera** para `unidad`, **medias piezas** para `pieza`.
 - **Ejemplo de consistencia categoría/unidad** *(es solo un ejemplo de coherencia categoría↔unidad; **no** es una regla sobre nombres de producto)*: `Queso cremoso en bote` (untable) → `Lácteos` / `unidad` (cantidad canónica **entera**); `Queso cremoso en pieza` → `Fiambres` / `pieza` (cantidad canónica **entera en medias piezas**). **No** se admite la combinación `Lácteos` + `pieza` ni `Fiambres` + `unidad`.
-- Precio (**ADR-002, aprobada 20/10/2026**): un producto `unidad` tiene un único precio unitario. Un producto `pieza` tiene **dos precios comerciales independientes** definidos por el propietario: **precio de pieza completa** y **precio de media pieza**. **No** existe `precio_media = precio_pieza / 2` ni otra relación matemática obligatoria entre ambos; no hay redondeo derivado.
+- Precio (**ADR-003 — Precio derivado de media pieza, aprobada 21/10/2026**; supera a ADR-002 solo en la política de precio de media pieza): un producto `unidad` tiene un único precio unitario. Un producto `pieza` tiene un único precio configurable, el de **pieza completa**. El **precio de media pieza no es configurable**: es la mitad del precio de pieza, **redondeada al peso entero** (fracción `>= .50` sube; `< .50` baja). Se calcula sobre centavos enteros: `floor((centavos_pieza + 100) / 200)`. Ejemplos: 20,98 → 10; 20,99 → 10; 21,00 → 11; 21,01 → 11; 21,02 → 11; 25 → 13.
   - **Cantidad canónica y presentación comercial:** el stock y la persistencia usan el entero `c` en medias piezas; comercialmente `c` se descompone siempre en `floor(c / 2)` piezas completas más como máximo una media (`c mod 2 = 1`). `c = 2` vale **una pieza**, nunca dos medias.
-  - **Subtotal:** `pieza` = `floor(c / 2) * precio_pieza + (c mod 2 = 1 ? precio_media_pieza : 0)`; `unidad` = `cantidad * precio_unitario`. Ejemplo con 10.000 / 6.000: `c=1 → 6.000`, `c=2 → 10.000`, `c=3 → 16.000`, `c=5 → 26.000`.
+  - **Subtotal:** `pieza` = `floor(c / 2) * precio_pieza + (c mod 2 = 1 ? precio_media_pieza : 0)`; `unidad` = `cantidad * precio_unitario`. Ejemplo con pieza = 21 (media 11): `c=1 → 11`, `c=2 → 21` (no 22), `c=3 → 32`. Con pieza = 10.000 (media 5.000): `c=1 → 5.000`, `c=2 → 10.000`, `c=3 → 15.000`, `c=5 → 25.000`.
+  - **Historial de venta:** cada ítem `pieza` conserva el precio de media pieza **aplicado** al vender; una venta histórica se reconstruye con ese valor guardado, **sin volver a derivarlo**. Ítem `pieza` sin ese valor, o ítem `unidad` con él, es inválido.
   - **Decimales:** los precios admiten como máximo 2 decimales; más de 2 se rechaza (sin redondear ni truncar). El prototipo calcula en centavos enteros; la base futura usará `numeric(14,2)`, nunca `float`. Precio 0: se mantiene la validación mínima vigente (`>= 0`); exigir `> 0` sería otra decisión.
-- **Prototipo legacy (pendiente de migración).** El prototipo de demostración actual (`apps/web/src/`) **todavía contiene `kg`** y **expresa las piezas como piezas enteras** (no en medias piezas). Esa representación **no cumple esta regla** y **requiere migración** antes de reutilizar sus datos o su lógica. El requisito de migración está en `docs/requirements/migracion-unidades-prototipo.md`. El versionado de las claves demo de `localStorage` (v1 → v2, con **inicialización limpia** y **sin migración automática** de cantidades) es una **decisión humana aprobada** (18/10/2026); su **ejecución** queda pendiente de autorización. El modelo de precios independientes (ADR-002) lleva además las claves operativas del prototipo (productos, jornadas, ventas, cobros, movimientos, retornos y camiones) de `v2` a `v3`, también por inicialización limpia y sin leer, copiar, reinterpretar ni borrar `v2`; `clientes` queda en `v2` y la sesión en `v1`.
+- **Prototipo legacy (pendiente de migración).** El prototipo de demostración actual (`apps/web/src/`) **todavía contiene `kg`** y **expresa las piezas como piezas enteras** (no en medias piezas). Esa representación **no cumple esta regla** y **requiere migración** antes de reutilizar sus datos o su lógica. El requisito de migración está en `docs/requirements/migracion-unidades-prototipo.md`. El versionado de las claves demo de `localStorage` (v1 → v2, con **inicialización limpia** y **sin migración automática** de cantidades) es una **decisión humana aprobada** (18/10/2026); su **ejecución** queda pendiente de autorización. El modelo de precios independientes (ADR-002, hoy superada) llevó las claves operativas del prototipo de `v2` a `v3`. El precio derivado de media pieza (ADR-003) las lleva de `v3` a **`v4`** (`distribuidora_productos_demo_v4`, `distribuidora_jornadas_demo_v4`, `distribuidora_ventas_demo_v4`, `distribuidora_cobros_demo_v4`, `distribuidora_movimientos_demo_v4`, `distribuidora_retornos_demo_v4`, `distribuidora_camiones_demo_v4`), por inicialización limpia y sin leer, copiar, reinterpretar ni borrar `v3` ni `v2`; `clientes` queda en `distribuidora_clientes_demo_v2` y la sesión en `distribuidora_sesion_demo_v1`.
 
 ### 7.2 Ubicaciones de stock
 
@@ -329,7 +330,7 @@ La estrategia concreta de bloqueo, isolation level o advisory locks se decide en
 | `empresas` | [APROBADA CONCEPTUALMENTE] | nombre; entidad dueña; `empresa_id` en todas las tablas de negocio |
 | `perfiles` | [APROBADA CONCEPTUALMENTE] | usuario (auth), nombre, activo; empresa y rol leídos de tablas protegidas |
 | `roles` / membresías | [PROPUESTA TÉCNICA] | forma exacta de dividir perfiles/membresías/rol/usuario↔empresa: pendiente de diseño SQL-RLS. Roles funcionales (dueño, encargado, vendedor/piloto) **aprobados**; **tabla `roles` NO aprobada** |
-| `productos` | [APROBADA CONCEPTUALMENTE] | codigo, nombre, categoria, forma_venta (`unidad`/`pieza`), precio_pieza_o_unidad, precio_media_pieza (obligatorio si `forma_venta = pieza`; no aplica si es `unidad`; ADR-002), stock_minimo, activo. *Tipos y restricciones SQL definitivos: pendientes* |
+| `productos` | [APROBADA CONCEPTUALMENTE] | codigo, nombre, categoria, forma_venta (`unidad`/`pieza`), precio_pieza_o_unidad (el precio de media pieza **no** se guarda en el producto: se deriva; ADR-003), stock_minimo, activo. *Tipos y restricciones SQL definitivos: pendientes* |
 | `camiones` | [APROBADA CONCEPTUALMENTE] | patente, nombre, activo |
 | `clientes` | [APROBADA CONCEPTUALMENTE] | nombre, comercio, direccion, telefono, activo, creado_por, validado_por, estado_validacion; contraparte comercial, **no** ubicación de stock |
 | `ubicaciones` | [APROBADA CONCEPTUALMENTE] | internas: `deposito`, `cuarentena`, `camion` (camion_id). **`merma` no es ubicación interna** (salida terminal) |
@@ -348,7 +349,7 @@ La estrategia concreta de bloqueo, isolation level o advisory locks se decide en
 | `talonarios` | [PROPUESTA TÉCNICA] | serie, numero_desde, numero_hasta, asignado_a, estado, fecha_asignacion |
 | `notas_talonario` | [PROPUESTA TÉCNICA] | talonario_id, numero, jornada_id, estado (`utilizada`/`anulada`/`justificada`), venta_id nullable, motivo, registrado_por |
 | `ventas` | [APROBADA CONCEPTUALMENTE] | operacion_id, jornada_id, cliente_id, origen (digital/papel), serie_talonario, numero_nota, total, estado |
-| `venta_items` | [APROBADA CONCEPTUALMENTE] | venta_id, producto_id, cantidad, precio_unitario, subtotal. **Historial de precios aplicados** (pieza/unidad y, en fiambres, media pieza) para reconstruir el cobro: **PROPUESTA TÉCNICA pendiente** (forma SQL exacta no aprobada; el prototipo usa la Opción A de ADR-002) |
+| `venta_items` | [APROBADA CONCEPTUALMENTE] | venta_id, producto_id, cantidad, precio_unitario, subtotal. **Historial de precios aplicados** (pieza/unidad y, en fiambres, media pieza aplicada) para reconstruir el cobro sin re-derivar la media (ADR-003): **PROPUESTA TÉCNICA pendiente** (forma SQL exacta no aprobada; el prototipo usa la Opción A de ADR-002, vigente por ADR-003) |
 | `venta_pagos` | [APROBADA CONCEPTUALMENTE] | operacion_id, venta_id, medio (efectivo/transferencia/a_cuenta; otros pendientes), importe, referencia, estado (`declarada`/`verificada` para transferencias), verificado_por, verificado_at |
 | `partidas_ingreso` | [F2 / PROPUESTA NO APROBADA] | producto_id, fecha_ingreso, fecha_vencimiento (nullable), cantidad_inicial. **No se mantienen saldos por partida ni se atribuye cada venta a un ingreso.** No implementar sin aprobación |
 | `auditoria` | [DERIVADA] | **No hay tabla genérica en Fase 1.** La trazabilidad surge de operaciones, ledgers, documentos, actor, timestamps, motivos, jornada y relaciones |
@@ -419,7 +420,7 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] No se puede cargar más de lo disponible en depósito.
 - [ ] No se puede cargar mercadería en cuarentena.
 - [ ] Media pieza: cargar "2 piezas + 1 media" guarda 5; vender 1 media deja 4.
-- [ ] Precio de fiambres (ADR-002): con pieza = 10.000 y media = 6.000, `c=1` cobra 6.000, `c=2` cobra 10.000, `c=3` cobra 16.000 y `c=5` cobra 26.000; un precio con más de 2 decimales se rechaza.
+- [ ] Precio de fiambres (ADR-003): con pieza = 21 (media derivada 11), `c=1` cobra 11, `c=2` cobra 21 (no 22) y `c=3` cobra 32; la media derivada de 20,98 / 20,99 / 21,00 / 21,01 / 21,02 es 10 / 10 / 11 / 11 / 11; un precio con más de 2 decimales se rechaza; una venta histórica usa la media guardada, sin re-derivarla.
 - [ ] El saldo de cada ubicación coincide con la suma de sus movimientos.
 
 **Jornada**
@@ -559,7 +560,7 @@ Estado: abierto | resuelto (solo con prueba)
 - [ ] **Gastos de ruta:** tipos, quién solicita, quién autoriza, comprobante, momento y cómo afectan rendición.
 - [ ] **Devoluciones por producto:** criterios documentables para clasificación apto/no apto; no asumir que todo retorno está apto por no requerir autorización humana.
 - [ ] **Vencimientos — propuesta:** fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. Requiere aprobación comercial.
-- [x] **Precio media pieza:** resuelto por ADR-002 (20/10/2026): dos precios independientes; sin relación obligatoria ni redondeo derivado.
+- [x] **Precio media pieza:** resuelto por ADR-003 (21/10/2026), que supera a ADR-002: media no configurable, igual a la mitad del precio de pieza redondeada al peso entero (`.50` sube).
 - [ ] **Fechas:** día operativo y zona horaria del negocio (distinción de UTC para auditoría); corte de jornada.
 
 ### Prioridad media — antes de entrega
@@ -603,7 +604,8 @@ Estado: abierto | resuelto (solo con prueba)
 | 1.6 | 18/10/2026 | Ejemplo de consistencia categoría/unidad (`Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`); versionado `localStorage` v1→v2 (sin migración automática) decisión humana aprobada. |
 | 1.7 | 20/10/2026 | **Decisiones arquitectónicas aprobadas conceptualmente (con ajustes)**: operaciones, ubicaciones (merma no es ubicación interna), cierres sin tabla propia, roles funcionales sin tabla roles, conteos separados, movimientos_stock ledger append-only, dinero sin ledger separado, saldos derivados, auditoría sin tabla genérica, idempotencia por operaciones, concurrencia funcional. Actualización de tabla de entidades (§8) y secciones 7.2, 7.9, 8, 9. |
 | 1.8 | 20/10/2026 | **ADR-002 aprobada** (precios comerciales independientes de pieza y media pieza): §7.1 (precio, cantidad canónica vs presentación comercial, subtotal, decimales), §8 (`productos`, `venta_items`), criterios de aceptación y cierre del pendiente de §15; claves operativas del prototipo `localStorage` v2 → v3 con inicialización limpia. Sin cambios en ADR-001 ni en SQL. |
+| 1.9 | 21/10/2026 | **ADR-003 aprobada — Precio derivado de media pieza** (supera a ADR-002 solo en la política de precio de media pieza; ADR-002 queda histórica): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube) calculada en centavos enteros; cantidad canónica en medias sin cambios; snapshot histórico conserva la media aplicada sin re-derivarla. §4, §7.1, §8 (`productos`, `venta_items`), §12 y §15; claves operativas del prototipo `localStorage` v3 → v4 con inicialización limpia. Sin cambios en ADR-001 ni SQL aprobado. |
 
 ---
 
-*Fin de BLUEPRINT.md v1.8*
+*Fin de BLUEPRINT.md v1.9*

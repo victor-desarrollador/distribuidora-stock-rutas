@@ -1,4 +1,3 @@
-
 import { useMemo, useState } from "react";
 import { Package, Plus, Search, Pencil, CheckCircle2 } from "lucide-react";
 
@@ -8,7 +7,7 @@ import {
   unidad_para_categoria,
   validar_combinacion_categoria_unidad,
 } from "../domain/productos";
-import { validar_precios_producto } from "../domain/precios";
+import { precio_media_pieza, validar_precio } from "../domain/precios";
 
 // Formato de moneda argentina.
 const formatoMoneda = (valor: number) =>
@@ -17,6 +16,16 @@ const formatoMoneda = (valor: number) =>
     currency: "ARS",
     maximumFractionDigits: 2,
   }).format(valor);
+
+// Vista previa de la media derivada mientras se tipea: un precio todavía
+// inválido (p. ej. 10.001) no debe romper el render; se muestra vacío.
+function vistaPreviaMedia(precioTexto: string): string {
+  try {
+    return String(precio_media_pieza(Number(precioTexto) || 0));
+  } catch {
+    return "";
+  }
+}
 
 // Abreviaciones de unidades.
 const unidades: Record<UnidadMedida, string> = {
@@ -29,8 +38,6 @@ type FormularioProducto = {
   categoria: Producto["categoria"];
   unidadMedida: UnidadMedida;
   precio: string;
-  // Solo fiambres (pieza): precio de media pieza, independiente del de pieza.
-  precioMediaPieza: string;
   stock: string;
   stockMinimo: string;
 };
@@ -41,7 +48,6 @@ function formularioVacio(): FormularioProducto {
     categoria: "Lácteos",
     unidadMedida: "unidad",
     precio: "",
-    precioMediaPieza: "",
     stock: "",
     stockMinimo: "",
   };
@@ -94,10 +100,6 @@ export default function Productos() {
       categoria: producto.categoria,
       unidadMedida: producto.unidadMedida,
       precio: String(producto.precio),
-      precioMediaPieza:
-        producto.precioMediaPieza === undefined
-          ? ""
-          : String(producto.precioMediaPieza),
       stock: String(producto.stock),
       stockMinimo: String(producto.stockMinimo),
     });
@@ -113,13 +115,6 @@ export default function Productos() {
     evento.preventDefault();
 
     const precio = Number(nuevoProducto.precio);
-    // pieza: precio de media obligatorio; unidad: debe estar ausente.
-    // Un campo vacío es ausencia, no 0.
-    const precioMediaPieza =
-      nuevoProducto.unidadMedida === "pieza" &&
-      nuevoProducto.precioMediaPieza.trim() !== ""
-        ? Number(nuevoProducto.precioMediaPieza)
-        : undefined;
     const stock = Number(nuevoProducto.stock);
     const stockMinimo = Number(nuevoProducto.stockMinimo);
 
@@ -148,15 +143,11 @@ export default function Productos() {
       nuevoProducto.unidadMedida
     );
 
-    // Validación de dominio de precios (ADR-002): máximo 2 decimales, sin
-    // redondear; pieza exige precio de media pieza, unidad no lo admite.
+    // Validación de dominio de precios (ADR-003): máximo 2 decimales, sin
+    // redondear; precio de media se deriva, NO es configurable.
     let errorPrecios: string | null = null;
     try {
-      validar_precios_producto({
-        unidad_medida: nuevoProducto.unidadMedida,
-        precio,
-        precio_media_pieza: precioMediaPieza,
-      });
+      validar_precio(precio);
     } catch (error) {
       errorPrecios = error instanceof Error ? error.message : "Precio inválido.";
     }
@@ -189,7 +180,6 @@ export default function Productos() {
                 ...producto,
                 nombre: nuevoProducto.nombre.trim(),
                 precio,
-                precioMediaPieza,
                 stockMinimo,
               }
             : producto
@@ -205,7 +195,6 @@ export default function Productos() {
         categoria: nuevoProducto.categoria,
         unidadMedida: nuevoProducto.unidadMedida,
         precio,
-        precioMediaPieza,
         stock,
         stockMinimo,
       };
@@ -302,8 +291,6 @@ export default function Productos() {
                     // unidad; Fiambres -> pieza. Nunca queda un estado
                     // intermedio inválido.
                     unidadMedida: unidad_para_categoria(categoria),
-                    // Lácteos no admite precio de media pieza.
-                    precioMediaPieza: "",
                   });
                 }}
                 className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100 disabled:text-slate-500"
@@ -371,25 +358,24 @@ export default function Productos() {
               />
             </label>
 
-            {/* Precio de media pieza: solo fiambres */}
+            {/* Precio de media pieza: derivado, solo lectura para fiambres */}
             {nuevoProducto.unidadMedida === "pieza" && (
               <label className="space-y-1 text-sm font-medium">
-                <span>Precio de media pieza ($)</span>
+                <span>Precio de media pieza (derivado, $)</span>
 
                 <input
-                  required
                   type="number"
                   min="0"
-                  step="0.01"
-                  value={nuevoProducto.precioMediaPieza}
-                  onChange={(e) =>
-                    setNuevoProducto({
-                      ...nuevoProducto,
-                      precioMediaPieza: e.target.value,
-                    })
-                  }
-                  className="w-full rounded-lg border border-slate-300 p-3"
+                  step="1"
+                  value={vistaPreviaMedia(nuevoProducto.precio)}
+                  readOnly
+                  className="w-full rounded-lg border border-slate-300 p-3 bg-slate-50 text-slate-700"
                 />
+
+                <p className="text-xs font-normal text-slate-500">
+                  Se deriva automáticamente: mitad del precio de pieza,
+                  redondeado al peso entero (.50 hacia arriba).
+                </p>
               </label>
             )}
 
@@ -525,12 +511,8 @@ export default function Productos() {
                     {producto.unidadMedida === "pieza" ? (
                       <>
                         {formatoMoneda(producto.precio)} pieza
-                        {producto.precioMediaPieza !== undefined && (
-                          <>
-                            <br />
-                            {formatoMoneda(producto.precioMediaPieza)} media
-                          </>
-                        )}
+                        <br />
+                        {formatoMoneda(precio_media_pieza(producto.precio))} media
                       </>
                     ) : (
                       formatoMoneda(producto.precio)
@@ -573,7 +555,6 @@ export default function Productos() {
             No se encontraron productos.
           </p>
         )}
-      </div>
 
       {/* Advertencia de prototipo */}
       <p className="text-sm text-slate-500">
@@ -582,5 +563,6 @@ export default function Productos() {
         y todavía no está conectado con PostgreSQL.
       </p>
     </div>
+  </div>
   );
 }
