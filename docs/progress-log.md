@@ -1,9 +1,9 @@
 ---
-## 21/10/2026 — Bloque 4: Autoventa compatible con ADR-003 (precio derivado de media pieza)
+## 21/10/2026 — Bloque 4: Autoventa compatible con ADR-003 (precio derivado de media pieza) — POST-AUDITORÍA
 
-**Rama:** `feat/autoventa-medias-piezas` · **HEAD:** `4060a1f79646b291f7913b504c0db218cf035b70` · **Estado:** cambios **sin commit**, sin push, sin merge, sin deploy; pendiente de revisión humana y auditoría independiente del hash; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+**Rama:** `feat/autoventa-medias-piezas` · **HEAD:** `794efcdc5ed84527e7ebd394b8b3fac35cfd7754` · **Estado:** cambios **sin commit**, sin push, sin merge, sin deploy; pendiente de revisión humana y nueva auditoría independiente del hash; **ADR-001 continúa PROPUESTA — NO APROBADA**.
 
-### Qué se hizo
+### Qué se hizo (commit original 4060a1f + correcciones post-auditoría)
 
 - **Autoventa.tsx** reescrito para usar exclusivamente las funciones del dominio compartido (`domain/precios.ts`, `domain/cantidades.ts`):
   - **Eliminado** cualquier cálculo manual `cantidad * precioReferencia` para productos por pieza.
@@ -21,48 +21,58 @@
   - Preview legible: `= 1 pieza y media` / `= 2 piezas` / etc.
   - Lácteos (`unidad`): input numérico entero simple.
 
+- **Frontera de escritura (M-1 corregido post-auditoría)**:
+  - `useVentas.registrarVenta` ahora valida con `venta_valida` (domain/validacion.ts) **ANTES** de callback de stock, persistencia y actualización de estado.
+  - Extraída función pura `registrarVentaOperacion` para testabilidad sin React.
+  - Venta inválida monetariamente falla antes de cualquier efecto lateral.
+
 - **No se tocó**: storage (sigue v4), backend, SQL, Supabase, Auth, RLS, RPC, migraciones, ADR-001 (sigue NO APROBADA).
 
-### Archivos modificados
+### Archivos modificados (7 archivos en commit auditado 794efcd)
 
 - `apps/web/src/pages/Autoventa.tsx`
+- `apps/web/src/hooks/useVentas.ts`
+- `apps/web/src/domain/venta.ts` (nuevo)
+- `apps/web/src/domain/validacion.ts` (nuevo)
+- `apps/web/src/domain/venta.test.ts` (nuevo)
+- `docs/PRD.md`
+- `docs/progress-log.md`
 
 ### Cómo se verificó
 
 Ejecutado desde `apps/web/`:
 - `npm run typecheck` → exit 0
-- `npm test -- --run` → 10 archivos, **179 tests passed**
+- `npm test -- --run` → 11 archivos, **217 tests passed** (+13 tests frontera de escritura)
 - `npm run lint` → exit 0
 - `npm run build` → exit 0
 - `npx playwright test` → 1 passed
+
+### Auditoría (commit 794efcd) — Hallazgos cerrados en esta corrección
+
+- **M-1 (bloqueante para merge):** `registrarVenta` permitía persistir venta sin aplicar `venta_valida`. **CORREGIDO**: validación compartida ejecutada ANTES de callback/persistencia/estado.
+- **L-1 (PRD):** referencia a "precio de media queda pendiente". **CORREGIDO**: refleja ADR-003 aprobado.
+- **L-2 (progress-log):** no reflejaba commit 794efcd, 7 archivos, 217 tests. **CORREGIDO** en esta entrada.
 
 ### Riesgos y pendientes
 
 1. **Merge/deploy bloqueados** hasta revisión humana y auditoría independiente del hash (AGENTS.md §2.2).
 2. **Superficies sensibles (AGENTS.md §2.4):** ventas y dinero (cálculo monetario local). Corresponde revisión de seguridad/humana y auditoría independiente.
-3. **Test de regresión M-1 IMPLEMENTADO**: `src/domain/venta.test.ts` cubre:
-   - Casos A/B/C/D de construirDetalleVenta (pieza 21 con c=1/2/3, unidad 100 con c=3)
-   - Validación de rechazo: 1.5, NaN, Infinity, negativos
-   - **Test de integración lógica**: validación simulada de useVentas (subtotal_linea_historica, snapshot precioMediaPieza, cantidad, precio)
-   - Verifica que venta de pieza con snapshot correcto pasa validación; con snapshot incorrecto/ausente falla; unidad con precioMediaPieza falla
-   - Total usa `sumar_importes` (política monetaria)
-4. **Documentación:** PRD.md corregido (Blueprint v1.9, ADR-001/002/003, precio media aprobado ADR-003); L1/L2 documentales del Bloque 3b cerrados.
-5. ADR-001 sigue PROPUESTA — NO APROBADA; no se tocó backend/SQL/Supabase.
+3. ADR-001 sigue PROPUESTA — NO APROBADA; no se tocó backend/SQL/Supabase.
 
 ### Archivos nuevos
 
-- `apps/web/src/domain/venta.ts` — función pura `construirDetalleVenta` / `construirItemsVenta` (reutilizable por Autoventa y tests)
-- `apps/web/src/domain/venta.test.ts` — 20 tests cubriendo M-1
+- `apps/web/src/domain/venta.ts` — función pura `construirDetalleVenta` / `construirItemsVenta`
+- `apps/web/src/domain/validacion.ts` — validador compartido `venta_valida`, `item_valido`, `subtotal_coincide`, `total_coincide`
+- `apps/web/src/domain/venta.test.ts` — **217 tests totales** (13 frontera de escritura M-1 + regresión M-1 original)
 
-### Verificación completa
+### Verificación completa POST-corrección
 
 - `npm run typecheck` → exit 0
-- `npm test -- --run` → 11 archivos, **199 tests passed** (+20 nuevos)
+- `npm test -- --run` → 11 archivos, **217 tests passed**
 - `npm run lint` → exit 0
 - `npm run build` → exit 0
 - `npx playwright test` → 1 passed
 - `git diff --check` → limpio
-
 
 
 ---

@@ -1,8 +1,66 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { construirDetalleVenta, construirItemsVenta } from "./venta";
 import { item_valido, subtotal_coincide, venta_valida } from "./validacion";
 import { sumar_importes } from "./precios";
+import { registrarVentaOperacion } from "../hooks/useVentas";
 import type { DetalleVenta, Venta } from "../data/mockVentas";
+
+// --- Simulación de localStorage para entorno node (igual que persistencia.test.ts) ---
+const crearMockLocalStorage = () => {
+  const store = new Map<string, string>();
+  return {
+    getItem: vi.fn((key: string) => store.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(key, value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(key);
+    }),
+    clear: vi.fn(() => {
+      store.clear();
+    }),
+    get length() {
+      return store.size;
+    },
+    key: vi.fn((index: number) => {
+      const arr = Array.from(store.keys());
+      return arr[index] ?? null;
+    }),
+    _store: store,
+  };
+};
+
+let mockLS: ReturnType<typeof crearMockLocalStorage>;
+
+beforeEach(() => {
+  mockLS = crearMockLocalStorage();
+  Object.defineProperty(globalThis, "localStorage", {
+    value: mockLS,
+    writable: true,
+    configurable: true,
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+
+// Helper para crear ventas actuales simuladas
+const crearCargarActuales = (inicial: Venta[] = []) => {
+  const store = [...inicial];
+  return () => [...store];
+};
+
+const crearGuardarActualizadas = () => {
+  let store: Venta[] = [];
+  return {
+    fn: vi.fn((nuevas: Venta[]) => {
+      store = nuevas;
+    }),
+    getStore: () => [...store],
+  };
+};
 
 describe("construirDetalleVenta — ADR-003 snapshot y subtotal", () => {
   // Caso A: pieza, precio = 21, cantidad = 1 (media pieza)
@@ -242,7 +300,6 @@ describe("Regresión M-1: venta de pieza sobrevive a recarga (usa validador real
       cantidadCanonica: 1,
       precioReferencia: 21,
     });
-    // Mutar el snapshot para simular error
     const itemConError = { ...item, precioMediaPieza: 999 };
     expect(item_valido(itemConError)).toBe(false);
   });
@@ -255,7 +312,6 @@ describe("Regresión M-1: venta de pieza sobrevive a recarga (usa validador real
       cantidadCanonica: 3,
       precioReferencia: 100,
     });
-    // Mutar para agregar precioMediaPieza donde no debe estar
     const itemConError = { ...item, precioMediaPieza: 50 };
     expect(item_valido(itemConError)).toBe(false);
   });
@@ -268,7 +324,6 @@ describe("Regresión M-1: venta de pieza sobrevive a recarga (usa validador real
       cantidadCanonica: 1,
       precioReferencia: 21,
     });
-    // Mutar para quitar precioMediaPieza
     const itemConError = { ...item, precioMediaPieza: undefined };
     expect(item_valido(itemConError)).toBe(false);
   });
@@ -281,7 +336,6 @@ describe("Regresión M-1: venta de pieza sobrevive a recarga (usa validador real
       cantidadCanonica: 1,
       precioReferencia: 21,
     });
-    // Mutar subtotal
     const itemConError = { ...item, subtotal: 999 };
     expect(item_valido(itemConError)).toBe(false);
   });
@@ -294,43 +348,13 @@ describe("Regresión M-1: venta de pieza sobrevive a recarga (usa validador real
       cantidadCanonica: 1,
       precioReferencia: 21,
     });
-    // Mutar cantidad a 0
     const itemConError = { ...item, cantidad: 0 };
     expect(item_valido(itemConError)).toBe(false);
   });
 });
 
 describe("Snapshot histórico: validación usa snapshot guardado, NO recalcula ADR-003", () => {
-  /**
-   * Demuestra que la validación histórica usa el snapshot guardado en precioMediaPieza
-   * y NO recalcula con precio_media_pieza(precioUnitario).
-   */
-
   it("detalle pieza con snapshot histórico 21/12/3/33 → VÁLIDO (subtotal coincide con snapshot)", () => {
-    // precioUnitario = 21 (pieza completa)
-    // precioMediaPieza = 12 (snapshot histórico, PUEDE ser distinto al derivado actual 11)
-    // cantidad = 3 (1 pieza + media)
-    // subtotal = 33 (calculado con el snapshot 12: 21 + 12 = 33)
-    const item: DetalleVenta = {
-      productoId: 1,
-      nombreProducto: "Jamón histórico",
-      unidadMedida: "pieza",
-      cantidad: 3,
-      precioUnitario: 21,
-      precioMediaPieza: 12, // Snapshot histórico (distinto al ADR-003 actual que daría 11)
-      subtotal: 33, // 21 + 12 = 33 (con snapshot 12)
-    };
-
-    // Debe ser VÁLIDO porque usa el snapshot guardado, no recalcula ADR-003
-    expect(item_valido(item)).toBe(true);
-    expect(subtotal_coincide(item)).toBe(true);
-  });
-
-  it("mismo snapshot 21/12/3 pero subtotal 32 → INVÁLIDO (no coincide con snapshot)", () => {
-    // precioUnitario = 21
-    // precioMediaPieza = 12 (snapshot)
-    // cantidad = 3
-    // subtotal = 32 (INCORRECTO: con snapshot 12 debería ser 33; 32 sería el cálculo ADR-003 actual)
     const item: DetalleVenta = {
       productoId: 1,
       nombreProducto: "Jamón histórico",
@@ -338,10 +362,24 @@ describe("Snapshot histórico: validación usa snapshot guardado, NO recalcula A
       cantidad: 3,
       precioUnitario: 21,
       precioMediaPieza: 12,
-      subtotal: 32, // ¡Error! Con snapshot 12 el subtotal debe ser 33
+      subtotal: 33,
     };
 
-    // Debe ser INVÁLIDO porque subtotal no coincide con el snapshot
+    expect(item_valido(item)).toBe(true);
+    expect(subtotal_coincide(item)).toBe(true);
+  });
+
+  it("mismo snapshot 21/12/3 pero subtotal 32 → INVÁLIDO (no coincide con snapshot)", () => {
+    const item: DetalleVenta = {
+      productoId: 1,
+      nombreProducto: "Jamón histórico",
+      unidadMedida: "pieza",
+      cantidad: 3,
+      precioUnitario: 21,
+      precioMediaPieza: 12,
+      subtotal: 32,
+    };
+
     expect(item_valido(item)).toBe(false);
     expect(subtotal_coincide(item)).toBe(false);
   });
@@ -362,8 +400,8 @@ describe("Snapshot histórico: validación usa snapshot guardado, NO recalcula A
           unidadMedida: "pieza",
           cantidad: 3,
           precioUnitario: 21,
-          precioMediaPieza: 12, // Snapshot histórico
-          subtotal: 33, // 21 + 12
+          precioMediaPieza: 12,
+          subtotal: 33,
         },
         {
           productoId: 2,
@@ -374,7 +412,7 @@ describe("Snapshot histórico: validación usa snapshot guardado, NO recalcula A
           subtotal: 200,
         },
       ],
-      total: 233, // 33 + 200
+      total: 233,
     };
 
     expect(venta_valida(venta)).toBe(true);
@@ -389,6 +427,273 @@ describe("Total de venta usa sumar_importes (política monetaria)", () => {
     ];
 
     const total = sumar_importes(items.map((i) => i.subtotal));
-    expect(total).toBe(11 + 300); // 311
+    expect(total).toBe(11 + 300);
+  });
+});
+
+/**
+ * Test de frontera de escritura (M-1): registrarVentaOperacion debe rechazar ventas inválidas
+ * ANTES de persistir, modificar estado o ejecutar callback de stock.
+ * Usa la función pura extraída, no el hook.
+ */
+describe("Frontera de escritura: registrarVentaOperacion rechaza inválidos antes de persistir", () => {
+  // Helper para crear una venta válida base
+  const ventaBaseValida: Venta = {
+    id: "test-venta-valida",
+    jornadaId: "jornada-1",
+    camionId: 1,
+    clienteId: 1,
+    nombreCliente: "Cliente Test",
+    fecha: new Date().toISOString(),
+    medioPago: "efectivo",
+    items: [
+      {
+        productoId: 1,
+        nombreProducto: "Jamón",
+        unidadMedida: "pieza",
+        cantidad: 3,
+        precioUnitario: 21,
+        precioMediaPieza: 12,
+        subtotal: 33,
+      },
+    ],
+    total: 33,
+  };
+
+  it("A. Venta válida: venta_valida=true → persiste y actualiza", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const error = registrarVentaOperacion(ventaBaseValida, validarStock, cargar, guardar.fn);
+
+    expect(error).toBeNull();
+    expect(validarStock).toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(1);
+    expect(guardar.getStore()[0].id).toBe(ventaBaseValida.id);
+  });
+
+  it("B. Pieza con snapshot adulterado (subtotal 32 vs 33) → rechazo, NO persistencia, NO callback", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaInvalida: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-invalida-snapshot",
+      items: [{ ...ventaBaseValida.items[0], subtotal: 32 }],
+      total: 32,
+    };
+
+    const error = registrarVentaOperacion(ventaInvalida, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("C. Total adulterado (item válido subtotal 33, venta.total = 32) → rechazo, NO persistencia, NO callback", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaTotalMal: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-total-mal",
+      total: 32,
+    };
+
+    const error = registrarVentaOperacion(ventaTotalMal, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("D. Unidad con precioMediaPieza presente → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaUnidadConMedia: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-unidad-con-media",
+      items: [
+        {
+          productoId: 2,
+          nombreProducto: "Leche",
+          unidadMedida: "unidad",
+          cantidad: 3,
+          precioUnitario: 100,
+          precioMediaPieza: 50,
+          subtotal: 300,
+        },
+      ],
+      total: 300,
+    };
+
+    const error = registrarVentaOperacion(ventaUnidadConMedia, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("E. Cantidad 0 → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaCantCero: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-cant-cero",
+      items: [{ ...ventaBaseValida.items[0], cantidad: 0 }],
+      total: 0,
+    };
+
+    const error = registrarVentaOperacion(ventaCantCero, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("F. Cantidad decimal (1.5) → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaDecimal: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-decimal",
+      items: [{ ...ventaBaseValida.items[0], cantidad: 1.5 }],
+      total: 33,
+    };
+
+    const error = registrarVentaOperacion(ventaDecimal, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("G. NaN en cantidad → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaNaN: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-nan",
+      items: [{ ...ventaBaseValida.items[0], cantidad: NaN }],
+      total: 33,
+    };
+
+    const error = registrarVentaOperacion(ventaNaN, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("H. Infinity en cantidad → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaInf: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-inf",
+      items: [{ ...ventaBaseValida.items[0], cantidad: Infinity }],
+      total: 33,
+    };
+
+    const error = registrarVentaOperacion(ventaInf, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("I. Cantidad negativa → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaNeg: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-neg",
+      items: [{ ...ventaBaseValida.items[0], cantidad: -1 }],
+      total: 33,
+    };
+
+    const error = registrarVentaOperacion(ventaNeg, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("J. Pieza SIN precioMediaPieza → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaSinMedia: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-sin-media",
+      items: [{ ...ventaBaseValida.items[0], precioMediaPieza: undefined }],
+      total: 33,
+    };
+
+    const error = registrarVentaOperacion(ventaSinMedia, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("K. Precio monetariamente inválido (negativo) → rechazo antes de persistir", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const ventaPrecioNeg: Venta = {
+      ...ventaBaseValida,
+      id: "test-venta-precio-neg",
+      items: [{ ...ventaBaseValida.items[0], precioUnitario: -10 }],
+      total: 33,
+    };
+
+    const error = registrarVentaOperacion(ventaPrecioNeg, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta no pasa la validación monetaria/estructural (ADR-003).");
+    expect(validarStock).not.toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
+  });
+
+  it("L. Duplicado de ID → rechazo antes de callback", () => {
+    const cargar = crearCargarActuales([ventaBaseValida]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue(null);
+
+    const error = registrarVentaOperacion(ventaBaseValida, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("La venta ya fue registrada.");
+    expect(validarStock).not.toHaveBeenCalled();
+    // El store de cargar no debe modificarse
+    expect(cargar().length).toBe(1);
+  });
+
+  it("M. Validación de stock falla → rechazo, NO persistencia", () => {
+    const cargar = crearCargarActuales([]);
+    const guardar = crearGuardarActualizadas();
+    const validarStock = vi.fn().mockReturnValue("Stock insuficiente");
+
+    const error = registrarVentaOperacion(ventaBaseValida, validarStock, cargar, guardar.fn);
+
+    expect(error).toBe("Stock insuficiente");
+    expect(validarStock).toHaveBeenCalled();
+    expect(guardar.getStore().length).toBe(0);
   });
 });
