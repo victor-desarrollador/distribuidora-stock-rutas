@@ -1,4 +1,71 @@
-# Bitácora de progreso
+---
+## 21/10/2026 — Bloque 4: Autoventa compatible con ADR-003 (precio derivado de media pieza)
+
+**Rama:** `feat/autoventa-medias-piezas` · **HEAD:** `4060a1f79646b291f7913b504c0db218cf035b70` · **Estado:** cambios **sin commit**, sin push, sin merge, sin deploy; pendiente de revisión humana y auditoría independiente del hash; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Qué se hizo
+
+- **Autoventa.tsx** reescrito para usar exclusivamente las funciones del dominio compartido (`domain/precios.ts`, `domain/cantidades.ts`):
+  - **Eliminado** cualquier cálculo manual `cantidad * precioReferencia` para productos por pieza.
+  - **Importadas** y usadas: `precio_media_pieza`, `subtotal_linea`, `sumar_importes`.
+  - **Cantidad canónica** para fiambres (`pieza`): internas en medias piezas enteras (1 = media, 2 = pieza, 3 = pieza + media, etc.).
+  - **Snapshot histórico** en `DetalleVenta`:
+    - `unidad`: `precioUnitario` = precio vigente; `precioMediaPieza` ausente.
+    - `pieza`: `precioUnitario` = precio de pieza completa; `precioMediaPieza` = `precio_media_pieza(precioUnitario)` (snapshot derivado al momento de la venta).
+  - **Subtotal** calculado con `subtotal_linea({ unidad_medida, cantidad, precio })` (maneja pieza/unidad correctamente).
+  - **Total** derivado con `sumar_importes` (política monetaria existente, evita suma float ingenua).
+  - **Validación antes de persistir**: cantidad válida, precio válido, snapshot de media correcto para pieza, subtotal válido, total válido, estructura compatible con `useVentas`.
+
+- **UX actualizada** para fiambres (pieza):
+  - Piezas enteras (input numérico) + media pieza (checkbox) — mismo patrón que Jornadas.
+  - Preview legible: `= 1 pieza y media` / `= 2 piezas` / etc.
+  - Lácteos (`unidad`): input numérico entero simple.
+
+- **No se tocó**: storage (sigue v4), backend, SQL, Supabase, Auth, RLS, RPC, migraciones, ADR-001 (sigue NO APROBADA).
+
+### Archivos modificados
+
+- `apps/web/src/pages/Autoventa.tsx`
+
+### Cómo se verificó
+
+Ejecutado desde `apps/web/`:
+- `npm run typecheck` → exit 0
+- `npm test -- --run` → 10 archivos, **179 tests passed**
+- `npm run lint` → exit 0
+- `npm run build` → exit 0
+- `npx playwright test` → 1 passed
+
+### Riesgos y pendientes
+
+1. **Merge/deploy bloqueados** hasta revisión humana y auditoría independiente del hash (AGENTS.md §2.2).
+2. **Superficies sensibles (AGENTS.md §2.4):** ventas y dinero (cálculo monetario local). Corresponde revisión de seguridad/humana y auditoría independiente.
+3. **Test de regresión M-1 IMPLEMENTADO**: `src/domain/venta.test.ts` cubre:
+   - Casos A/B/C/D de construirDetalleVenta (pieza 21 con c=1/2/3, unidad 100 con c=3)
+   - Validación de rechazo: 1.5, NaN, Infinity, negativos
+   - **Test de integración lógica**: validación simulada de useVentas (subtotal_linea_historica, snapshot precioMediaPieza, cantidad, precio)
+   - Verifica que venta de pieza con snapshot correcto pasa validación; con snapshot incorrecto/ausente falla; unidad con precioMediaPieza falla
+   - Total usa `sumar_importes` (política monetaria)
+4. **Documentación:** PRD.md corregido (Blueprint v1.9, ADR-001/002/003, precio media aprobado ADR-003); L1/L2 documentales del Bloque 3b cerrados.
+5. ADR-001 sigue PROPUESTA — NO APROBADA; no se tocó backend/SQL/Supabase.
+
+### Archivos nuevos
+
+- `apps/web/src/domain/venta.ts` — función pura `construirDetalleVenta` / `construirItemsVenta` (reutilizable por Autoventa y tests)
+- `apps/web/src/domain/venta.test.ts` — 20 tests cubriendo M-1
+
+### Verificación completa
+
+- `npm run typecheck` → exit 0
+- `npm test -- --run` → 11 archivos, **199 tests passed** (+20 nuevos)
+- `npm run lint` → exit 0
+- `npm run build` → exit 0
+- `npx playwright test` → 1 passed
+- `git diff --check` → limpio
+
+
+
+---
 
 Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, archivos modificados, cómo se verificó y riesgos pendientes.
 

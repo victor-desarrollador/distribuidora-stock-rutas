@@ -10,10 +10,10 @@
 
 ## 0. Cómo leer este documento
 
-- **Fuente de verdad:** `BLUEPRINT.md` v1.8, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR **aprobadas** y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
+- **Fuente de verdad:** `BLUEPRINT.md` v1.9, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR **aprobadas** y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
 - **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
 - **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
-- **ADR:** hoy la única ADR es **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas**, en **versión 1.2 (ronda 3 de correcciones documentales)** y estado **`propuesta` — NO APROBADA** (`docs/decisions/001-rpc-privilegiadas.md`; `docs/decisions/README.md`). Sus **veinte puntos P1–P20** (sección 18 de la ADR) son **decisiones pendientes de aprobación humana**; sus recomendaciones son **no vinculantes**. Este PRD la trata como dependencia pendiente, nunca como decisión vigente, y **no convierte en requisito ninguna de sus recomendaciones**.
+- **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.2, ronda 3, estado `propuesta` — NO APROBADA), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (estado `aprobada`). ADR-001 tiene **veinte puntos P1–P20** pendientes de aprobación humana; sus recomendaciones son **no vinculantes**. Este PRD trata ADR-001 como dependencia pendiente, nunca como decisión vigente, y **no convierte en requisito ninguna de sus recomendaciones**. ADR-002 es histórica y superada; ADR-003 establece que el precio de media pieza se deriva del de pieza completa (mitad, redondeada al peso entero, `.50` sube) y no es configurable.
 - **Fase 2:** lo listado en Blueprint §5 permanece fuera de Fase 1.
 - Este documento **no inventa** decisiones ausentes: donde falta definición, remite a «Decisiones pendientes» (§21), a «Dependencias de ADR» (§22) y al Blueprint §15.
 
