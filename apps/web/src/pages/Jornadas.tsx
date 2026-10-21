@@ -19,6 +19,7 @@ import {
   puede_agregar_media,
   recomponer_medias,
 } from "../domain/cantidades";
+import { subtotal_linea, sumar_importes } from "../domain/precios";
 import {
   type Jornada,
   type ItemCarga,
@@ -33,6 +34,18 @@ const unidades = {
   unidad: "un.",
   pieza: "pzas.",
 };
+// Valor de referencia de un ítem de carga. La fórmula vive en el dominio de
+// precios (ADR-002): la cantidad canónica está en medias piezas y no se
+// multiplica por el precio de pieza.
+function valorItem(item: ItemCarga): number {
+  return subtotal_linea({
+    unidad_medida: item.unidadMedida,
+    cantidad: item.cantidad,
+    precio: item.precioReferencia,
+    precio_media_pieza: item.precioMediaPieza,
+  });
+}
+
 export default function Jornadas() {
   const { camiones } = useCamiones();
   const { productos } = useProductos();
@@ -171,13 +184,10 @@ export default function Jornadas() {
         unidadMedida: producto.unidadMedida,
         cantidad: obtenerCantidadCanonica(producto.id),
         precioReferencia: producto.precio,
+        precioMediaPieza: producto.precioMediaPieza,
       }));
   }, [productos, hayCantidadPositiva, obtenerCantidadCanonica]);
-  const valorCarga = itemsSeleccionados.reduce(
-    (total, item) =>
-      total + item.cantidad * item.precioReferencia,
-    0
-  );
+  const valorCarga = sumar_importes(itemsSeleccionados.map(valorItem));
   const jornadasOrdenadas = [...jornadas].sort((a, b) =>
     b.fechaCreacion.localeCompare(a.fechaCreacion)
   );
@@ -235,6 +245,16 @@ export default function Jornadas() {
         setError(
           `No hay stock suficiente de ${producto.nombre}.`
         );
+        return;
+      }
+    }
+    // Validación defensiva de precios: no se persiste un ítem cuyo valor no
+    // se pueda calcular con el dominio de precios.
+    for (const item of itemsSeleccionados) {
+      try {
+        valorItem(item);
+      } catch {
+        setError(`Precio inválido: ${item.nombreProducto}`);
         return;
       }
     }
@@ -604,12 +624,7 @@ export default function Jornadas() {
           const camion = camiones.find(
             (c) => c.id === jornada.camionId
           );
-          const total = jornada.items.reduce(
-            (acumulado, item) =>
-              acumulado +
-              item.cantidad * item.precioReferencia,
-            0
-          );
+          const total = sumar_importes(jornada.items.map(valorItem));
           return (
             <article
               key={jornada.id}

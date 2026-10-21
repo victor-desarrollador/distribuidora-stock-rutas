@@ -9,7 +9,11 @@ export interface DetalleVenta {
   nombreProducto: string;
   unidadMedida: "unidad" | "pieza";
   cantidad: number;
+  // Precios aplicados al vender (historial, ADR-002).
+  // unidad: precio unitario. pieza: precio de pieza completa.
   precioUnitario: number;
+  // Solo pieza: precio de media pieza aplicado.
+  precioMediaPieza?: number;
   subtotal: number;
 }
 

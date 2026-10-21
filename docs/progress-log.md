@@ -3,10 +3,43 @@
 Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, archivos modificados, cómo se verificó y riesgos pendientes.
 
 
+
+---
+## 20/10/2026 — ADR-002 y Bloque 3b: precios independientes de pieza y media pieza
+
+**Rama:** `feat/precios-medias-piezas` · **Base:** `c188b8230029166c508dfb801b0a92c68b789263` · **Estado:** implementación y documentación completas y verificadas localmente; **sin commit, sin push, sin merge, sin deploy**, pendiente de revisión humana; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Decisión humana (20/10/2026)
+
+Los fiambres vendidos por pieza tienen **dos precios comerciales independientes** (pieza completa y media pieza), sin relación matemática obligatoria. La cantidad canónica sigue siendo un entero en medias piezas; comercialmente se descompone en `floor(c / 2)` piezas más como máximo una media (`c = 2` vale una pieza). Máximo 2 decimales (más de 2 se rechaza, sin redondear ni truncar); cálculo en centavos enteros; precio 0 no se resuelve como regla nueva (se mantiene `>= 0`). Claves operativas del prototipo `v2 → v3` por inicialización limpia; `clientes` queda en `v2` y la sesión en `v1`. Historial de venta del prototipo: Opción A. Forma SQL del historial: pendiente.
+
+### Qué se hizo
+
+- **Documentación:** `docs/decisions/002-precios-independientes-pieza-media.md` (APROBADA) y su fila en `docs/decisions/README.md`; `BLUEPRINT.md` v1.8 (§7.1, §8 `productos` y `venta_items`, criterios de aceptación, §15, changelog); `docs/PRD.md` v0.7 (RF-01, criterio de stock, pregunta 13, changelog); `docs/requirements/migracion-unidades-prototipo.md` (nota de v3).
+- **Dominio:** `apps/web/src/domain/precios.ts` (única implementación: `precio_a_centavos`, `centavos_a_pesos`, `validar_precios_producto`, `precios_producto_validos`, `subtotal_linea_centavos`, `subtotal_linea`, `sumar_importes`), en centavos enteros y fail closed.
+- **Modelo:** `Producto.precioMediaPieza?`, `ItemCarga.precioMediaPieza?` y `DetalleVenta.precioMediaPieza?` (historial Opción A); `Producto.precio` conserva su nombre.
+- **Mocks demo:** queso cremoso en pieza 12.500 / 7.000; jamón cocido 12.500 / 7.500; salame milán 9.800 / 6.000 (valores de demostración, sin fórmula entre precios).
+- **Storage v3:** `apps/web/src/data/clavesStorage.ts` (única definición). `useProductos`, `useJornadas`, `useVentas`, `useCobros`, `useMovimientos`, `useRetornos` y `useCamiones` usan las claves v3; `useJornadas`, `useVentas` y `useProductos` validan precios en la frontera de persistencia (en ventas, además, el subtotal debe coincidir con el dominio). `ConfiguracionDemo.tsx` usa las mismas claves.
+- **Pantallas:** `Productos.tsx` (precio de pieza completa y precio de media pieza solo en fiambres; validación de dominio); `Jornadas.tsx` (valor de carga y total por jornada con `subtotal_linea`/`sumar_importes`, snapshot de `precioMediaPieza` y validación defensiva al guardar). **Corrige el bug de `c188b82`** (`medias × precio de pieza`).
+- **No se tocó `Autoventa.tsx`** (Bloque 4), ni Movimientos, Retornos, Rendición, Auth, backend, SQL, Supabase ni migraciones.
+
+### Cómo se verificó
+
+Ejecutado desde `apps/web/`: `npm run typecheck` exit 0 · `npm test -- --run` 10 archivos, **143 tests** (107 → 143, +36: `precios.test.ts` 20, `persistencia.test.ts` +11, `mockProductos.test.ts` +3, `Jornadas.test.ts` +2) · `npm run lint` exit 0 · `npm run build` exit 0 · `npx playwright test` 1 passed. `persistencia-v2.test.ts` se renombró a `persistencia.test.ts`.
+
+### Riesgos y pendientes
+
+1. **Autoventa sigue sin adaptar** (Bloque 4): su subtotal `cantidad × precioReferencia` es incorrecto para fiambres cargados en medias hasta que use `domain/precios.ts`. No integrar ni desplegar el Bloque 3 sin el Bloque 4.
+2. **Deuda de cobertura:** no existe test React → usuario → `localStorage` v3 → recarga; los tests son unitarios (dominio, hooks de lectura y lógica aplicada). `Jornadas.test.ts` no monta React ni verifica `valorItem` del componente, solo el dominio que usa.
+3. Los datos demo operativos `v2` quedan sin uso y sin borrarse; el respaldo de `ConfiguracionDemo` también los exporta.
+4. Los importes del prototipo se persisten como números en pesos (con 2 decimales exactos); la base futura usará `numeric(14,2)`.
+5. Forma SQL exacta de `venta_items` y exigir precio `> 0`: decisiones pendientes.
+6. **Superficies sensibles (AGENTS.md §2.4):** toca ventas, dinero e idempotencia de datos locales (sin auth, RLS, RPC ni Supabase). Corresponde revisión de seguridad/humana del cálculo monetario y auditoría independiente del hash; no se considera cerrado sin ellas.
+
 ---
 ## 20/10/2026 — Bloque 3: UX canónica de pieza / media pieza en Jornadas
 
-**Rama:** `feat/jornadas-medias-piezas` · **Base:** `9367b59e007838382503bbbb4914a7494d72fb22` · **Estado:** commit `9b4892202318dd878f3d35a27b3a9769f49beec0` creado, **no pusheado**, auditado con **APPROVED WITH CORRECTIONS**; correcciones post-auditoría **sin commit**, pendientes de revisión humana y de nuevo hash a re-auditar; **sin push, sin merge, sin deploy**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+**Rama:** `feat/jornadas-medias-piezas` · **Base:** `9367b59e007838382503bbbb4914a7494d72fb22` · **Estado:** **cerrado en `c188b8230029166c508dfb801b0a92c68b789263`** (corrige M1/M2/L1/L2 del commit `9b4892202318dd878f3d35a27b3a9769f49beec0`); publicado en `origin/feat/jornadas-medias-piezas`; sin merge, sin deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**
 
 ### Qué se hizo (commit 9b48922)
 
@@ -52,6 +85,13 @@ Ejecutadas desde `apps/web/`: `npm run typecheck` exit 0 · `npm test -- --run` 
 2. **Deuda conocida:** **NO existe** test React → interacción → guardar → `localStorage` v2 → recarga → reconstrucción de la UX.
 3. Pendiente: nueva auditoría independiente del nuevo hash (§2.3.4).
 4. ADR-001 sigue PROPUESTA — NO APROBADA; esta tarea no la toca.
+
+### Cierre histórico del Bloque 3
+
+- Bloque 3 cerrado en `c188b8230029166c508dfb801b0a92c68b789263`. Auditoría final acumulativa (`9367b59e…c188b823`): **APPROVED WITH CORRECTIONS**.
+- Hallazgos restantes: L no bloqueantes, **aceptados por decisión humana** (entre ellos, que este registro mencionara «sin commit» para las correcciones y no nombrara `c188b82`; sin feedback de stock excedido en piezas; `Number()` acepta `1e1`; cast `as string` cosmético).
+- Hallazgo posterior (Bloque 3b): el valor de carga de Jornadas de `c188b82` calculaba `cantidad canónica (medias) × precio de pieza`, inflando ×2 los fiambres. Se corrige en el Bloque 3b.
+- La deuda E2E del Bloque 3 se mantiene: no existe test React → `localStorage` → recarga → UX.
 
 ---
 ## 20/10/2026 — Actualización documental: Blueprint v1.7, PRD v0.6, research, arquitectura y bitácora

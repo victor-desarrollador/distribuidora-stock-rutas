@@ -8,6 +8,7 @@ import {
   unidad_para_categoria,
   validar_combinacion_categoria_unidad,
 } from "../domain/productos";
+import { validar_precios_producto } from "../domain/precios";
 
 // Formato de moneda argentina.
 const formatoMoneda = (valor: number) =>
@@ -28,6 +29,8 @@ type FormularioProducto = {
   categoria: Producto["categoria"];
   unidadMedida: UnidadMedida;
   precio: string;
+  // Solo fiambres (pieza): precio de media pieza, independiente del de pieza.
+  precioMediaPieza: string;
   stock: string;
   stockMinimo: string;
 };
@@ -38,6 +41,7 @@ function formularioVacio(): FormularioProducto {
     categoria: "Lácteos",
     unidadMedida: "unidad",
     precio: "",
+    precioMediaPieza: "",
     stock: "",
     stockMinimo: "",
   };
@@ -90,6 +94,10 @@ export default function Productos() {
       categoria: producto.categoria,
       unidadMedida: producto.unidadMedida,
       precio: String(producto.precio),
+      precioMediaPieza:
+        producto.precioMediaPieza === undefined
+          ? ""
+          : String(producto.precioMediaPieza),
       stock: String(producto.stock),
       stockMinimo: String(producto.stockMinimo),
     });
@@ -105,6 +113,13 @@ export default function Productos() {
     evento.preventDefault();
 
     const precio = Number(nuevoProducto.precio);
+    // pieza: precio de media obligatorio; unidad: debe estar ausente.
+    // Un campo vacío es ausencia, no 0.
+    const precioMediaPieza =
+      nuevoProducto.unidadMedida === "pieza" &&
+      nuevoProducto.precioMediaPieza.trim() !== ""
+        ? Number(nuevoProducto.precioMediaPieza)
+        : undefined;
     const stock = Number(nuevoProducto.stock);
     const stockMinimo = Number(nuevoProducto.stockMinimo);
 
@@ -115,10 +130,8 @@ export default function Productos() {
       nuevoProducto.stockMinimo.trim() !== "";
 
     const numerosValidos =
-      Number.isFinite(precio) &&
       Number.isFinite(stock) &&
       Number.isFinite(stockMinimo) &&
-      precio >= 0 &&
       stock >= 0 &&
       stockMinimo >= 0;
 
@@ -134,6 +147,24 @@ export default function Productos() {
       nuevoProducto.categoria,
       nuevoProducto.unidadMedida
     );
+
+    // Validación de dominio de precios (ADR-002): máximo 2 decimales, sin
+    // redondear; pieza exige precio de media pieza, unidad no lo admite.
+    let errorPrecios: string | null = null;
+    try {
+      validar_precios_producto({
+        unidad_medida: nuevoProducto.unidadMedida,
+        precio,
+        precio_media_pieza: precioMediaPieza,
+      });
+    } catch (error) {
+      errorPrecios = error instanceof Error ? error.message : "Precio inválido.";
+    }
+
+    if (errorPrecios !== null) {
+      alert(errorPrecios);
+      return;
+    }
 
     if (
       !camposCompletos ||
@@ -158,6 +189,7 @@ export default function Productos() {
                 ...producto,
                 nombre: nuevoProducto.nombre.trim(),
                 precio,
+                precioMediaPieza,
                 stockMinimo,
               }
             : producto
@@ -173,6 +205,7 @@ export default function Productos() {
         categoria: nuevoProducto.categoria,
         unidadMedida: nuevoProducto.unidadMedida,
         precio,
+        precioMediaPieza,
         stock,
         stockMinimo,
       };
@@ -269,6 +302,8 @@ export default function Productos() {
                     // unidad; Fiambres -> pieza. Nunca queda un estado
                     // intermedio inválido.
                     unidadMedida: unidad_para_categoria(categoria),
+                    // Lácteos no admite precio de media pieza.
+                    precioMediaPieza: "",
                   });
                 }}
                 className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100 disabled:text-slate-500"
@@ -314,7 +349,11 @@ export default function Productos() {
 
             {/* Precio */}
             <label className="space-y-1 text-sm font-medium">
-              <span>Precio de venta ($)</span>
+              <span>
+                {nuevoProducto.unidadMedida === "pieza"
+                  ? "Precio de pieza completa ($)"
+                  : "Precio de venta ($)"}
+              </span>
 
               <input
                 required
@@ -331,6 +370,28 @@ export default function Productos() {
                 className="w-full rounded-lg border border-slate-300 p-3"
               />
             </label>
+
+            {/* Precio de media pieza: solo fiambres */}
+            {nuevoProducto.unidadMedida === "pieza" && (
+              <label className="space-y-1 text-sm font-medium">
+                <span>Precio de media pieza ($)</span>
+
+                <input
+                  required
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={nuevoProducto.precioMediaPieza}
+                  onChange={(e) =>
+                    setNuevoProducto({
+                      ...nuevoProducto,
+                      precioMediaPieza: e.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 p-3"
+                />
+              </label>
+            )}
 
             {/* Stock inicial: solamente para productos nuevos */}
             {productoEditando === null && (
@@ -461,7 +522,19 @@ export default function Productos() {
 
                   {/* Precio */}
                   <td className="px-5 py-4">
-                    {formatoMoneda(producto.precio)}
+                    {producto.unidadMedida === "pieza" ? (
+                      <>
+                        {formatoMoneda(producto.precio)} pieza
+                        {producto.precioMediaPieza !== undefined && (
+                          <>
+                            <br />
+                            {formatoMoneda(producto.precioMediaPieza)} media
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      formatoMoneda(producto.precio)
+                    )}
                   </td>
 
                   {/* Estado */}

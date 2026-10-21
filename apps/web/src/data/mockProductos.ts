@@ -6,7 +6,10 @@ export interface Producto {
   categoria: "Lácteos" | "Fiambres";
   unidadMedida: UnidadMedida;
   stock: number;
+  // unidad: precio unitario. pieza: precio de pieza completa.
   precio: number;
+  // Solo pieza (ADR-002): precio de media pieza, independiente del de pieza.
+  precioMediaPieza?: number;
   stockMinimo: number;
 }
 
@@ -36,6 +39,7 @@ export const productosIniciales: Producto[] = [
     unidadMedida: "pieza",
     stock: 36,
     precio: 12500,
+    precioMediaPieza: 7000,
     stockMinimo: 10,
   },
   {
@@ -45,6 +49,7 @@ export const productosIniciales: Producto[] = [
     unidadMedida: "pieza",
     stock: 36,
     precio: 12500,
+    precioMediaPieza: 7500,
     stockMinimo: 10,
   },
   {
@@ -54,6 +59,7 @@ export const productosIniciales: Producto[] = [
     unidadMedida: "pieza",
     stock: 12,
     precio: 9800,
+    precioMediaPieza: 6000,
     stockMinimo: 16,
   },
   {

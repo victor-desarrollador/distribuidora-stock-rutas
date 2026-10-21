@@ -9,6 +9,7 @@ Una decisión por archivo: `NNN-titulo.md`. Ver `BLUEPRINT.md`, sección 13.
 | N.º | Título | Versión | Estado |
 |---|---|---|---|
 | [001](001-rpc-privilegiadas.md) | Puerta de entrada SQL para operaciones privilegiadas | 1.2 | PROPUESTA — NO APROBADA |
+| [002](002-precios-independientes-pieza-media.md) | Precios comerciales independientes de pieza y media pieza | 1.0 | APROBADA |
 
 ADR-001 (v1.2, ronda 3 de correcciones) detalla sus puntos **PENDIENTE DE APROBACIÓN HUMANA** (P1–P20) en su sección 18; las recomendaciones que incluye son **no vinculantes** y no son decisiones vigentes. No existe aprobación humana de ADR-001.
 

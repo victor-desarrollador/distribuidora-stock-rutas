@@ -1,12 +1,13 @@
 
 import { useEffect, useState } from "react";
 
+import { CLAVES_STORAGE } from "../data/clavesStorage";
 import {
   camionesIniciales,
   type Camion,
 } from "../data/mockCamiones";
 
-const STORAGE_KEY = "distribuidora_camiones_demo_v2";
+const STORAGE_KEY = CLAVES_STORAGE.camiones;
 
 export function cargarCamiones(): Camion[] {
   try {

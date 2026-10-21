@@ -2,6 +2,7 @@
 // (BLUEPRINT.md v1.6 §7.1 y docs/requirements/migracion-unidades-prototipo.md).
 import { describe, expect, it } from "vitest";
 import { productosIniciales, type UnidadMedida } from "./mockProductos";
+import { precios_producto_validos } from "../domain/precios";
 
 describe("UnidadMedida sin kg", () => {
   it("ningún producto demo usa unidadMedida 'kg'", () => {
@@ -88,5 +89,45 @@ describe("Fiambres expresados en medias piezas", () => {
     expect(quesoBote?.categoria).toBe("Lácteos");
     expect(quesoBote?.unidadMedida).toBe("unidad");
     expect(Number.isInteger(quesoBote?.stock ?? -1)).toBe(true);
+  });
+});
+
+describe("Precios de los productos demo (ADR-002)", () => {
+  it("todo fiambre tiene precioMediaPieza válido", () => {
+    const fiambres = productosIniciales.filter((p) => p.categoria === "Fiambres");
+    expect(fiambres.length).toBeGreaterThan(0);
+    fiambres.forEach((p) => {
+      expect(p.precioMediaPieza).toBeDefined();
+      expect(
+        precios_producto_validos({
+          unidad_medida: p.unidadMedida,
+          precio: p.precio,
+          precio_media_pieza: p.precioMediaPieza,
+        })
+      ).toBe(true);
+    });
+  });
+
+  it("ningún lácteo tiene precioMediaPieza", () => {
+    productosIniciales
+      .filter((p) => p.categoria === "Lácteos")
+      .forEach((p) => {
+        expect(p.precioMediaPieza).toBeUndefined();
+        expect(
+          precios_producto_validos({
+            unidad_medida: p.unidadMedida,
+            precio: p.precio,
+          })
+        ).toBe(true);
+      });
+  });
+
+  it("valores demo aprobados (sin fórmula entre precios)", () => {
+    const por_nombre = new Map(
+      productosIniciales.map((p) => [p.nombre, [p.precio, p.precioMediaPieza]])
+    );
+    expect(por_nombre.get("Queso cremoso en pieza")).toEqual([12500, 7000]);
+    expect(por_nombre.get("Jamón cocido")).toEqual([12500, 7500]);
+    expect(por_nombre.get("Salame milán")).toEqual([9800, 6000]);
   });
 });

@@ -1,13 +1,15 @@
 
 import { useState } from "react";
 
+import { CLAVES_STORAGE } from "../data/clavesStorage";
+
 import {
   type MovimientoReparto,
   type ProductoMovimiento,
 } from "../data/mockMovimientos";
 import type { UnidadMedida } from "../data/mockProductos";
 
-const STORAGE_KEY = "distribuidora_movimientos_demo_v2";
+const STORAGE_KEY = CLAVES_STORAGE.movimientos;
 
 export function leerMovimientos(): MovimientoReparto[] {
   try {

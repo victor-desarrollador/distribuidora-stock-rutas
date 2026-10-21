@@ -1,11 +1,12 @@
 
 import { useState } from "react";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
 import type {
   RetornoDeposito,
   ItemRetorno,
 } from "../data/mockRetornos";
 
-const STORAGE_KEY = "distribuidora_retornos_demo_v2";
+const STORAGE_KEY = CLAVES_STORAGE.retornos;
 
 export function esCantidadValida(cantidad: number) {
   return (

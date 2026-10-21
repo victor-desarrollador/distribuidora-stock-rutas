@@ -5,9 +5,11 @@ import {
   productosIniciales,
   type Producto,
 } from "../data/mockProductos";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
 import { validar_combinacion_categoria_unidad } from "../domain/productos";
+import { precios_producto_validos } from "../domain/precios";
 
-const STORAGE_KEY = "distribuidora_productos_demo_v2";
+const STORAGE_KEY = CLAVES_STORAGE.productos;
 
 export function cargarProductos(): Producto[] {
   try {
@@ -36,8 +38,13 @@ export function cargarProductos(): Producto[] {
           producto.categoria,
           producto.unidadMedida
         ).valido &&
-        Number.isFinite(producto.precio) &&
-        producto.precio >= 0 &&
+        // Precios (ADR-002): máximo 2 decimales; pieza exige precio de media
+        // pieza y unidad no lo admite. Nada se completa ni se deriva.
+        precios_producto_validos({
+          unidad_medida: producto.unidadMedida,
+          precio: producto.precio,
+          precio_media_pieza: producto.precioMediaPieza,
+        }) &&
         Number.isFinite(producto.stock) &&
         producto.stock >= 0 &&
         Number.isFinite(producto.stockMinimo) &&

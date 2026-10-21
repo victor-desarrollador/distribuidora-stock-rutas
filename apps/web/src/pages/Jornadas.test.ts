@@ -8,6 +8,7 @@
 // enteras, nunca decimales, nunca negativos).
 
 import { describe, expect, it } from "vitest";
+import { subtotal_linea, sumar_importes } from "../domain/precios";
 import {
   cantidad_unidad_desde_texto,
   descomponer_medias,
@@ -102,5 +103,28 @@ describe("Jornadas — límite de stock en pieza / media (§7.4)", () => {
         }
       }
     }
+  });
+});
+
+describe("Jornadas — valor de carga con precios independientes (ADR-002)", () => {
+  // Misma forma de ítem que usa Jornadas.tsx (ItemCarga); el cálculo es la
+  // función de dominio, no una fórmula local.
+  const item = {
+    unidad_medida: "pieza",
+    cantidad: 9,
+    precio: 12500,
+    precio_media_pieza: 7000,
+  } as const;
+
+  it("4 piezas + media (c=9) no se infla ×2", () => {
+    const valor = subtotal_linea(item);
+    expect(valor).toBe(4 * 12500 + 7000);
+    expect(valor).not.toBe(9 * 12500);
+  });
+
+  it("el total de la carga suma lácteos y fiambres sin error binario", () => {
+    const fiambre = subtotal_linea(item);
+    const lacteo = subtotal_linea({ unidad_medida: "unidad", cantidad: 3, precio: 0.1 });
+    expect(sumar_importes([fiambre, lacteo])).toBe(57000.3);
   });
 });

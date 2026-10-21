@@ -1,10 +1,11 @@
 
 import { useState } from "react";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
 import type { Cobro } from "../data/mockCobros";
 import type { Venta } from "../data/mockVentas";
 
-const CLAVE_COBROS = "distribuidora_cobros_demo_v2";
-const CLAVE_VENTAS = "distribuidora_ventas_demo_v2";
+const CLAVE_COBROS = CLAVES_STORAGE.cobros;
+const CLAVE_VENTAS = CLAVES_STORAGE.ventas;
 
 function redondearDinero(valor: number) {
   return Math.round(valor * 100) / 100;

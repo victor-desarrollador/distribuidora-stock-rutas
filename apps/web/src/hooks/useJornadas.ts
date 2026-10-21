@@ -1,12 +1,15 @@
 
 import { useState } from "react";
 
+import { CLAVES_STORAGE } from "../data/clavesStorage";
+import { precios_producto_validos } from "../domain/precios";
+
 import {
   type Jornada,
   type CierreJornada,
 } from "../data/mockJornadas";
 
-const STORAGE_KEY = "distribuidora_jornadas_demo_v2";
+const STORAGE_KEY = CLAVES_STORAGE.jornadas;
 
 function cierreValido(cierre: unknown): cierre is CierreJornada {
   if (!cierre || typeof cierre !== "object") return false;
@@ -78,8 +81,11 @@ export function leerJornadas(): Jornada[] {
           ["unidad", "pieza"].includes(item.unidadMedida) &&
           Number.isFinite(item.cantidad) &&
           item.cantidad > 0 &&
-          Number.isFinite(item.precioReferencia) &&
-          item.precioReferencia >= 0
+          precios_producto_validos({
+            unidad_medida: item.unidadMedida,
+            precio: item.precioReferencia,
+            precio_media_pieza: item.precioMediaPieza,
+          })
         );
 
       if (!baseValida) return false;

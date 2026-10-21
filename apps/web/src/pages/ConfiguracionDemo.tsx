@@ -9,15 +9,16 @@ import {
 } from "lucide-react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
 
 // Claves de las operaciones que vamos a reiniciar.
 // No incluir productos, clientes, camiones ni sesión.
 const CLAVES_OPERACIONES = [
-  "distribuidora_jornadas_demo_v2",
-  "distribuidora_ventas_demo_v2",
-  "distribuidora_movimientos_demo_v2",
-  "distribuidora_retornos_demo_v2",
-  "distribuidora_cobros_demo_v2",
+  CLAVES_STORAGE.jornadas,
+  CLAVES_STORAGE.ventas,
+  CLAVES_STORAGE.movimientos,
+  CLAVES_STORAGE.retornos,
+  CLAVES_STORAGE.cobros,
 ] as const;
 
 const nombresModulos = [

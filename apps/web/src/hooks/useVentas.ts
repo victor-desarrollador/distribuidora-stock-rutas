@@ -1,8 +1,28 @@
 
 import { useState } from "react";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
+import {
+  precios_producto_validos,
+  subtotal_linea,
+} from "../domain/precios";
 import type { Venta } from "../data/mockVentas";
 
-const STORAGE_KEY = "distribuidora_ventas_demo_v2";
+const STORAGE_KEY = CLAVES_STORAGE.ventas;
+
+function subtotal_coincide(item: Venta["items"][number]): boolean {
+  try {
+    return (
+      subtotal_linea({
+        unidad_medida: item.unidadMedida,
+        cantidad: item.cantidad,
+        precio: item.precioUnitario,
+        precio_media_pieza: item.precioMediaPieza,
+      }) === item.subtotal
+    );
+  } catch {
+    return false;
+  }
+}
 
 export function cargarVentas(): Venta[] {
   try {
@@ -41,10 +61,14 @@ export function cargarVentas(): Venta[] {
             ["unidad", "pieza"].includes(item.unidadMedida) &&
             Number.isFinite(item.cantidad) &&
             item.cantidad > 0 &&
-            Number.isFinite(item.precioUnitario) &&
-            item.precioUnitario >= 0 &&
-            Number.isFinite(item.subtotal) &&
-            item.subtotal >= 0
+            // Historial de precios aplicados (ADR-002): el subtotal debe
+            // coincidir con la función de dominio.
+            precios_producto_validos({
+              unidad_medida: item.unidadMedida,
+              precio: item.precioUnitario,
+              precio_media_pieza: item.precioMediaPieza,
+            }) &&
+            subtotal_coincide(item)
         )
       );
     });
