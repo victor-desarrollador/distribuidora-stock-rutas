@@ -18,20 +18,31 @@ import {
   type TipoMovimiento,
   type MovimientoReparto,
   type ProductoMovimiento,
-  salidasPorMovimiento,
 } from "../data/mockMovimientos";
-
-// Eliminar ", type," de la importación anterior:
-// import { useMovimientos } from "../hooks/useMovimientos";
+import type { UnidadMedida } from "../data/mockProductos";
+import {
+  maximo_piezas_segun_disponible,
+  medias_a_texto,
+  puede_agregar_media,
+} from "../domain/cantidades";
+import {
+  cantidad_movimiento_desde_entrada,
+  disponibles_de_jornada,
+  salidas_de_jornada,
+  validar_stock_movimiento,
+} from "../domain/movimientos";
 
 type DatosFormulario = {
   tipo: TipoMovimiento;
   jornadaId: string;
   clienteId: string;
   productoId: string;
+  // unidad: cantidad entera. pieza: piezas completas (+ `media`).
   cantidad: string;
+  media: boolean;
   entregadoId: string;
   cantidadEntregada: string;
+  mediaEntregada: boolean;
   motivo: string;
 };
 
@@ -41,8 +52,10 @@ const inicial: DatosFormulario = {
   clienteId: "",
   productoId: "",
   cantidad: "",
+  media: false,
   entregadoId: "",
   cantidadEntregada: "",
+  mediaEntregada: false,
   motivo: "",
 };
 
@@ -56,6 +69,98 @@ const unidades = {
   unidad: "un.",
   pieza: "pzas.",
 };
+
+interface CampoCantidadProps {
+  etiqueta: string;
+  unidad: UnidadMedida | undefined;
+  texto: string;
+  media: boolean;
+  // Disponible canónico a mostrar (solo merma y producto entregado).
+  disponible?: number;
+  fondoBlanco?: boolean;
+  onChange: (texto: string, media: boolean) => void;
+}
+
+// Unidad: input entero. Pieza: piezas completas + media opcional; se muestra
+// el texto legible y se persiste solo el entero canónico (medias piezas).
+function CampoCantidad({
+  etiqueta,
+  unidad,
+  texto,
+  media,
+  disponible,
+  fondoBlanco,
+  onChange,
+}: CampoCantidadProps) {
+  const fondo = fondoBlanco ? " bg-white" : "";
+  const esPieza = unidad === "pieza";
+  const preview = unidad
+    ? cantidad_movimiento_desde_entrada(unidad, { texto, media })
+    : null;
+
+  const maxPiezas =
+    esPieza && disponible !== undefined
+      ? maximo_piezas_segun_disponible(disponible, media)
+      : undefined;
+  const piezasActuales = Number(texto);
+  const mediaBloqueada =
+    esPieza &&
+    disponible !== undefined &&
+    !media &&
+    Number.isInteger(piezasActuales) &&
+    !puede_agregar_media(disponible, piezasActuales);
+
+  return (
+    <div className="block space-y-2">
+      <label className="block space-y-2">
+        <span className="text-sm font-medium">
+          {etiqueta}
+          {esPieza ? " (piezas enteras)" : ""}
+        </span>
+        <input
+          type="number"
+          min="0"
+          max={maxPiezas}
+          step="1"
+          value={texto}
+          onChange={(e) => onChange(e.target.value, media)}
+          placeholder="0"
+          className={`min-h-14 w-full rounded-xl border border-slate-300 p-3${fondo}`}
+        />
+      </label>
+
+      {esPieza && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={media}
+            disabled={mediaBloqueada}
+            onChange={(e) => onChange(texto, e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          <span>Media pieza</span>
+        </label>
+      )}
+
+      {esPieza && preview !== null && (
+        <p className="text-xs text-slate-600">= {medias_a_texto(preview)}</p>
+      )}
+
+      {unidad && disponible !== undefined && (
+        <p className="text-xs text-blue-700">
+          Disponible: {textoCantidad(unidad, disponible)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Disponible y preview legibles según la unidad del producto.
+function textoCantidad(unidad: UnidadMedida, cantidad: number) {
+  return unidad === "pieza"
+    ? medias_a_texto(cantidad)
+    : `${cantidad} ${unidades[unidad]}`;
+}
 
 export default function Movimientos() {
   const { jornadas } = useJornadas();
@@ -108,43 +213,16 @@ export default function Movimientos() {
     [movimientos, formulario.jornadaId]
   );
 
-  // Cantidades que dejaron de estar disponibles.
-  const salidas = useMemo(() => {
-    const resultado: Record<number, number> = {};
+  // Cantidades canónicas que dejaron de estar disponibles.
+  const salidas = useMemo(
+    () => salidas_de_jornada(formulario.jornadaId, ventas, movimientosJornada),
+    [ventas, movimientosJornada, formulario.jornadaId]
+  );
 
-    for (const venta of ventas) {
-      if (venta.jornadaId !== formulario.jornadaId) continue;
-
-      for (const item of venta.items) {
-        resultado[item.productoId] =
-          (resultado[item.productoId] ?? 0) +
-          item.cantidad;
-      }
-    }
-
-    for (const movimiento of movimientosJornada) {
-      for (const item of salidasPorMovimiento(movimiento)) {
-        resultado[item.productoId] =
-          (resultado[item.productoId] ?? 0) +
-          item.cantidad;
-      }
-    }
-
-    return resultado;
-  }, [ventas, movimientosJornada, formulario.jornadaId]);
-
-  const disponibles = useMemo(() => {
-    const resultado: Record<number, number> = {};
-
-    for (const item of jornada?.items ?? []) {
-      resultado[item.productoId] = Math.max(
-        0,
-        item.cantidad - (salidas[item.productoId] ?? 0)
-      );
-    }
-
-    return resultado;
-  }, [jornada, salidas]);
+  const disponibles = useMemo(
+    () => disponibles_de_jornada(jornada?.items ?? [], salidas),
+    [jornada, salidas]
+  );
 
   function seleccionarTipo(tipo: TipoMovimiento) {
     setFormulario((actual) => ({
@@ -154,18 +232,6 @@ export default function Movimientos() {
     }));
     setError("");
     setMensaje("");
-  }
-
-  function cantidadValida(texto: string) {
-    if (!texto.trim()) return false;
-
-    const cantidad = Number(texto);
-
-    return (
-      Number.isFinite(cantidad) &&
-      cantidad > 0 &&
-      Number.isInteger(cantidad)
-    );
   }
 
   function guardarMovimiento() {
@@ -192,23 +258,34 @@ export default function Movimientos() {
       return;
     }
 
-    if (
-      !cantidadValida(formulario.cantidad)
-    ) {
+    const cantidad = cantidad_movimiento_desde_entrada(
+      productoDevuelto.unidadMedida,
+      { texto: formulario.cantidad, media: formulario.media }
+    );
+
+    if (cantidad === null) {
       setError("La cantidad del producto no es válida.");
       return;
     }
 
+    const cantidadEntregada =
+      formulario.tipo === "cambio" && productoEntregado
+        ? cantidad_movimiento_desde_entrada(
+            productoEntregado.unidadMedida,
+            {
+              texto: formulario.cantidadEntregada,
+              media: formulario.mediaEntregada,
+            }
+          )
+        : null;
+
     if (
       formulario.tipo === "cambio" &&
-      (!productoEntregado ||
-        !cantidadValida(formulario.cantidadEntregada))
+      (!productoEntregado || cantidadEntregada === null)
     ) {
       setError("Completá el producto de reemplazo y su cantidad.");
       return;
     }
-
-    const cantidad = Number(formulario.cantidad);
 
     const crearItem = (
       producto: typeof productoDevuelto,
@@ -253,7 +330,7 @@ export default function Movimientos() {
         producto: crearItem(productoDevuelto, cantidad),
       };
     } else {
-      if (!cliente || !productoEntregado) return;
+      if (!cliente || !productoEntregado || cantidadEntregada === null) return;
 
       movimiento = {
         ...base,
@@ -261,50 +338,13 @@ export default function Movimientos() {
         clienteId: cliente.id,
         nombreCliente: cliente.nombreComercio,
         productoDevuelto: crearItem(productoDevuelto, cantidad),
-        productoEntregado: crearItem(
-          productoEntregado,
-          Number(formulario.cantidadEntregada)
-        ),
+        productoEntregado: crearItem(productoEntregado, cantidadEntregada),
       };
     }
 
     // Volvemos a calcular el stock al registrar.
-    const resultado = registrarMovimiento(
-      movimiento,
-      (actuales) => {
-        const salidasNuevas = salidasPorMovimiento(movimiento);
-
-        for (const item of salidasNuevas) {
-          const cargado = jornada.items.find(
-            (p) => p.productoId === item.productoId
-          );
-
-          if (!cargado) {
-            return `${item.nombreProducto} no está cargado en el camión.`;
-          }
-
-          const vendido = ventas
-            .filter((v) => v.jornadaId === jornada.id)
-            .flatMap((v) => v.items)
-            .filter((p) => p.productoId === item.productoId)
-            .reduce((suma, p) => suma + p.cantidad, 0);
-
-          const descartado = actuales
-            .filter((m) => m.jornadaId === jornada.id)
-            .flatMap(salidasPorMovimiento)
-            .filter((p) => p.productoId === item.productoId)
-            .reduce((suma, p) => suma + p.cantidad, 0);
-
-          if (
-            item.cantidad >
-            cargado.cantidad - vendido - descartado + 0.000001
-          ) {
-            return `Stock insuficiente de ${item.nombreProducto}.`;
-          }
-        }
-
-        return null;
-      }
+    const resultado = registrarMovimiento(movimiento, (actuales) =>
+      validar_stock_movimiento(movimiento, jornada.items, ventas, actuales)
     );
 
     if (resultado) {
@@ -462,6 +502,7 @@ export default function Movimientos() {
                       ...formulario,
                       productoId: e.target.value,
                       cantidad: "",
+                      media: false,
                     })
                   }
                   className="min-h-14 w-full rounded-xl border border-slate-300 p-3"
@@ -480,31 +521,20 @@ export default function Movimientos() {
                 </select>
               </label>
 
-              <label className="block space-y-2">
-                <span className="text-sm font-medium">
-                  Cantidad *
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={formulario.cantidad}
-                  onChange={(e) =>
-                    setFormulario({
-                      ...formulario,
-                      cantidad: e.target.value,
-                    })
-                  }
-                  placeholder="0"
-                  className="min-h-14 w-full rounded-xl border border-slate-300 p-3"
-                />
-                {formulario.tipo === "merma" && productoDevuelto && (
-                  <p className="text-xs text-blue-700">
-                    Disponible: {disponibles[productoDevuelto.id] ?? 0}{" "}
-                    {unidades[productoDevuelto.unidadMedida]}
-                  </p>
-                )}
-              </label>
+              <CampoCantidad
+                etiqueta="Cantidad *"
+                unidad={productoDevuelto?.unidadMedida}
+                texto={formulario.cantidad}
+                media={formulario.media}
+                disponible={
+                  formulario.tipo === "merma" && productoDevuelto
+                    ? disponibles[productoDevuelto.id] ?? 0
+                    : undefined
+                }
+                onChange={(texto, media) =>
+                  setFormulario({ ...formulario, cantidad: texto, media })
+                }
+              />
             </div>
 
             {formulario.tipo === "cambio" && (
@@ -525,6 +555,7 @@ export default function Movimientos() {
                           ...formulario,
                           entregadoId: e.target.value,
                           cantidadEntregada: "",
+                          mediaEntregada: false,
                         })
                       }
                       className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3"
@@ -541,30 +572,25 @@ export default function Movimientos() {
                     </select>
                   </label>
 
-                  <label className="block space-y-2">
-                    <span className="text-sm font-medium">
-                      Cantidad entregada *
-                    </span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={formulario.cantidadEntregada}
-                      onChange={(e) =>
-                        setFormulario({
-                          ...formulario,
-                          cantidadEntregada: e.target.value,
-                        })
-                      }
-                      className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3"
-                    />
-                    {productoEntregado && (
-                      <p className="text-xs text-blue-700">
-                        Disponible: {disponibles[productoEntregado.id] ?? 0}{" "}
-                        {unidades[productoEntregado.unidadMedida]}
-                      </p>
-                    )}
-                  </label>
+                  <CampoCantidad
+                    etiqueta="Cantidad entregada *"
+                    unidad={productoEntregado?.unidadMedida}
+                    texto={formulario.cantidadEntregada}
+                    media={formulario.mediaEntregada}
+                    disponible={
+                      productoEntregado
+                        ? disponibles[productoEntregado.id] ?? 0
+                        : undefined
+                    }
+                    fondoBlanco
+                    onChange={(texto, media) =>
+                      setFormulario({
+                        ...formulario,
+                        cantidadEntregada: texto,
+                        mediaEntregada: media,
+                      })
+                    }
+                  />
                 </div>
               </div>
             )}
@@ -631,17 +657,26 @@ export default function Movimientos() {
                     <>
                       <p className="text-sm">
                         Devuelto: {m.productoDevuelto.nombreProducto} ·{" "}
-                        {m.productoDevuelto.cantidad}
+                        {textoCantidad(
+                          m.productoDevuelto.unidadMedida,
+                          m.productoDevuelto.cantidad
+                        )}
                       </p>
                       <p className="text-sm">
                         Entregado: {m.productoEntregado.nombreProducto} ·{" "}
-                        {m.productoEntregado.cantidad}
+                        {textoCantidad(
+                          m.productoEntregado.unidadMedida,
+                          m.productoEntregado.cantidad
+                        )}
                       </p>
                     </>
                   ) : (
                     <p className="text-sm">
-                      {m.producto.nombreProducto} · {m.producto.cantidad}{" "}
-                      {unidades[m.producto.unidadMedida]}
+                      {m.producto.nombreProducto} ·{" "}
+                      {textoCantidad(
+                        m.producto.unidadMedida,
+                        m.producto.cantidad
+                      )}
                     </p>
                   )}
 

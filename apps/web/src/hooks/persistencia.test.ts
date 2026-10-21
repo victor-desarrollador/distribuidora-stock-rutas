@@ -14,7 +14,14 @@ import {
 } from "../data/mockProductos";
 import { leerJornadas } from "./useJornadas";
 import { cargarVentas } from "./useVentas";
-import { leerMovimientos } from "./useMovimientos";
+import {
+  leerMovimientos,
+  registrarMovimientoOperacion,
+} from "./useMovimientos";
+import type {
+  MovimientoReparto,
+  ProductoMovimiento,
+} from "../data/mockMovimientos";
 import { leerRetornos } from "./useRetornos";
 import { cargarCamiones } from "./useCamiones";
 import { cargarClientes } from "./useClientes";
@@ -774,5 +781,105 @@ describe("L2B — Frontera de persistencia: useVentas total histórico", () => {
       JSON.stringify([{ ...ventaConCentavos, total: 402.001 }])
     );
     expect(cargarVentas()).toEqual([]);
+  });
+});
+
+describe("movimientos: persistencia falla cerrado ante cantidades inválidas", () => {
+  const producto = (
+    unidadMedida: string,
+    cantidad: unknown
+  ): Record<string, unknown> => ({
+    productoId: 1,
+    nombreProducto: "Producto",
+    unidadMedida,
+    cantidad,
+  });
+
+  const mermaGuardada = (p: Record<string, unknown>) => ({
+    id: "m1",
+    jornadaId: "j1",
+    camionId: 1,
+    fecha: "2026-10-21T10:00:00.000Z",
+    motivo: "Otro motivo",
+    tipo: "merma",
+    producto: p,
+    clienteId: null,
+    nombreCliente: null,
+  });
+
+  const guardar = (p: Record<string, unknown>) => {
+    mockLS._store.set(
+      CLAVES_STORAGE.movimientos,
+      JSON.stringify([mermaGuardada(p)])
+    );
+  };
+
+  it("pieza canónica entera y unidad entera son válidas", () => {
+    guardar(producto("pieza", 3));
+    expect(leerMovimientos()).toHaveLength(1);
+    guardar(producto("unidad", 2));
+    expect(leerMovimientos()).toHaveLength(1);
+  });
+
+  it.each([1.5, 0, -1, "2"])("cantidad %j → lectura inválida (vacío)", (c) => {
+    guardar(producto("pieza", c));
+    expect(leerMovimientos()).toEqual([]);
+    guardar(producto("unidad", c));
+    expect(leerMovimientos()).toEqual([]);
+  });
+
+  it("NaN e Infinity (serializados como null) → inválido", () => {
+    guardar(producto("unidad", NaN));
+    expect(leerMovimientos()).toEqual([]);
+    guardar(producto("pieza", Infinity));
+    expect(leerMovimientos()).toEqual([]);
+  });
+
+  it("kg no es una unidad válida", () => {
+    guardar(producto("kg", 1));
+    expect(leerMovimientos()).toEqual([]);
+  });
+
+  it("un solo ítem inválido invalida todo el payload", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.movimientos,
+      JSON.stringify([
+        mermaGuardada(producto("unidad", 2)),
+        { ...mermaGuardada(producto("unidad", 1.5)), id: "m2" },
+      ])
+    );
+    expect(leerMovimientos()).toEqual([]);
+  });
+
+  describe("registrarMovimientoOperacion", () => {
+    const mov = (p: ProductoMovimiento) =>
+      mermaGuardada(p as unknown as Record<string, unknown>) as unknown as MovimientoReparto;
+
+    it.each([0, 1.5, NaN, Infinity, -1])(
+      "rechaza cantidad %s sin persistir ni llamar a validar",
+      (c) => {
+        const guardar_fn = vi.fn();
+        const validar = vi.fn(() => null);
+        const error = registrarMovimientoOperacion(
+          mov({ productoId: 1, nombreProducto: "P", unidadMedida: "pieza", cantidad: c }),
+          validar,
+          () => [],
+          guardar_fn
+        );
+        expect(error).toMatch(/no es válido/);
+        expect(validar).not.toHaveBeenCalled();
+        expect(guardar_fn).not.toHaveBeenCalled();
+      }
+    );
+
+    it("persiste un movimiento válido y rechaza duplicados", () => {
+      const guardar_fn = vi.fn();
+      const m = mov({ productoId: 1, nombreProducto: "P", unidadMedida: "pieza", cantidad: 3 });
+      expect(registrarMovimientoOperacion(m, () => null, () => [], guardar_fn)).toBeNull();
+      expect(guardar_fn).toHaveBeenCalledWith([m]);
+      expect(
+        registrarMovimientoOperacion(m, () => null, () => [m], vi.fn())
+      ).toMatch(/ya está registrado/);
+    });
   });
 });

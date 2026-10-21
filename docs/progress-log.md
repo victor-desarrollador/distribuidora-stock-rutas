@@ -1,4 +1,27 @@
 ---
+## 21/10/2026 — Bloque 5: Movimientos compatibles con medias piezas
+
+**Rama:** `feat/movimientos-medias-piezas` · **Base:** `b48ce2c0c69ee6200e314af5727295e855228576` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Qué se hizo
+
+- Nuevo dominio puro `apps/web/src/domain/movimientos.ts`: entrada de UI (piezas enteras + media) a cantidad canónica, validador único de movimiento (`movimiento_valido`), salidas/disponibles de jornada y validación de stock con enteros exactos (se eliminó la tolerancia `+ 0.000001`). Reutiliza `domain/cantidades.ts`; no duplica conversiones.
+- `useMovimientos.ts`: lectura y escritura comparten `movimiento_valido` (cantidad entera > 0, unidad `unidad|pieza`, sin kg). Nueva `registrarMovimientoOperacion` valida antes de llamar al callback de stock y de persistir (falla cerrado; no corrige, trunca ni redondea).
+- `Movimientos.tsx`: producto `pieza` = piezas enteras + checkbox de media con preview (`medias_a_texto`); `unidad` = entero. Merma/devolución/cambio conservan su semántica; en cambio cada cantidad respeta la unidad de su producto. Historial y disponible legibles según unidad.
+- `mockMovimientos.ts` sin cambios: no contiene datos demo ni `kg`.
+- Storage sigue v4. No se tocaron `Retornos.tsx`, `Rendicion.tsx`, Supabase, SQL, RLS, RPC ni ADR-001.
+
+### Verificación
+
+Desde `apps/web/`: `typecheck` exit 0; `npm test -- --run` 12 archivos / 261 tests (217 antes); `lint` exit 0; `build` exit 0; `npx playwright test` 1 passed.
+
+### Riesgos pendientes
+
+- La duplicación estructural de stock del prototipo (Movimientos/Autoventa/Retornos) no se resolvió.
+- No hay test de componente de `Movimientos.tsx`; la UX queda cubierta por helpers de dominio y verificación manual pendiente.
+- Retornos y Rendición (`pieza_legacy`) siguen para bloques posteriores.
+
+---
 ## 21/10/2026 — Bloque 4: Autoventa compatible con ADR-003 (precio derivado de media pieza) — CIERRE POST-AUDITORÍA
 
 **Rama:** `feat/autoventa-medias-piezas` · **Código funcional auditado y pusheado:** `0fb6287640b9a0593544f2061a246ef1a3054411` · **Estado:** corrección funcional M-1 commiteada y pusheada a `origin/feat/autoventa-medias-piezas`; working tree limpio; pendiente únicamente de cierre documental y aprobación humana para merge; **sin deploy**; **ADR-001 continúa PROPUESTA — NO APROBADA**.

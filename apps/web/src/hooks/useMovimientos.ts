@@ -3,11 +3,8 @@ import { useState } from "react";
 
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 
-import {
-  type MovimientoReparto,
-  type ProductoMovimiento,
-} from "../data/mockMovimientos";
-import type { UnidadMedida } from "../data/mockProductos";
+import { type MovimientoReparto } from "../data/mockMovimientos";
+import { movimiento_valido } from "../domain/movimientos";
 
 const STORAGE_KEY = CLAVES_STORAGE.movimientos;
 
@@ -21,71 +18,44 @@ export function leerMovimientos(): MovimientoReparto[] {
 
     if (!Array.isArray(datos)) return [];
 
-    const esProducto = (p: unknown): p is Partial<ProductoMovimiento> =>
-      typeof p === "object" && p !== null;
-
-    // Validador estructural equivalente al original (sin `any`):
-    // chequea en runtime cada campo antes de leerlo.
-    const productoValido = (p: unknown) => {
-      if (!esProducto(p)) return false;
-
-      const { productoId, nombreProducto, unidadMedida, cantidad } = p;
-
-      return (
-        Number.isSafeInteger(productoId) &&
-        typeof nombreProducto === "string" &&
-        ["unidad", "pieza"].includes(
-          unidadMedida as UnidadMedida
-        ) &&
-        Number.isFinite(cantidad) &&
-        (cantidad as number) > 0
-      );
-    };
-
-    const valido = datos.every((m) => {
-      if (!m || typeof m !== "object") return false;
-
-      const baseValida =
-        typeof m.id === "string" &&
-        typeof m.jornadaId === "string" &&
-        Number.isSafeInteger(m.camionId) &&
-        typeof m.fecha === "string" &&
-        typeof m.motivo === "string";
-
-      if (!baseValida) return false;
-
-      if (m.tipo === "merma") {
-        return (
-          m.clienteId === null &&
-          m.nombreCliente === null &&
-          productoValido(m.producto)
-        );
-      }
-
-      const clienteValido =
-        Number.isSafeInteger(m.clienteId) &&
-        typeof m.nombreCliente === "string";
-
-      if (!clienteValido) return false;
-
-      if (m.tipo === "devolucion") {
-        return productoValido(m.producto);
-      }
-
-      if (m.tipo === "cambio") {
-        return (
-          productoValido(m.productoDevuelto) &&
-          productoValido(m.productoEntregado)
-        );
-      }
-
-      return false;
-    });
+    // Misma validación que la escritura (domain/movimientos.ts): falla cerrado.
+    const valido = datos.every(movimiento_valido);
 
     return valido ? datos as MovimientoReparto[] : [];
   } catch {
     return [];
   }
+}
+
+/**
+ * Operación pura de registro de movimiento: valida, persiste y devuelve el
+ * resultado. Separada del hook para ser testeable sin React.
+ */
+export function registrarMovimientoOperacion(
+  movimiento: MovimientoReparto,
+  validar: (actuales: MovimientoReparto[]) => string | null,
+  cargarActuales: () => MovimientoReparto[],
+  guardarActualizados: (movimientos: MovimientoReparto[]) => void
+): string | null {
+  // 1. Cantidades y estructura ANTES de cualquier efecto: no se corrige,
+  // trunca ni redondea nada.
+  if (!movimiento_valido(movimiento)) {
+    return "El movimiento no es válido: las cantidades deben ser enteros positivos.";
+  }
+
+  const actuales = cargarActuales();
+
+  if (actuales.some((m) => m.id === movimiento.id)) {
+    return "Este movimiento ya está registrado.";
+  }
+
+  const error = validar(actuales);
+
+  if (error) return error;
+
+  guardarActualizados([...actuales, movimiento]);
+
+  return null;
 }
 
 export function useMovimientos() {
@@ -97,26 +67,15 @@ export function useMovimientos() {
     validar: (actuales: MovimientoReparto[]) => string | null
   ): string | null {
     try {
-      const actuales = leerMovimientos();
-
-      if (actuales.some((m) => m.id === movimiento.id)) {
-        return "Este movimiento ya está registrado.";
-      }
-
-      const error = validar(actuales);
-
-      if (error) return error;
-
-      const actualizados = [...actuales, movimiento];
-
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(actualizados)
+      return registrarMovimientoOperacion(
+        movimiento,
+        validar,
+        leerMovimientos,
+        (nuevos) => {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos));
+          setMovimientos(nuevos);
+        }
       );
-
-      setMovimientos(actualizados);
-
-      return null;
     } catch {
       return "No se pudo guardar el movimiento.";
     }
