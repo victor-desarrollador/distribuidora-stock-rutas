@@ -1,8 +1,10 @@
 # ADR-002 — Precios comerciales independientes de pieza y media pieza
 
 **Fecha:** 20/10/2026
-**Estado:** APROBADA (aprobación humana explícita del dueño del proyecto, 20/10/2026)
+**Estado:** SUPERADA por [ADR-003](003-precio-derivado-media-pieza.md) (21/10/2026) en la política de precio de media pieza y en el versionado `localStorage` v3. Fue APROBADA el 20/10/2026 (aprobación humana explícita del dueño del proyecto).
 **Versión:** 1.0
+
+> **Documento histórico.** Se conserva sin cambios de contenido. El precio de media pieza ya **no** es configurable: se deriva del precio de pieza (ADR-003). Las claves operativas vigentes son `_demo_v4`. Lo no reemplazado (cantidad canónica, presentación comercial, decimales, centavos enteros, implementación única del subtotal, historial de precios aplicados) sigue vigente y está reiterado en ADR-003.
 
 > **Alcance.** Esta ADR autoriza el modelo de precios del **prototipo frontend** (`apps/web/`). **No aprueba** tablas, columnas, tipos ni restricciones SQL definitivas, ni migraciones, ni Supabase.
 
