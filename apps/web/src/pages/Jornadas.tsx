@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Truck,
   Plus,
@@ -11,6 +11,12 @@ import { useCamiones } from "../hooks/useCamiones";
 import { useProductos } from "../hooks/useProductos";
 import { useJornadas } from "../hooks/useJornadas";
 import { useRetornos } from "../hooks/useRetornos";
+import {
+  descomponer_medias,
+  es_cantidad_valida,
+  medias_a_texto,
+  recomponer_medias,
+} from "../domain/cantidades";
 import {
   type Jornada,
   type ItemCarga,
@@ -38,8 +44,10 @@ export default function Jornadas() {
   const [camionId, setCamionId] = useState("");
   const [chofer, setChofer] = useState("");
   const [zona, setZona] = useState("");
+  // Para productos "unidad": string con el entero.
+  // Para productos "pieza": objeto { piezas: number, media: boolean }.
   const [cantidades, setCantidades] = useState<
-    Record<number, string>
+    Record<number, string | { piezas: number; media: boolean }>
   >({});
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
@@ -103,20 +111,50 @@ export default function Jornadas() {
       producto.stock - (stockReservado[productoId] ?? 0)
     );
   }
+  // Convierte el estado de la UX (string para "unidad", {piezas, media} para "pieza")
+  // a la cantidad canónica (entero en unidad mínima) para persistir.
+  const obtenerCantidadCanonica = useCallback(
+    (productoId: number): number => {
+      const valor = cantidades[productoId];
+      if (!valor) return 0;
+      const producto = productos.find((p) => p.id === productoId);
+      if (!producto) return 0;
+      if (producto.unidadMedida === "unidad") {
+        return Number(valor);
+      }
+      // producto.unidadMedida === "pieza"
+      if (typeof valor === "object") {
+        try {
+          return recomponer_medias(valor);
+        } catch {
+          return 0;
+        }
+      }
+      // Fallback: si por alguna razón es string, intentar parsear
+      const n = Number(valor);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    },
+    [cantidades, productos]
+  );
+
+  const hayCantidadPositiva = useCallback(
+    (productoId: number): boolean => {
+      return obtenerCantidadCanonica(productoId) > 0;
+    },
+    [obtenerCantidadCanonica]
+  );
+
   const itemsSeleccionados = useMemo(() => {
     return productos
-      .filter((producto) => {
-        const cantidad = Number(cantidades[producto.id] ?? 0);
-        return cantidad > 0;
-      })
+      .filter((producto) => hayCantidadPositiva(producto.id))
       .map((producto): ItemCarga => ({
         productoId: producto.id,
         nombreProducto: producto.nombre,
         unidadMedida: producto.unidadMedida,
-        cantidad: Number(cantidades[producto.id]),
+        cantidad: obtenerCantidadCanonica(producto.id),
         precioReferencia: producto.precio,
       }));
-  }, [productos, cantidades]);
+  }, [productos, hayCantidadPositiva, obtenerCantidadCanonica]);
   const valorCarga = itemsSeleccionados.reduce(
     (total, item) =>
       total + item.cantidad * item.precioReferencia,
@@ -164,18 +202,14 @@ export default function Jornadas() {
     }
     // Comprobamos todas las cantidades antes de guardar.
     for (const producto of productos) {
-      const texto = cantidades[producto.id] ?? "";
-      if (!texto.trim()) continue;
-      const cantidad = Number(texto);
-      const cantidadValida =
-        Number.isFinite(cantidad) &&
-        cantidad >= 0 &&
-        Number.isInteger(cantidad);
+      const canonica = obtenerCantidadCanonica(producto.id);
+      if (canonica === 0) continue;
+      const cantidadValida = es_cantidad_valida(canonica);
       if (!cantidadValida) {
         setError(`Cantidad inválida: ${producto.nombre}`);
         return;
       }
-      if (cantidad > disponibilidad(producto.id)) {
+      if (canonica > disponibilidad(producto.id)) {
         setError(
           `No hay stock suficiente de ${producto.nombre}.`
         );
@@ -341,6 +375,109 @@ export default function Jornadas() {
           <div className="space-y-3">
             {productos.map((producto) => {
               const disponible = disponibilidad(producto.id);
+              const esPieza = producto.unidadMedida === "pieza";
+              const valorActual = cantidades[producto.id];
+              const disponibleTexto = esPieza
+                ? medias_a_texto(disponible)
+                : `${disponible} ${unidades[producto.unidadMedida]}`;
+
+              if (esPieza) {
+                // UX para fiambres: piezas enteras + media pieza opcional
+                const { piezas, media } = valorActual
+                  ? (typeof valorActual === "object"
+                      ? valorActual
+                      : descomponer_medias(Number(valorActual)))
+                  : { piezas: 0, media: false };
+
+                // Calcula la cantidad canónica actual de la UX
+                const cantidadCanonicaActual = recomponer_medias({ piezas, media });
+
+                // Máximo de piezas enteras permitidas, considerando si media ya está marcada.
+                // Si media=true, restamos 1 del disponible antes de dividir por 2.
+                const maxPiezas = media
+                  ? Math.max(0, Math.floor((disponible - 1) / 2))
+                  : Math.max(0, Math.floor(disponible / 2));
+
+                // Media está deshabilitada si:
+                // - no hay stock disponible (disponible < 1), o
+                // - las piezas actuales * 2 ya consumen todo el stock disponible (no queda espacio para media)
+                const mediaDisabled = disponible < 1 || piezas * 2 >= disponible;
+
+                // Helper para actualizar estado validando contra stock total
+                const actualizarCantidades = (nuevasPiezas: number, nuevaMedia: boolean) => {
+                  const canonica = recomponer_medias({ piezas: nuevasPiezas, media: nuevaMedia });
+                  if (canonica > disponible) {
+                    // No permitir transición que exceda el stock
+                    return;
+                  }
+                  setCantidades((actuales) => ({
+                    ...actuales,
+                    [producto.id]: { piezas: nuevasPiezas, media: nuevaMedia },
+                  }));
+                };
+
+                return (
+                  <div
+                    key={producto.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-4"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Package
+                        className="shrink-0 text-blue-600"
+                        size={23}
+                      />
+                      <div>
+                        <p className="font-medium text-slate-800">
+                          {producto.nombre}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          Disponible: {disponibleTexto}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {moneda(producto.precio)} por pieza
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <span>Piezas:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max={maxPiezas}
+                          step="1"
+                          value={piezas}
+                          onChange={(e) => {
+                            const nuevasPiezas = Math.max(0, Number(e.target.value));
+                            actualizarCantidades(nuevasPiezas, media);
+                          }}
+                          className="min-h-12 w-20 rounded-lg border border-slate-300 p-3 text-right"
+                          aria-label={`Piezas enteras de ${producto.nombre}`}
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={media}
+                          disabled={mediaDisabled}
+                          onChange={(e) => {
+                            const nuevaMedia = e.target.checked;
+                            actualizarCantidades(piezas, nuevaMedia);
+                          }}
+                          className="w-4 h-4 rounded border-slate-300"
+                          aria-label={`Media pieza de ${producto.nombre}`}
+                        />
+                        <span>Media pieza</span>
+                      </label>
+                      <span className="text-slate-500 text-sm">
+                        = {medias_a_texto(cantidadCanonicaActual)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              // UX para lácteos: solo entero
               return (
                 <div
                   key={producto.id}
@@ -356,8 +493,7 @@ export default function Jornadas() {
                         {producto.nombre}
                       </p>
                       <p className="text-sm text-slate-500">
-                        Disponible: {disponible}{" "}
-                        {unidades[producto.unidadMedida]}
+                        Disponible: {disponible} {unidades[producto.unidadMedida]}
                       </p>
                       <p className="text-xs text-slate-400">
                         {moneda(producto.precio)} por{" "}
@@ -372,7 +508,7 @@ export default function Jornadas() {
                       min="0"
                       max={disponible}
                       step="1"
-                      value={cantidades[producto.id] ?? ""}
+                      value={(cantidades[producto.id] as string) ?? ""}
                       onChange={(e) =>
                         setCantidades((actuales) => ({
                           ...actuales,
@@ -506,8 +642,9 @@ export default function Jornadas() {
                           {item.nombreProducto}
                         </td>
                         <td className="py-3 text-right">
-                          {item.cantidad}{" "}
-                          {unidades[item.unidadMedida]}
+                          {item.unidadMedida === "pieza"
+                            ? medias_a_texto(item.cantidad)
+                            : `${item.cantidad} ${unidades[item.unidadMedida]}`}
                         </td>
                       </tr>
                     ))}

@@ -69,3 +69,81 @@ export function medias_a_piezas(medias: number): number {
   validar_cantidad(medias);
   return medias / MEDIAS_POR_PIEZA;
 }
+
+/**
+ * Convierte una cantidad canónica (entero en medias piezas) a su
+ * representación legible para el usuario.
+ *
+ * Ejemplos:
+ *   0 -> "0 piezas"
+ *   1 -> "media pieza"
+ *   2 -> "1 pieza"
+ *   3 -> "1 pieza y media"
+ *   4 -> "2 piezas"
+ *   9 -> "4 piezas y media"
+ *
+ * Es solo para presentación: la cantidad canónica sigue siendo el entero.
+ */
+export function medias_a_texto(medias: number): string {
+  validar_cantidad(medias);
+  if (medias === 0) return "0 piezas";
+  if (medias === 1) return "media pieza";
+  const piezas = Math.floor(medias / MEDIAS_POR_PIEZA);
+  const tieneMedia = medias % MEDIAS_POR_PIEZA === 1;
+  if (piezas === 0) {
+    return tieneMedia ? "media pieza" : "0 piezas";
+  }
+  const piezaTexto = piezas === 1 ? "1 pieza" : `${piezas} piezas`;
+  return tieneMedia ? `${piezaTexto} y media` : piezaTexto;
+}
+
+/**
+ * Separa una cantidad canónica (entero en medias piezas) en sus dos
+ * componentes para la UX: cantidad de piezas enteras y si tiene media pieza.
+ *
+ * Devuelve: { piezas: número de piezas enteras, media: boolean }
+ *
+ * Ejemplos:
+ *   0 -> { piezas: 0, media: false }
+ *   1 -> { piezas: 0, media: true }
+ *   2 -> { piezas: 1, media: false }
+ *   3 -> { piezas: 1, media: true }
+ *   9 -> { piezas: 4, media: true }
+ */
+export function descomponer_medias(medias: number): {
+  piezas: number;
+  media: boolean;
+} {
+  validar_cantidad(medias);
+  return {
+    piezas: Math.floor(medias / MEDIAS_POR_PIEZA),
+    media: medias % MEDIAS_POR_PIEZA === 1,
+  };
+}
+
+/**
+ * Recompone la cantidad canónica a partir de los componentes de la UX:
+ * piezas enteras + media opcional.
+ *
+ * Ejemplos:
+ *   { piezas: 0, media: false } -> 0
+ *   { piezas: 0, media: true }  -> 1
+ *   { piezas: 1, media: false } -> 2
+ *   { piezas: 4, media: true }  -> 9
+ *
+ * Lanza Error si las entradas son inválidas.
+ */
+export function recomponer_medias({ piezas, media }: {
+  piezas: number;
+  media: boolean;
+}): number {
+  if (!Number.isFinite(piezas) || !Number.isInteger(piezas) || piezas < 0) {
+    throw new Error(
+      `Piezas inválidas: ${String(piezas)}. Se esperaba un entero finito mayor o igual que cero.`
+    );
+  }
+  if (typeof media !== "boolean") {
+    throw new Error("El campo 'media' debe ser booleano.");
+  }
+  return piezas * MEDIAS_POR_PIEZA + (media ? 1 : 0);
+}

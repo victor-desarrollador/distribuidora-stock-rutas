@@ -4,6 +4,89 @@ Una entrada por tarea, la más reciente arriba. Cada entrada: qué se hizo, arch
 
 
 ---
+## 20/10/2026 — Bloque 3: UX canónica de pieza / media pieza en Jornadas
+
+**Rama:** `feat/jornadas-medias-piezas` · **Base:** `9367b59e007838382503bbbb4914a7494d72fb22` · **Agente:** OpenCode · **Estado:** implementación completada y verificada localmente; **sin commit**, pendiente de revisión humana; **sin push, sin merge, sin deploy**; **ADR-001 continúa PROPUESTA — NO APROBADA**
+
+### Qué se hizo
+
+Adaptación del flujo/pantalla de **Jornadas** para que las cantidades respeten el dominio canónico aprobado (Blueprint §7.1, §7.4):
+
+**Lácteos (`unidad`):**
+- Input solo entero ≥ 0; rechaza fracciones, negativos, NaN, Infinity.
+- Muestra cantidad como "N un."
+
+**Fiambres (`pieza`):**
+- UX con dos controles explícitos:
+  - **Piezas enteras**: input numérico (entero ≥ 0, máximo según disponibilidad).
+  - **Media pieza**: checkbox (habilitado solo si hay disponibilidad para al menos 1 media).
+- Conversión al guardar: `medias = piezas * 2 + (media ? 1 : 0)` usando `recomponer_medias()`.
+- Persistencia exclusiva del entero canónico (medias piezas).
+- Visualización humana: `medias_a_texto()` → "0 piezas", "media pieza", "1 pieza", "1 pieza y media", "4 piezas y media", etc.
+- Al recargar jornada existente: descomposición canónica → UX via `descomponer_medias()`.
+
+**Cambios en dominio compartido (`apps/web/src/domain/cantidades.ts`):**
+- `medias_a_texto(medias: number): string` — presentación legible.
+- `descomponer_medias(medias: number): { piezas, media }` — separación para UX.
+- `recomponer_medias({ piezas, media }): number` — unión UX → canónico.
+
+**Tests agregados (`cantidades.test.ts`):**
+- `medias_a_texto`: 0→"0 piezas", 1→"media pieza", 2→"1 pieza", 3→"1 pieza y media", 4→"2 piezas", 9→"4 piezas y media".
+- `descomponer_medias` / `recomponer_medias`: casos 0-9, bidireccionalidad, rechazo de inválidos.
+- Validaciones: negativos, decimales no múltiplos de 0.5, NaN, Infinity.
+
+**Tests agregados (`Jornadas.test.ts`):**
+- Transformación UX → canónico: 4 piezas + media → 9.
+- Rehidratación: canónico 9 → 4 piezas + media.
+- Round-trip canónicos representativos.
+- `obtenerCantidadCanonica` para unidad y pieza.
+- Validación stock: `maxPiezasPermitidas` y `mediaDisabled` contra disponibles 1,2,3,8,9.
+- Prueba exhaustiva: todas las combinaciones canónicas ≤ disponible son permitidas; > disponible son bloqueadas.
+
+**Números exactos (Vitest):**
+- Baseline (9367b59): 89 tests
+- Actual: 107 tests
+- Incremento neto Bloque 3: +18 tests
+- Reparto:
+  - `cantidades.test.ts`: 20 → 27 (+7)
+  - `Jornadas.test.ts`: nuevo, 11 tests
+  - resto: sin cambios
+
+### Archivos modificados
+
+- `apps/web/src/domain/cantidades.ts` — helpers de presentación y descomposición/recomposición.
+- `apps/web/src/domain/cantidades.test.ts` — tests de presentación, descomposición, recomposición.
+- `apps/web/src/pages/Jornadas.tsx` — UX diferenciada por tipo de unidad; validación stock consistente; uso de `useCallback` para helpers; visualización con `medias_a_texto()`.
+- `apps/web/src/pages/Jornadas.test.ts` — nuevo; **test unitario de lógica aplicada a Jornadas** (transformación UX ↔ canónico, validación stock). **NO es test de integración/E2E**.
+
+### Cómo se verificó
+
+| Verificación | Resultado |
+|--------------|-----------|
+| `npm run typecheck` | exit 0 |
+| `npm test -- --run` | exit 0; 9 archivos, **107 pruebas** (+18 netas: +7 cantidades +11 Jornadas) |
+| `npm run lint` | exit 0; 0 errores, 0 advertencias |
+| `npm run build` | exit 0 (`dist/assets/index-pdHah06r.js`) |
+| `npx playwright test` (desde `apps/web/`) | exit 0; 1 prueba pasa |
+| `git diff --check` | sin espacios en blanco problemáticos |
+
+### Riesgos y pendientes
+
+1. **Alcance estricto respetado**: No se tocó Autoventa, Movimientos, Retornos, Rendición, Productos, Auth, routing, backend, Supabase, SQL, migraciones.
+2. **Datos v2**: La pantalla lee/escribe correctamente `localStorage v2` sin tocar claves v1.
+3. **Responsive**: Controles de piezas/media pieza usables en Android (sin hover, labels visibles, target táctil).
+4. **Fail closed**: Rechaza NaN, Infinity, negativos, cuartos de pieza, decimales no múltiplos de 0.5.
+5. **Pendientes de Bloque 3**: Autoventa, Movimientos, Retornos, Rendición requieren la misma adaptación de UX (fuera de este bloque).
+6. **ADR-001**: sigue PROPUESTA — NO APROBADA; esta tarea no la toca.
+7. **Sin commit/push/merge/deploy**: requiere revisión y autorización humana.
+8. **Cobertura de tests:**
+   - `Jornadas.test.ts` = **test unitario de lógica aplicada a Jornadas** (funciones puras, no monta componente React).
+   - **NO existe** test end-to-end que cubra: React → interacción usuario → guardar → localStorage v2 (cantidad=9) → recarga → reconstrucción UX {4, true}.
+   - Cobertura actual sí incluye: dominio canónico, recomposición/descomposición, presentación, restricciones stock, round-trip funciones puras.
+9. **Validación stock**: Corrección aplicada en ambas direcciones (maxPiezas + mediaDisabled + actualizarCantidades) + defensa save-time en `guardarPreparacion`.
+
+---
+
 ## 20/10/2026 — Actualización documental: Blueprint v1.7, PRD v0.6, research, arquitectura y bitácora
 
 **Rama:** `docs/actualizar-blueprint-v17-prd-v06` · **Base:** `86e58b36d252b5c1b8e31d5bd7d3e9910f94186a` · **Agente:** OpenCode · **Estado:** cambios **solo documentales** preparados **sin commit**, pendientes de revisión humana; **sin push, sin merge, sin deploy**; **ADR-001 continúa PROPUESTA — NO APROBADA**

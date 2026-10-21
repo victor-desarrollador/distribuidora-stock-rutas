@@ -15,9 +15,12 @@
 import { describe, expect, it } from "vitest";
 import {
   MEDIAS_POR_PIEZA,
+  descomponer_medias,
   es_cantidad_valida,
   medias_a_piezas,
+  medias_a_texto,
   piezas_a_medias,
+  recomponer_medias,
   validar_cantidad,
 } from "./cantidades";
 
@@ -135,5 +138,68 @@ describe("validación de cantidades (§7.4)", () => {
 
   it("validar_cantidad rechaza Infinity", () => {
     expect(() => validar_cantidad(Number.POSITIVE_INFINITY)).toThrow(Error);
+  });
+});
+
+describe("presentación de cantidades (§7.1)", () => {
+  it("medias_a_texto muestra la representación legible", () => {
+    expect(medias_a_texto(0)).toBe("0 piezas");
+    expect(medias_a_texto(1)).toBe("media pieza");
+    expect(medias_a_texto(2)).toBe("1 pieza");
+    expect(medias_a_texto(3)).toBe("1 pieza y media");
+    expect(medias_a_texto(4)).toBe("2 piezas");
+    expect(medias_a_texto(5)).toBe("2 piezas y media");
+    expect(medias_a_texto(8)).toBe("4 piezas");
+    expect(medias_a_texto(9)).toBe("4 piezas y media");
+    expect(medias_a_texto(10)).toBe("5 piezas");
+  });
+
+  it("medias_a_texto rechaza valores no válidos", () => {
+    expect(() => medias_a_texto(-1)).toThrow(Error);
+    expect(() => medias_a_texto(1.5)).toThrow(Error);
+    expect(() => medias_a_texto(Number.NaN)).toThrow(Error);
+    expect(() => medias_a_texto(Number.POSITIVE_INFINITY)).toThrow(Error);
+  });
+});
+
+describe("descomposición y recomposición para UX (§7.1)", () => {
+  it("descomponer_medias separa en piezas enteras + media", () => {
+    expect(descomponer_medias(0)).toEqual({ piezas: 0, media: false });
+    expect(descomponer_medias(1)).toEqual({ piezas: 0, media: true });
+    expect(descomponer_medias(2)).toEqual({ piezas: 1, media: false });
+    expect(descomponer_medias(3)).toEqual({ piezas: 1, media: true });
+    expect(descomponer_medias(4)).toEqual({ piezas: 2, media: false });
+    expect(descomponer_medias(9)).toEqual({ piezas: 4, media: true });
+  });
+
+  it("descomponer_medias rechaza valores no válidos", () => {
+    expect(() => descomponer_medias(-1)).toThrow(Error);
+    expect(() => descomponer_medias(1.5)).toThrow(Error);
+    expect(() => descomponer_medias(Number.NaN)).toThrow(Error);
+  });
+
+  it("recomponer_medias une piezas enteras + media al entero canónico", () => {
+    expect(recomponer_medias({ piezas: 0, media: false })).toBe(0);
+    expect(recomponer_medias({ piezas: 0, media: true })).toBe(1);
+    expect(recomponer_medias({ piezas: 1, media: false })).toBe(2);
+    expect(recomponer_medias({ piezas: 1, media: true })).toBe(3);
+    expect(recomponer_medias({ piezas: 2, media: false })).toBe(4);
+    expect(recomponer_medias({ piezas: 4, media: true })).toBe(9);
+  });
+
+  it("recomponer_medias rechaza entradas inválidas", () => {
+    expect(() => recomponer_medias({ piezas: -1, media: false })).toThrow(Error);
+    expect(() => recomponer_medias({ piezas: 1.5, media: false })).toThrow(Error);
+    // { piezas: 0, media: true } es válido (produce 1 media pieza)
+    expect(() => recomponer_medias({ piezas: Number.NaN, media: false })).toThrow(Error);
+    // @ts-expect-error: probamos que rechaza tipos inválidos en media
+    expect(() => recomponer_medias({ piezas: 0, media: "true" })).toThrow(Error);
+  });
+
+  it("descomponer y recomponer son operaciones inversas", () => {
+    for (const medias of [0, 1, 2, 3, 4, 5, 8, 9, 10, 15, 20]) {
+      const partes = descomponer_medias(medias);
+      expect(recomponer_medias(partes)).toBe(medias);
+    }
   });
 });
