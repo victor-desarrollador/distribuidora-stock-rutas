@@ -12,9 +12,11 @@ import { useProductos } from "../hooks/useProductos";
 import { useJornadas } from "../hooks/useJornadas";
 import { useRetornos } from "../hooks/useRetornos";
 import {
-  descomponer_medias,
+  cantidad_unidad_desde_texto,
   es_cantidad_valida,
+  maximo_piezas_segun_disponible,
   medias_a_texto,
+  puede_agregar_media,
   recomponer_medias,
 } from "../domain/cantidades";
 import {
@@ -120,9 +122,13 @@ export default function Jornadas() {
       const producto = productos.find((p) => p.id === productoId);
       if (!producto) return 0;
       if (producto.unidadMedida === "unidad") {
-        return Number(valor);
+        // Una cantidad de unidad inválida no cuenta como cantidad: devuelve 0
+        // y guardarPreparacion la reporta como error.
+        return typeof valor === "string"
+          ? (cantidad_unidad_desde_texto(valor) ?? 0)
+          : 0;
       }
-      // producto.unidadMedida === "pieza"
+      // producto.unidadMedida === "pieza": el estado es { piezas, media }.
       if (typeof valor === "object") {
         try {
           return recomponer_medias(valor);
@@ -130,9 +136,21 @@ export default function Jornadas() {
           return 0;
         }
       }
-      // Fallback: si por alguna razón es string, intentar parsear
-      const n = Number(valor);
-      return Number.isFinite(n) && n >= 0 ? n : 0;
+      return 0;
+    },
+    [cantidades, productos]
+  );
+
+  // Texto de unidad no vacío que no es un entero finito >= 0.
+  const hayCantidadUnidadInvalida = useCallback(
+    (productoId: number): boolean => {
+      const valor = cantidades[productoId];
+      const producto = productos.find((p) => p.id === productoId);
+      return (
+        producto?.unidadMedida === "unidad" &&
+        typeof valor === "string" &&
+        cantidad_unidad_desde_texto(valor) === null
+      );
     },
     [cantidades, productos]
   );
@@ -202,6 +220,10 @@ export default function Jornadas() {
     }
     // Comprobamos todas las cantidades antes de guardar.
     for (const producto of productos) {
+      if (hayCantidadUnidadInvalida(producto.id)) {
+        setError(`Cantidad inválida: ${producto.nombre}`);
+        return;
+      }
       const canonica = obtenerCantidadCanonica(producto.id);
       if (canonica === 0) continue;
       const cantidadValida = es_cantidad_valida(canonica);
@@ -386,7 +408,7 @@ export default function Jornadas() {
                 const { piezas, media } = valorActual
                   ? (typeof valorActual === "object"
                       ? valorActual
-                      : descomponer_medias(Number(valorActual)))
+                      : { piezas: 0, media: false })
                   : { piezas: 0, media: false };
 
                 // Calcula la cantidad canónica actual de la UX
@@ -394,14 +416,15 @@ export default function Jornadas() {
 
                 // Máximo de piezas enteras permitidas, considerando si media ya está marcada.
                 // Si media=true, restamos 1 del disponible antes de dividir por 2.
-                const maxPiezas = media
-                  ? Math.max(0, Math.floor((disponible - 1) / 2))
-                  : Math.max(0, Math.floor(disponible / 2));
+                const maxPiezas = maximo_piezas_segun_disponible(
+                  disponible,
+                  media
+                );
 
                 // Media está deshabilitada si:
                 // - no hay stock disponible (disponible < 1), o
                 // - las piezas actuales * 2 ya consumen todo el stock disponible (no queda espacio para media)
-                const mediaDisabled = disponible < 1 || piezas * 2 >= disponible;
+                const mediaDisabled = !puede_agregar_media(disponible, piezas);
 
                 // Helper para actualizar estado validando contra stock total
                 const actualizarCantidades = (nuevasPiezas: number, nuevaMedia: boolean) => {
@@ -448,7 +471,14 @@ export default function Jornadas() {
                           step="1"
                           value={piezas}
                           onChange={(e) => {
-                            const nuevasPiezas = Math.max(0, Number(e.target.value));
+                            const nuevasPiezas = Number(e.target.value);
+                            if (!es_cantidad_valida(nuevasPiezas)) {
+                              setError(
+                                `Piezas inválidas de ${producto.nombre}: se esperaba un entero mayor o igual que cero.`
+                              );
+                              return;
+                            }
+                            setError("");
                             actualizarCantidades(nuevasPiezas, media);
                           }}
                           className="min-h-12 w-20 rounded-lg border border-slate-300 p-3 text-right"

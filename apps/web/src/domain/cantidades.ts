@@ -147,3 +147,39 @@ export function recomponer_medias({ piezas, media }: {
   }
   return piezas * MEDIAS_POR_PIEZA + (media ? 1 : 0);
 }
+
+/**
+ * Máximo de piezas enteras que se pueden pedir sin superar el disponible
+ * (en medias piezas), dado si ya hay una media pieza marcada.
+ * Invariante: piezas * 2 + (tiene_media ? 1 : 0) <= disponible_medias.
+ */
+export function maximo_piezas_segun_disponible(
+  disponible_medias: number,
+  tiene_media: boolean
+): number {
+  const libre = disponible_medias - (tiene_media ? 1 : 0);
+  return Math.max(0, Math.floor(libre / MEDIAS_POR_PIEZA));
+}
+
+/**
+ * Indica si, con `piezas` enteras ya elegidas, todavía entra una media pieza
+ * más sin superar el disponible (en medias piezas).
+ */
+export function puede_agregar_media(
+  disponible_medias: number,
+  piezas: number
+): boolean {
+  return piezas * MEDIAS_POR_PIEZA + 1 <= disponible_medias;
+}
+
+/**
+ * Interpreta el texto de un input de producto por "unidad".
+ *   - vacío o solo espacios -> 0 (no seleccionado)
+ *   - entero finito >= 0     -> ese entero
+ *   - cualquier otra cosa    -> null (inválido; no se redondea ni trunca)
+ */
+export function cantidad_unidad_desde_texto(texto: string): number | null {
+  if (texto.trim() === "") return 0;
+  const n = Number(texto);
+  return es_cantidad_valida(n) ? n : null;
+}
