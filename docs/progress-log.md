@@ -1,7 +1,50 @@
 ---
-## 21/10/2026 — Bloque 4: Autoventa compatible con ADR-003 (precio derivado de media pieza) — POST-AUDITORÍA
+## 21/10/2026 — Bloque 4: Autoventa compatible con ADR-003 (precio derivado de media pieza) — CIERRE POST-AUDITORÍA
 
-**Rama:** `feat/autoventa-medias-piezas` · **HEAD:** `794efcdc5ed84527e7ebd394b8b3fac35cfd7754` · **Estado:** cambios **sin commit**, sin push, sin merge, sin deploy; pendiente de revisión humana y nueva auditoría independiente del hash; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+**Rama:** `feat/autoventa-medias-piezas` · **HEAD:** `0fb6287640b9a0593544f2061a246ef1a3054411` · **Estado:** corrección funcional M-1 commiteada y pusheada a `origin/feat/autoventa-medias-piezas`; working tree limpio; pendiente únicamente de cierre documental y aprobación humana para merge; **sin deploy**; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Secuencia de commits y auditoría
+
+1. **Bloque 3b — precios/presentaciones:** `4060a1f79646b291f7913b504c0db218cf035b70`
+   - Rama `feat/precios-presentaciones`.
+   - Auditorías completadas.
+   - Push realizado.
+
+2. **Bloque 4 — implementación inicial de Autoventa:** `794efcdc5ed84527e7ebd394b8b3fac35cfd7754`
+   - Adaptó Autoventa a cantidades canónicas en medias piezas.
+   - Introdujo `construirDetalleVenta`, `construirItemsVenta` y validación compartida.
+   - Auditoría detectó **M-1**: la frontera de escritura podía persistir una venta sin aplicar `venta_valida`.
+
+3. **Corrección post-auditoría M-1:** `0fb6287640b9a0593544f2061a246ef1a3054411`
+   - `registrarVenta` delega en `registrarVentaOperacion`.
+   - `venta_valida(venta)` se ejecuta antes de callback de stock, persistencia y actualización de estado.
+   - Lectura y escritura comparten el mismo validador monetario/estructural.
+   - Agregados 13 tests específicos de frontera de escritura.
+   - Suite vigente: **11 archivos / 217 tests passed**.
+   - Auditoría posterior: **APPROVED WITH CORRECTIONS**, sin hallazgos H/M; M-1 cerrado.
+   - Push realizado a `origin/feat/autoventa-medias-piezas`.
+
+### Estado funcional actual
+
+- **M-1 cerrado:** una venta monetariamente inválida no puede llegar al callback de stock ni persistirse.
+- **L-1 PRD cerrado:** el precio de media pieza figura como derivado según ADR-003.
+- **L-2 trazabilidad:** cerrado mediante esta actualización.
+- Storage continúa en v4.
+- No se tocó backend, SQL, Supabase, Auth, RLS, RPC ni ADR-001.
+- No quedan bloqueos funcionales conocidos del Bloque 4.
+- **Merge:** pendiente de aprobación humana final.
+- **Deploy:** no autorizado.
+
+### Verificación vigente
+
+Ejecutado desde `apps/web/` antes del commit `0fb6287640b9a0593544f2061a246ef1a3054411`:
+
+- `npm run typecheck` → exit 0
+- `npm test -- --run` → **11 archivos / 217 tests passed**
+- `npm run lint` → exit 0
+- `npm run build` → exit 0
+- `npx playwright test` → 1 passed
+- `git diff --check` → limpio
 
 ### Qué se hizo (commit original 4060a1f + correcciones post-auditoría)
 
