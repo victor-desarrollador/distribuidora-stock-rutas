@@ -1,4 +1,32 @@
 ---
+## 21/10/2026 — Hardening de Ventas y Cobros: storage corrupto fail-closed
+
+**Rama:** `fix/ventas-cobros-storage-fail-closed` · **Base:** `fbe2c96ad54bec759ca3296ec0e25d8e6986b141` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; claves `distribuidora_ventas_demo_v4` y `distribuidora_cobros_demo_v4` sin cambios; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Riesgo cerrado
+
+- **Ventas:** `cargarVentas()` usaba `if (!guardado)` y devolvía `[]` ante ausente, `""`, JSON inválido, no array o venta inválida; `registrarVentaOperacion` lo recibía como ledger actual, por lo que una venta nueva válida podía persistirse sobre un raw corrupto.
+- **Cobros:** `leerCobros()` (`if (!texto)`) devolvía `[]` ante corrupción y `registrarCobro` lo usaba como cobros actuales; además `leerVentasActuales()` trataba `""` como ventas vacías y usaba un validador débil (sin `venta_valida`), divergente del contrato de Ventas.
+
+### Qué se hizo
+
+- `useVentas.ts`: `leerVentas()` discriminada (`getItem === null` → `inicial []`; válida; corrupta) con `venta_valida` como único contrato; `cargarVentas()` pública sigue fail-closed visual. `registrarVentaOperacion` recibe la lectura discriminada: 1) `venta_valida`, 2) lectura (corrupto → abortar **sin** llamar al callback de stock), 3) duplicado, 4) stock, 5) persistir. `registrarVentaPersistida` es la frontera real sin React; el hook delega en ella.
+- `useCobros.ts`: `cobroValido` único, `leerCobrosDiscriminado()` y `leerCobros()` pública. `registrarCobroOperacion`/`registrarCobroPersistido`: 1) cobro válido, 2) cobros (corrupto → abortar), 3) duplicado, 4) ventas vía `leerVentas()` (corrupto → abortar; el saldo nunca se calcula sobre un `[]` artificial), 5) saldo, 6) persistir. Se eliminó `leerVentasActuales()`.
+- Cobros ahora exige que TODAS las ventas guardadas pasen `venta_valida` (antes, un validador parcial).
+- `domain/venta.test.ts`: el helper `crearCargarActuales` devuelve la lectura discriminada (único ajuste, por el cambio de firma).
+- Política monetaria sin cambios (`redondearDinero`, tolerancias `0.000001`/`0.009`, medios, saldo máximo).
+
+### Verificación
+
+Tests (ejecutados desde `apps/web/`): **13 archivos / 493 tests** (465 antes: +28). Matrices de corrupción (JSON inválido, `""`, `"null"`, objeto, elemento inválido) para ventas, cobros y ventas vistas desde cobros, con raw idéntico, `setItem` no llamado y callbacks de stock/guardado no invocados; prioridades de corrupción. Mutaciones temporales (ignorar corrupción en ventas / en ventas desde cobros / en cobros) hicieron fallar 5 / 6 / 7 tests y se revirtieron. Resultado de typecheck, lint, build y Playwright: ver entrega.
+
+### Riesgos pendientes
+
+- Deuda monetaria NO tocada: el dinero sigue en floats con `Math.round`/tolerancias (`0.000001`, `0.009`); migrar a centavos enteros es otro bloque.
+- `Rendicion` y `CuentasCorrientes` siguen leyendo con las lecturas públicas (`[]` ante corrupción) y no avisan; falta un aviso visible y una acción de recuperación aprobada.
+- Sin tests de componente ni de los hooks React; la frontera probada es la función persistida que usa cada hook.
+
+---
 ## 21/10/2026 — Hardening de catálogos (Productos, Camiones, Clientes): storage corrupto fail-closed
 
 **Rama:** `fix/catalogos-storage-fail-closed` · **Base:** `ca34192a90f4809c3b9033ed9c9e95d44e5bc3f1` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.

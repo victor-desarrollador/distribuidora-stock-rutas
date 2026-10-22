@@ -49,7 +49,11 @@ afterEach(() => {
 // Helper para crear ventas actuales simuladas
 const crearCargarActuales = (inicial: Venta[] = []) => {
   const store = [...inicial];
-  return () => [...store];
+  return (): { ok: true; ventas: Venta[]; estado: "valido" } => ({
+    ok: true,
+    ventas: [...store],
+    estado: "valido",
+  });
 };
 
 const crearGuardarActualizadas = () => {
@@ -682,7 +686,7 @@ describe("Frontera de escritura: registrarVentaOperacion rechaza inválidos ante
     expect(error).toBe("La venta ya fue registrada.");
     expect(validarStock).not.toHaveBeenCalled();
     // El store de cargar no debe modificarse
-    expect(cargar().length).toBe(1);
+    expect(cargar().ventas.length).toBe(1);
   });
 
   it("M. Validación de stock falla → rechazo, NO persistencia", () => {

@@ -21,7 +21,13 @@ import {
   crearJornadaPersistida,
   leerJornadas,
 } from "./useJornadas";
-import { cargarVentas } from "./useVentas";
+import {
+  cargarVentas,
+  registrarVentaOperacion,
+  registrarVentaPersistida,
+} from "./useVentas";
+import type { Venta } from "../data/mockVentas";
+import type { Cobro } from "../data/mockCobros";
 import {
   leerMovimientos,
   registrarMovimientoOperacion,
@@ -39,7 +45,11 @@ import {
 import type { RetornoDeposito } from "../data/mockRetornos";
 import { cargarCamiones, leerCamiones } from "./useCamiones";
 import { cargarClientes, leerClientes } from "./useClientes";
-import { leerCobros } from "./useCobros";
+import {
+  leerCobros,
+  registrarCobroOperacion,
+  registrarCobroPersistido,
+} from "./useCobros";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 
 // --- Simulación de localStorage para entorno node ---
@@ -1548,5 +1558,235 @@ describe("catálogos (productos, camiones, clientes): storage corrupto fail-clos
   it("claves sin cambios", () => {
     expect(CLAVES_STORAGE.productos).toBe("distribuidora_productos_demo_v4");
     expect(CLAVES_STORAGE.camiones).toBe("distribuidora_camiones_demo_v4");
+  });
+});
+
+describe("ventas y cobros: escritura fail-closed ante storage corrupto", () => {
+  const CV = CLAVES_STORAGE.ventas;
+  const CC = CLAVES_STORAGE.cobros;
+
+  const venta = (id: string, total = 200): Venta => ({
+    id,
+    jornadaId: "j1",
+    camionId: 1,
+    clienteId: 1,
+    nombreCliente: "Almacén",
+    fecha: "2026-10-21T10:00:00.000Z",
+    medioPago: "cuenta_corriente",
+    items: [
+      {
+        productoId: 1,
+        nombreProducto: "Yogur",
+        unidadMedida: "unidad",
+        cantidad: total / 100,
+        precioUnitario: 100,
+        subtotal: total,
+      },
+    ],
+    total,
+  });
+
+  const cobro = (id: string, importe = 50, extra: Partial<Cobro> = {}): Cobro => ({
+    id,
+    clienteId: 1,
+    nombreCliente: "Almacén",
+    jornadaId: null,
+    fecha: "2026-10-21T12:00:00.000Z",
+    importe,
+    medio: "efectivo",
+    referencia: "",
+    observaciones: "",
+    ...extra,
+  });
+
+  const CORRUPTOS_VENTAS: Array<[string, string]> = [
+    ["JSON inválido", "{no es json"],
+    ["string vacío presente", ""],
+    ["null", "null"],
+    ["objeto no array", JSON.stringify({ ventas: [] })],
+    [
+      "array con venta inválida (total inconsistente)",
+      JSON.stringify([{ ...venta("x"), total: 999 }]),
+    ],
+  ];
+
+  const CORRUPTOS_COBROS: Array<[string, string]> = [
+    ["JSON inválido", "{no es json"],
+    ["string vacío presente", ""],
+    ["null", "null"],
+    ["objeto no array", JSON.stringify({ cobros: [] })],
+    [
+      "array con cobro inválido (importe negativo)",
+      JSON.stringify([cobro("x", -5)]),
+    ],
+  ];
+
+  describe("ventas", () => {
+    it("A. storage ausente: la venta válida se registra y se persiste", () => {
+      const validar = vi.fn(() => null);
+      const v = venta("v1");
+      expect(mockLS.getItem(CV)).toBeNull();
+      expect(registrarVentaPersistida(v, validar)).toBeNull();
+      expect(validar).toHaveBeenCalledWith([]);
+      expect(JSON.parse(mockLS.getItem(CV) as string)).toEqual([v]);
+    });
+
+    it("B. storage válido: conserva el historial y agrega al final", () => {
+      const previa = venta("v0");
+      mockLS._store.set(CV, JSON.stringify([previa]));
+      const v = venta("v1");
+      expect(registrarVentaPersistida(v, () => null)).toBeNull();
+      expect(JSON.parse(mockLS.getItem(CV) as string)).toEqual([previa, v]);
+    });
+
+    it("C. venta duplicada: rechazo sin escribir ni llamar a validar", () => {
+      const crudo = JSON.stringify([venta("v1")]);
+      mockLS._store.set(CV, crudo);
+      mockLS.setItem.mockClear();
+      const validar = vi.fn(() => null);
+      expect(registrarVentaPersistida(venta("v1"), validar)).toMatch(/ya fue registrada/);
+      expect(validar).not.toHaveBeenCalled();
+      expect(mockLS.getItem(CV)).toBe(crudo);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    });
+
+    it("D. venta inválida: rechazo antes de leer, validar o escribir", () => {
+      const cargar = vi.fn();
+      const validar = vi.fn(() => null);
+      const guardar = vi.fn();
+      const error = registrarVentaOperacion({ ...venta("v1"), total: 1 }, validar, cargar, guardar);
+      expect(error).toMatch(/validación/);
+      expect(cargar).not.toHaveBeenCalled();
+      expect(validar).not.toHaveBeenCalled();
+      expect(guardar).not.toHaveBeenCalled();
+    });
+
+    it.each(CORRUPTOS_VENTAS)("storage corrupto — %s: falla, sin validar de stock, sin setItem, raw intacto", (_n, crudo) => {
+      mockLS._store.set(CV, crudo);
+      mockLS.setItem.mockClear();
+      const antes = mockLS.getItem(CV);
+      const validar = vi.fn(() => null);
+      const alGuardar = vi.fn();
+      const error = registrarVentaPersistida(venta("v1"), validar, alGuardar);
+      expect(error).toMatch(/No se puede registrar/);
+      expect(validar).not.toHaveBeenCalled();
+      expect(alGuardar).not.toHaveBeenCalled();
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+      expect(mockLS.getItem(CV)).toBe(antes);
+      expect(mockLS.getItem(CV)).toBe(crudo);
+      // La lectura pública para la UI sigue siendo [] y tampoco escribe.
+      expect(cargarVentas()).toEqual([]);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cobros", () => {
+    const conVentas = () =>
+      mockLS._store.set(CV, JSON.stringify([venta("v1", 200)]));
+
+    it("A. cobros ausentes + ventas con deuda: el cobro válido se registra", () => {
+      conVentas();
+      expect(mockLS.getItem(CC)).toBeNull();
+      const c = cobro("c1", 50);
+      expect(registrarCobroPersistido(c)).toBeNull();
+      expect(JSON.parse(mockLS.getItem(CC) as string)).toEqual([c]);
+    });
+
+    it("B. cobros válidos: conserva el historial y agrega", () => {
+      conVentas();
+      const previo = cobro("c0", 50);
+      mockLS._store.set(CC, JSON.stringify([previo]));
+      const c = cobro("c1", 100);
+      expect(registrarCobroPersistido(c)).toBeNull();
+      expect(JSON.parse(mockLS.getItem(CC) as string)).toEqual([previo, c]);
+    });
+
+    it("C. cobro duplicado: rechazo sin escribir", () => {
+      conVentas();
+      const crudo = JSON.stringify([cobro("c1", 50)]);
+      mockLS._store.set(CC, crudo);
+      mockLS.setItem.mockClear();
+      expect(registrarCobroPersistido(cobro("c1", 50))).toMatch(/ya fue registrado/);
+      expect(mockLS.getItem(CC)).toBe(crudo);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    });
+
+    it("D. transferencia sin referencia: rechazo", () => {
+      conVentas();
+      const error = registrarCobroPersistido(cobro("c1", 50, { medio: "transferencia", referencia: "  " }));
+      expect(error).toMatch(/referencia/);
+      expect(mockLS.getItem(CC)).toBeNull();
+    });
+
+    it("E. cobro mayor al saldo: rechazo", () => {
+      conVentas();
+      expect(registrarCobroPersistido(cobro("c1", 250))).toMatch(/supera el saldo/);
+      expect(mockLS.getItem(CC)).toBeNull();
+    });
+
+    it.each(CORRUPTOS_COBROS)("cobros corruptos — %s: falla, sin setItem, raw de cobros intacto", (_n, crudo) => {
+      conVentas();
+      mockLS._store.set(CC, crudo);
+      mockLS.setItem.mockClear();
+      const alGuardar = vi.fn();
+      const error = registrarCobroPersistido(cobro("c1", 50), alGuardar);
+      expect(error).toMatch(/No se puede registrar/);
+      expect(alGuardar).not.toHaveBeenCalled();
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+      expect(mockLS.getItem(CC)).toBe(crudo);
+      expect(leerCobros()).toEqual([]);
+    });
+
+    it.each(CORRUPTOS_VENTAS)("ventas corruptas desde cobros — %s: no persiste ni calcula saldo sobre []", (_n, crudoVentas) => {
+      for (const crudoCobros of [null, JSON.stringify([cobro("c0", 10)])]) {
+        mockLS._store.clear();
+        mockLS._store.set(CV, crudoVentas);
+        if (crudoCobros !== null) mockLS._store.set(CC, crudoCobros);
+        mockLS.setItem.mockClear();
+        const alGuardar = vi.fn();
+        // Importe que excedería el saldo si se calculara sobre [] (saldo 0).
+        const error = registrarCobroPersistido(cobro("c1", 5000), alGuardar);
+        expect(error).toMatch(/No se pudieron verificar las ventas/);
+        expect(alGuardar).not.toHaveBeenCalled();
+        expect(mockLS.setItem).not.toHaveBeenCalled();
+        expect(mockLS.getItem(CV)).toBe(crudoVentas);
+        expect(mockLS.getItem(CC)).toBe(crudoCobros);
+      }
+    });
+
+    it("prioridad A: cobros corruptos + cobro duplicado → corrupción, sin escribir", () => {
+      conVentas();
+      mockLS._store.set(CC, "{roto");
+      mockLS.setItem.mockClear();
+      expect(registrarCobroPersistido(cobro("c1", 50))).toMatch(/No se puede registrar/);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    });
+
+    it("prioridad B: cobros válidos + ventas corruptas → falla por ventas", () => {
+      mockLS._store.set(CC, JSON.stringify([cobro("c0", 10)]));
+      mockLS._store.set(CV, "");
+      mockLS.setItem.mockClear();
+      expect(registrarCobroPersistido(cobro("c1", 5))).toMatch(/ventas/);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    });
+
+    it("prioridad C: cobros corruptos no consultan ventas (guardar/ventas no se invocan)", () => {
+      const cargarVentasActuales = vi.fn();
+      const guardar = vi.fn();
+      const error = registrarCobroOperacion(
+        cobro("c1", 50),
+        () => ({ ok: false, estado: "corrupto", error: "roto" }),
+        cargarVentasActuales,
+        guardar
+      );
+      expect(error).toMatch(/No se puede registrar/);
+      expect(cargarVentasActuales).not.toHaveBeenCalled();
+      expect(guardar).not.toHaveBeenCalled();
+    });
+
+    it("las claves de ventas y cobros siguen siendo v4", () => {
+      expect(CV).toBe("distribuidora_ventas_demo_v4");
+      expect(CC).toBe("distribuidora_cobros_demo_v4");
+    });
   });
 });
