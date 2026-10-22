@@ -16,6 +16,8 @@ import {
 } from "../data/mockCamiones";
 
 import { useCamiones } from "../hooks/useCamiones";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 type FormularioCamion = {
   nombre: string;
@@ -44,7 +46,8 @@ const etiquetasEstado: Record<EstadoCamion, string> = {
 };
 
 export default function Camiones() {
-  const { camiones, setCamiones } = useCamiones();
+  const { camiones, actualizarCamiones, estadoLectura } = useCamiones();
+  const estadoOperacion = estadoStorageOperativo({ camiones: estadoLectura });
 
   const [busqueda, setBusqueda] = useState("");
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
@@ -83,6 +86,7 @@ export default function Camiones() {
   }
 
   function abrirNuevoCamion() {
+    if (estadoOperacion.bloqueado) return;
     cancelarFormulario();
     setMensaje("");
     setMostrarFormulario(true);
@@ -111,6 +115,7 @@ export default function Camiones() {
 
   function guardarCamion(evento: React.SubmitEvent<HTMLFormElement>) {
     evento.preventDefault();
+    if (estadoOperacion.bloqueado) return;
 
     const nombre = formulario.nombre.trim();
     const patente = formulario.patente
@@ -154,7 +159,7 @@ export default function Camiones() {
         return;
       }
 
-      setCamiones((anteriores) =>
+      const guardado = actualizarCamiones((anteriores) =>
         anteriores.map((camion) =>
           camion.id === camionEditando
             ? { ...camion, ...datos, estado: formulario.estado }
@@ -162,9 +167,16 @@ export default function Camiones() {
         )
       );
 
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el camión en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
+
       setMensaje("Camión actualizado correctamente.");
     } else {
-      setCamiones((anteriores) => [
+      const guardado = actualizarCamiones((anteriores) => [
         ...anteriores,
         {
           id: Math.max(0, ...anteriores.map((c) => c.id)) + 1,
@@ -172,6 +184,13 @@ export default function Camiones() {
           estado: formulario.estado,
         },
       ]);
+
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el camión en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
 
       setMensaje("Camión registrado correctamente.");
     }
@@ -195,12 +214,15 @@ export default function Camiones() {
         <button
           type="button"
           onClick={abrirNuevoCamion}
+          disabled={estadoOperacion.bloqueado}
           className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700"
         >
           <Plus size={20} />
           Nuevo camión
         </button>
       </div>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {/* Estadísticas */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -355,6 +377,7 @@ export default function Camiones() {
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="submit"
+              disabled={estadoOperacion.bloqueado}
               className="min-h-11 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white"
             >
               {camionEditando === null

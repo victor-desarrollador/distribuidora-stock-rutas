@@ -8,30 +8,43 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-import { useJornadas } from "../hooks/useJornadas";
+import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
 import { useClientes } from "../hooks/useClientes";
 import { useProductos } from "../hooks/useProductos";
-import { useVentas } from "../hooks/useVentas";
+import { leerVentas, useVentas } from "../hooks/useVentas";
 import { useMovimientos} from "../hooks/useMovimientos";
 import {
   type TipoMovimiento,
   type MovimientoReparto,
   type ProductoMovimiento,
-  salidasPorMovimiento,
 } from "../data/mockMovimientos";
-
-// Eliminar ", type," de la importación anterior:
-// import { useMovimientos } from "../hooks/useMovimientos";
+import type { UnidadMedida } from "../data/mockProductos";
+import {
+  maximo_piezas_segun_disponible,
+  medias_a_texto,
+  puede_agregar_media,
+} from "../domain/cantidades";
+import {
+  cantidad_movimiento_desde_entrada,
+  disponibilidad_de_jornada,
+  validar_stock_movimiento,
+} from "../domain/movimientos";
+import { revalidar_jornada_para_operacion } from "../domain/jornadas";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 type DatosFormulario = {
   tipo: TipoMovimiento;
   jornadaId: string;
   clienteId: string;
   productoId: string;
+  // unidad: cantidad entera. pieza: piezas completas (+ `media`).
   cantidad: string;
+  media: boolean;
   entregadoId: string;
   cantidadEntregada: string;
+  mediaEntregada: boolean;
   motivo: string;
 };
 
@@ -41,8 +54,10 @@ const inicial: DatosFormulario = {
   clienteId: "",
   productoId: "",
   cantidad: "",
+  media: false,
   entregadoId: "",
   cantidadEntregada: "",
+  mediaEntregada: false,
   motivo: "",
 };
 
@@ -55,18 +70,120 @@ const etiquetas = {
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 
-export default function Movimientos() {
-  const { jornadas } = useJornadas();
-  const { camiones } = useCamiones();
-  const { clientes } = useClientes();
-  const { productos } = useProductos();
-  const { ventas } = useVentas();
+interface CampoCantidadProps {
+  etiqueta: string;
+  unidad: UnidadMedida | undefined;
+  texto: string;
+  media: boolean;
+  // Disponible canónico a mostrar (solo merma y producto entregado).
+  disponible?: number;
+  fondoBlanco?: boolean;
+  onChange: (texto: string, media: boolean) => void;
+}
 
-  const { movimientos, registrarMovimiento } =
-    useMovimientos();
+// Unidad: input entero. Pieza: piezas completas + media opcional; se muestra
+// el texto legible y se persiste solo el entero canónico (medias piezas).
+function CampoCantidad({
+  etiqueta,
+  unidad,
+  texto,
+  media,
+  disponible,
+  fondoBlanco,
+  onChange,
+}: CampoCantidadProps) {
+  const fondo = fondoBlanco ? " bg-white" : "";
+  const esPieza = unidad === "pieza";
+  const preview = unidad
+    ? cantidad_movimiento_desde_entrada(unidad, { texto, media })
+    : null;
+
+  const maxPiezas =
+    esPieza && disponible !== undefined
+      ? maximo_piezas_segun_disponible(disponible, media)
+      : undefined;
+  const piezasActuales = Number(texto);
+  const mediaBloqueada =
+    esPieza &&
+    disponible !== undefined &&
+    !media &&
+    Number.isInteger(piezasActuales) &&
+    !puede_agregar_media(disponible, piezasActuales);
+
+  return (
+    <div className="block space-y-2">
+      <label className="block space-y-2">
+        <span className="text-sm font-medium">
+          {etiqueta}
+          {esPieza ? " (piezas enteras)" : ""}
+        </span>
+        <input
+          type="number"
+          min="0"
+          max={maxPiezas}
+          step="1"
+          value={texto}
+          onChange={(e) => onChange(e.target.value, media)}
+          placeholder="0"
+          className={`min-h-14 w-full rounded-xl border border-slate-300 p-3${fondo}`}
+        />
+      </label>
+
+      {esPieza && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={media}
+            disabled={mediaBloqueada}
+            onChange={(e) => onChange(texto, e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          <span>Media pieza</span>
+        </label>
+      )}
+
+      {esPieza && preview !== null && (
+        <p className="text-xs text-slate-600">= {medias_a_texto(preview)}</p>
+      )}
+
+      {unidad && disponible !== undefined && (
+        <p className="text-xs text-blue-700">
+          Disponible: {textoCantidad(unidad, disponible)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Disponible y preview legibles según la unidad del producto.
+function textoCantidad(unidad: UnidadMedida, cantidad: number) {
+  return unidad === "pieza"
+    ? medias_a_texto(cantidad)
+    : `${cantidad} ${unidades[unidad]}`;
+}
+
+export default function Movimientos() {
+  const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const { clientes, estadoLectura: estadoClientes } = useClientes();
+  const { productos, estadoLectura: estadoProductos } = useProductos();
+  const { ventas, estadoLectura: estadoVentas } = useVentas();
+
+  const {
+    movimientos,
+    registrarMovimiento,
+    estadoLectura: estadoMovimientos,
+  } = useMovimientos();
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    camiones: estadoCamiones,
+    clientes: estadoClientes,
+    productos: estadoProductos,
+    ventas: estadoVentas,
+    movimientos: estadoMovimientos,
+  });
 
   const [formulario, setFormulario] =
     useState<DatosFormulario>(inicial);
@@ -74,12 +191,16 @@ export default function Movimientos() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  const jornadasAbiertas = jornadas.filter(
-    (j) => j.estado === "abierta"
+  const jornadasAbiertas = useMemo(
+    () => jornadas.filter((j) => j.estado === "abierta"),
+    [jornadas]
   );
 
-  const jornada = jornadasAbiertas.find(
-    (j) => j.id === formulario.jornadaId
+  // Referencia estable: evita invalidar en cada render los
+  // useMemo que dependen de `jornada`.
+  const jornada = useMemo(
+    () => jornadasAbiertas.find((j) => j.id === formulario.jornadaId),
+    [jornadasAbiertas, formulario.jornadaId]
   );
 
   const cliente = clientes.find(
@@ -97,47 +218,31 @@ export default function Movimientos() {
   // Devoluciones y cambios solo usan clientes activos.
   const requiereCliente = formulario.tipo !== "merma";
 
-  const movimientosJornada = movimientos.filter(
-    (m) => m.jornadaId === formulario.jornadaId
+  const movimientosJornada = useMemo(
+    () =>
+      movimientos.filter(
+        (m) => m.jornadaId === formulario.jornadaId
+      ),
+    [movimientos, formulario.jornadaId]
   );
 
-  // Cantidades que dejaron de estar disponibles.
-  const salidas = useMemo(() => {
-    const resultado: Record<number, number> = {};
+  // Disponibilidad canónica: misma cadena de dominio que la validación previa
+  // al registro. Si el cálculo es inseguro no se muestra un saldo aproximado.
+  const disponibilidad = useMemo(
+    () =>
+      disponibilidad_de_jornada(
+        formulario.jornadaId,
+        jornada?.items ?? [],
+        ventas,
+        movimientosJornada
+      ),
+    [jornada, ventas, movimientosJornada, formulario.jornadaId]
+  );
 
-    for (const venta of ventas) {
-      if (venta.jornadaId !== formulario.jornadaId) continue;
-
-      for (const item of venta.items) {
-        resultado[item.productoId] =
-          (resultado[item.productoId] ?? 0) +
-          item.cantidad;
-      }
-    }
-
-    for (const movimiento of movimientosJornada) {
-      for (const item of salidasPorMovimiento(movimiento)) {
-        resultado[item.productoId] =
-          (resultado[item.productoId] ?? 0) +
-          item.cantidad;
-      }
-    }
-
-    return resultado;
-  }, [ventas, movimientos, formulario.jornadaId]);
-
-  const disponibles = useMemo(() => {
-    const resultado: Record<number, number> = {};
-
-    for (const item of jornada?.items ?? []) {
-      resultado[item.productoId] = Math.max(
-        0,
-        item.cantidad - (salidas[item.productoId] ?? 0)
-      );
-    }
-
-    return resultado;
-  }, [jornada, salidas]);
+  const disponibles = useMemo(
+    () => (disponibilidad.ok ? disponibilidad.disponibles : {}),
+    [disponibilidad]
+  );
 
   function seleccionarTipo(tipo: TipoMovimiento) {
     setFormulario((actual) => ({
@@ -149,26 +254,10 @@ export default function Movimientos() {
     setMensaje("");
   }
 
-  function cantidadValida(
-    texto: string,
-    unidad: "unidad" | "pieza" | "kg"
-  ) {
-    if (!texto.trim()) return false;
-
-    const cantidad = Number(texto);
-
-    return (
-      Number.isFinite(cantidad) &&
-      cantidad > 0 &&
-      (unidad === "kg" || Number.isInteger(cantidad)) &&
-      (unidad !== "kg" ||
-        Math.round(cantidad * 1000) === cantidad * 1000)
-    );
-  }
-
   function guardarMovimiento() {
     setMensaje("");
     setError("");
+    if (estadoOperacion.bloqueado) return;
 
     if (!jornada) {
       setError("Seleccioná una jornada abierta.");
@@ -190,29 +279,34 @@ export default function Movimientos() {
       return;
     }
 
-    if (
-      !cantidadValida(
-        formulario.cantidad,
-        productoDevuelto.unidadMedida
-      )
-    ) {
+    const cantidad = cantidad_movimiento_desde_entrada(
+      productoDevuelto.unidadMedida,
+      { texto: formulario.cantidad, media: formulario.media }
+    );
+
+    if (cantidad === null) {
       setError("La cantidad del producto no es válida.");
       return;
     }
 
+    const cantidadEntregada =
+      formulario.tipo === "cambio" && productoEntregado
+        ? cantidad_movimiento_desde_entrada(
+            productoEntregado.unidadMedida,
+            {
+              texto: formulario.cantidadEntregada,
+              media: formulario.mediaEntregada,
+            }
+          )
+        : null;
+
     if (
       formulario.tipo === "cambio" &&
-      (!productoEntregado ||
-        !cantidadValida(
-          formulario.cantidadEntregada,
-          productoEntregado.unidadMedida
-        ))
+      (!productoEntregado || cantidadEntregada === null)
     ) {
       setError("Completá el producto de reemplazo y su cantidad.");
       return;
     }
-
-    const cantidad = Number(formulario.cantidad);
 
     const crearItem = (
       producto: typeof productoDevuelto,
@@ -257,7 +351,7 @@ export default function Movimientos() {
         producto: crearItem(productoDevuelto, cantidad),
       };
     } else {
-      if (!cliente || !productoEntregado) return;
+      if (!cliente || !productoEntregado || cantidadEntregada === null) return;
 
       movimiento = {
         ...base,
@@ -265,51 +359,38 @@ export default function Movimientos() {
         clienteId: cliente.id,
         nombreCliente: cliente.nombreComercio,
         productoDevuelto: crearItem(productoDevuelto, cantidad),
-        productoEntregado: crearItem(
-          productoEntregado,
-          Number(formulario.cantidadEntregada)
-        ),
+        productoEntregado: crearItem(productoEntregado, cantidadEntregada),
       };
     }
 
     // Volvemos a calcular el stock al registrar.
-    const resultado = registrarMovimiento(
-      movimiento,
-      (actuales) => {
-        const salidasNuevas = salidasPorMovimiento(movimiento);
+    const resultado = registrarMovimiento(movimiento, (actuales) => {
+      // M-2 (bloque E): revalidar la Jornada vigente justo antes de
+      // persistir. La jornada del render es un snapshot: puede haberse
+      // cerrado, desaparecido o cambiado de camión, y el storage de
+      // Jornadas puede haberse corrompido, desde el montaje. Ningún
+      // movimiento se persiste después del cierre.
+      const revalidacionJornada = revalidar_jornada_para_operacion(
+        leerJornadasDiscriminado(),
+        jornada,
+        "abierta"
+      );
 
-        for (const item of salidasNuevas) {
-          const cargado = jornada.items.find(
-            (p) => p.productoId === item.productoId
-          );
-
-          if (!cargado) {
-            return `${item.nombreProducto} no está cargado en el camión.`;
-          }
-
-          const vendido = ventas
-            .filter((v) => v.jornadaId === jornada.id)
-            .flatMap((v) => v.items)
-            .filter((p) => p.productoId === item.productoId)
-            .reduce((suma, p) => suma + p.cantidad, 0);
-
-          const descartado = actuales
-            .filter((m) => m.jornadaId === jornada.id)
-            .flatMap(salidasPorMovimiento)
-            .filter((p) => p.productoId === item.productoId)
-            .reduce((suma, p) => suma + p.cantidad, 0);
-
-          if (
-            item.cantidad >
-            cargado.cantidad - vendido - descartado + 0.000001
-          ) {
-            return `Stock insuficiente de ${item.nombreProducto}.`;
-          }
-        }
-
-        return null;
+      if (!revalidacionJornada.ok) {
+        return `No se puede registrar: ${revalidacionJornada.error}`;
       }
-    );
+
+      const lecturaVentas = leerVentas();
+      if (!lecturaVentas.ok) {
+        return `No se puede registrar: ${lecturaVentas.error}`;
+      }
+      return validar_stock_movimiento(
+        movimiento,
+        revalidacionJornada.jornada.items,
+        lecturaVentas.ventas,
+        actuales
+      );
+    });
 
     if (resultado) {
       setError(resultado);
@@ -339,10 +420,19 @@ export default function Movimientos() {
         </p>
       </div>
 
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
+
       {mensaje && (
         <div role="status" className="flex items-center gap-2 rounded-xl bg-green-50 p-4 text-green-800">
           <CheckCircle2 size={22} />
           {mensaje}
+        </div>
+      )}
+
+      {!disponibilidad.ok && (
+        <div role="alert" className="flex items-center gap-2 rounded-xl bg-red-50 p-4 text-red-800">
+          <AlertTriangle size={22} />
+          {disponibilidad.error}
         </div>
       )}
 
@@ -466,6 +556,7 @@ export default function Movimientos() {
                       ...formulario,
                       productoId: e.target.value,
                       cantidad: "",
+                      media: false,
                     })
                   }
                   className="min-h-14 w-full rounded-xl border border-slate-300 p-3"
@@ -484,35 +575,20 @@ export default function Movimientos() {
                 </select>
               </label>
 
-              <label className="block space-y-2">
-                <span className="text-sm font-medium">
-                  Cantidad *
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step={
-                    productoDevuelto?.unidadMedida === "kg"
-                      ? "0.001"
-                      : "1"
-                  }
-                  value={formulario.cantidad}
-                  onChange={(e) =>
-                    setFormulario({
-                      ...formulario,
-                      cantidad: e.target.value,
-                    })
-                  }
-                  placeholder="0"
-                  className="min-h-14 w-full rounded-xl border border-slate-300 p-3"
-                />
-                {formulario.tipo === "merma" && productoDevuelto && (
-                  <p className="text-xs text-blue-700">
-                    Disponible: {disponibles[productoDevuelto.id] ?? 0}{" "}
-                    {unidades[productoDevuelto.unidadMedida]}
-                  </p>
-                )}
-              </label>
+              <CampoCantidad
+                etiqueta="Cantidad *"
+                unidad={productoDevuelto?.unidadMedida}
+                texto={formulario.cantidad}
+                media={formulario.media}
+                disponible={
+                  formulario.tipo === "merma" && productoDevuelto
+                    ? disponibles[productoDevuelto.id] ?? 0
+                    : undefined
+                }
+                onChange={(texto, media) =>
+                  setFormulario({ ...formulario, cantidad: texto, media })
+                }
+              />
             </div>
 
             {formulario.tipo === "cambio" && (
@@ -533,6 +609,7 @@ export default function Movimientos() {
                           ...formulario,
                           entregadoId: e.target.value,
                           cantidadEntregada: "",
+                          mediaEntregada: false,
                         })
                       }
                       className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3"
@@ -549,34 +626,25 @@ export default function Movimientos() {
                     </select>
                   </label>
 
-                  <label className="block space-y-2">
-                    <span className="text-sm font-medium">
-                      Cantidad entregada *
-                    </span>
-                    <input
-                      type="number"
-                      min="0"
-                      step={
-                        productoEntregado?.unidadMedida === "kg"
-                          ? "0.001"
-                          : "1"
-                      }
-                      value={formulario.cantidadEntregada}
-                      onChange={(e) =>
-                        setFormulario({
-                          ...formulario,
-                          cantidadEntregada: e.target.value,
-                        })
-                      }
-                      className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3"
-                    />
-                    {productoEntregado && (
-                      <p className="text-xs text-blue-700">
-                        Disponible: {disponibles[productoEntregado.id] ?? 0}{" "}
-                        {unidades[productoEntregado.unidadMedida]}
-                      </p>
-                    )}
-                  </label>
+                  <CampoCantidad
+                    etiqueta="Cantidad entregada *"
+                    unidad={productoEntregado?.unidadMedida}
+                    texto={formulario.cantidadEntregada}
+                    media={formulario.mediaEntregada}
+                    disponible={
+                      productoEntregado
+                        ? disponibles[productoEntregado.id] ?? 0
+                        : undefined
+                    }
+                    fondoBlanco
+                    onChange={(texto, media) =>
+                      setFormulario({
+                        ...formulario,
+                        cantidadEntregada: texto,
+                        mediaEntregada: media,
+                      })
+                    }
+                  />
                 </div>
               </div>
             )}
@@ -609,6 +677,7 @@ export default function Movimientos() {
             <button
               type="button"
               onClick={guardarMovimiento}
+              disabled={estadoOperacion.bloqueado}
               className="min-h-14 w-full rounded-xl bg-blue-600 px-5 text-base font-bold text-white hover:bg-blue-700"
             >
               Registrar {etiquetas[formulario.tipo].toLowerCase()}
@@ -643,17 +712,26 @@ export default function Movimientos() {
                     <>
                       <p className="text-sm">
                         Devuelto: {m.productoDevuelto.nombreProducto} ·{" "}
-                        {m.productoDevuelto.cantidad}
+                        {textoCantidad(
+                          m.productoDevuelto.unidadMedida,
+                          m.productoDevuelto.cantidad
+                        )}
                       </p>
                       <p className="text-sm">
                         Entregado: {m.productoEntregado.nombreProducto} ·{" "}
-                        {m.productoEntregado.cantidad}
+                        {textoCantidad(
+                          m.productoEntregado.unidadMedida,
+                          m.productoEntregado.cantidad
+                        )}
                       </p>
                     </>
                   ) : (
                     <p className="text-sm">
-                      {m.producto.nombreProducto} · {m.producto.cantidad}{" "}
-                      {unidades[m.producto.unidadMedida]}
+                      {m.producto.nombreProducto} ·{" "}
+                      {textoCantidad(
+                        m.producto.unidadMedida,
+                        m.producto.cantidad
+                      )}
                     </p>
                   )}
 

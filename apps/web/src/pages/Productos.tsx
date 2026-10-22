@@ -1,9 +1,16 @@
-
 import { useMemo, useState } from "react";
 import { Package, Plus, Search, Pencil, CheckCircle2 } from "lucide-react";
 
 import { type Producto, type UnidadMedida } from "../data/mockProductos";
 import { useProductos } from "../hooks/useProductos";
+import {
+  stock_producto_valido,
+  unidad_para_categoria,
+  validar_combinacion_categoria_unidad,
+} from "../domain/productos";
+import { precio_media_pieza, validar_precio } from "../domain/precios";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 // Formato de moneda argentina.
 const formatoMoneda = (valor: number) =>
@@ -13,11 +20,20 @@ const formatoMoneda = (valor: number) =>
     maximumFractionDigits: 2,
   }).format(valor);
 
+// Vista previa de la media derivada mientras se tipea: un precio todavía
+// inválido (p. ej. 10.001) no debe romper el render; se muestra vacío.
+function vistaPreviaMedia(precioTexto: string): string {
+  try {
+    return String(precio_media_pieza(Number(precioTexto) || 0));
+  } catch {
+    return "";
+  }
+}
+
 // Abreviaciones de unidades.
 const unidades: Record<UnidadMedida, string> = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 
 type FormularioProducto = {
@@ -42,7 +58,8 @@ function formularioVacio(): FormularioProducto {
 
 export default function Productos() {
   // El hook se encarga de guardar los productos localmente.
-  const { productos, setProductos } = useProductos();
+  const { productos, actualizarProductos, estadoLectura } = useProductos();
+  const estadoOperacion = estadoStorageOperativo({ productos: estadoLectura });
 
   const [busqueda, setBusqueda] = useState("");
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
@@ -73,6 +90,7 @@ export default function Productos() {
 
   // Abrir un formulario vacío.
   function abrirNuevoProducto() {
+    if (estadoOperacion.bloqueado) return;
     cancelarFormulario();
     setMensaje("");
     setMostrarFormulario(true);
@@ -100,6 +118,7 @@ export default function Productos() {
   // Guardar un producto nuevo o actualizar uno existente.
   function guardarProducto(evento: React.SubmitEvent<HTMLFormElement>) {
     evento.preventDefault();
+    if (estadoOperacion.bloqueado) return;
 
     const precio = Number(nuevoProducto.precio);
     const stock = Number(nuevoProducto.stock);
@@ -112,38 +131,72 @@ export default function Productos() {
       nuevoProducto.stockMinimo.trim() !== "";
 
     const numerosValidos =
-      Number.isFinite(precio) &&
       Number.isFinite(stock) &&
       Number.isFinite(stockMinimo) &&
-      precio >= 0 &&
       stock >= 0 &&
       stockMinimo >= 0;
 
-    // Para piezas y unidades solamente aceptamos cantidades enteras.
-    const cantidadesValidas =
-      nuevoProducto.unidadMedida === "kg" ||
-      (Number.isInteger(stock) && Number.isInteger(stockMinimo));
+    // Para piezas y unidades solamente aceptamos enteros seguros (dominio).
+    const cantidadesValidas = stock_producto_valido(stock, stockMinimo);
 
-    if (!camposCompletos || !numerosValidos || !cantidadesValidas) {
-      alert("Revisá los datos del producto.");
+    // Validación defensiva: la combinación categoría ↔ unidad debe ser
+    // canónica (Lácteos -> unidad; Fiambres -> pieza) aunque la UI ya
+    // derive la unidad de la categoría. Si llega algo inválido, falla
+    // cerrado y no se persiste.
+    const combinacion = validar_combinacion_categoria_unidad(
+      nuevoProducto.categoria,
+      nuevoProducto.unidadMedida
+    );
+
+    // Validación de dominio de precios (ADR-003): máximo 2 decimales, sin
+    // redondear; precio de media se deriva, NO es configurable.
+    let errorPrecios: string | null = null;
+    try {
+      validar_precio(precio);
+    } catch (error) {
+      errorPrecios = error instanceof Error ? error.message : "Precio inválido.";
+    }
+
+    if (errorPrecios !== null) {
+      alert(errorPrecios);
+      return;
+    }
+
+    if (
+      !camposCompletos ||
+      !numerosValidos ||
+      !cantidadesValidas ||
+      !combinacion.valido
+    ) {
+      alert(combinacion.valido
+        ? "Revisá los datos del producto."
+        : combinacion.mensaje);
       return;
     }
 
     if (productoEditando !== null) {
-      // Editar información comercial sin alterar el stock.
-      setProductos((actuales) =>
+      // Editar información comercial sin alterar el stock ni la
+      // interpretación de las cantidades existentes: categoría y
+      // unidadMedida se preservan tal como están.
+      const guardado = actualizarProductos((actuales) =>
         actuales.map((producto) =>
           producto.id === productoEditando
             ? {
                 ...producto,
                 nombre: nuevoProducto.nombre.trim(),
-                categoria: nuevoProducto.categoria,
                 precio,
                 stockMinimo,
               }
             : producto
         )
       );
+
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el producto en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
 
       setMensaje("Producto actualizado correctamente.");
     } else {
@@ -158,7 +211,17 @@ export default function Productos() {
         stockMinimo,
       };
 
-      setProductos((actuales) => [...actuales, producto]);
+      const guardado = actualizarProductos((actuales) => [
+        ...actuales,
+        producto,
+      ]);
+
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el producto en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
 
       setMensaje("Producto agregado correctamente.");
     }
@@ -183,12 +246,15 @@ export default function Productos() {
         <button
           type="button"
           onClick={abrirNuevoProducto}
+          disabled={estadoOperacion.bloqueado}
           className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700"
         >
           <Plus size={20} />
           Nuevo producto
         </button>
       </div>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {/* Mensaje de confirmación */}
       {mensaje && (
@@ -238,49 +304,68 @@ export default function Productos() {
 
               <select
                 value={nuevoProducto.categoria}
-                onChange={(e) =>
+                disabled={productoEditando !== null}
+                onChange={(e) => {
+                  const categoria =
+                    e.target.value as Producto["categoria"];
+
                   setNuevoProducto({
                     ...nuevoProducto,
-                    categoria: e.target.value as Producto["categoria"],
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3"
+                    categoria,
+                    // La unidad se deriva de la categoría: Lácteos ->
+                    // unidad; Fiambres -> pieza. Nunca queda un estado
+                    // intermedio inválido.
+                    unidadMedida: unidad_para_categoria(categoria),
+                  });
+                }}
+                className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="Lácteos">Lácteos</option>
                 <option value="Fiambres">Fiambres</option>
               </select>
+
+              {productoEditando !== null && (
+                <p className="text-xs font-normal text-slate-500">
+                  La categoría no puede cambiarse durante la edición:
+                  alteraría la interpretación de las cantidades
+                  existentes.
+                </p>
+              )}
             </label>
 
-            {/* Unidad de medida */}
+            {/* Unidad de medida: derivada de la categoría */}
             <label className="space-y-1 text-sm font-medium">
               <span>Unidad de medida</span>
 
               <select
                 value={nuevoProducto.unidadMedida}
-                disabled={productoEditando !== null}
-                onChange={(e) =>
-                  setNuevoProducto({
-                    ...nuevoProducto,
-                    unidadMedida: e.target.value as UnidadMedida,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100 disabled:text-slate-500"
+                onChange={() => {
+                  // La unidad siempre es la derivada de la categoría;
+                  // no hay otra opción válida que elegir.
+                }}
+                className="w-full rounded-lg border border-slate-300 p-3 bg-slate-100 text-slate-500"
               >
-                <option value="unidad">Unidad</option>
-                <option value="pieza">Pieza</option>
-                <option value="kg">Kilogramo</option>
+                <option value={nuevoProducto.unidadMedida}>
+                  {nuevoProducto.unidadMedida === "unidad"
+                    ? "Unidad"
+                    : "Pieza"}
+                </option>
               </select>
 
-              {productoEditando !== null && (
-                <p className="text-xs font-normal text-slate-500">
-                  La unidad no puede cambiarse durante la edición.
-                </p>
-              )}
+              <p className="text-xs font-normal text-slate-500">
+                La unidad se determina por la categoría: Lácteos se
+                controlan por unidad entera y fiambres por pieza. No
+                se elige manualmente.
+              </p>
             </label>
 
             {/* Precio */}
             <label className="space-y-1 text-sm font-medium">
-              <span>Precio de venta ($)</span>
+              <span>
+                {nuevoProducto.unidadMedida === "pieza"
+                  ? "Precio de pieza completa ($)"
+                  : "Precio de venta ($)"}
+              </span>
 
               <input
                 required
@@ -298,6 +383,27 @@ export default function Productos() {
               />
             </label>
 
+            {/* Precio de media pieza: derivado, solo lectura para fiambres */}
+            {nuevoProducto.unidadMedida === "pieza" && (
+              <label className="space-y-1 text-sm font-medium">
+                <span>Precio de media pieza (derivado, $)</span>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={vistaPreviaMedia(nuevoProducto.precio)}
+                  readOnly
+                  className="w-full rounded-lg border border-slate-300 p-3 bg-slate-50 text-slate-700"
+                />
+
+                <p className="text-xs font-normal text-slate-500">
+                  Se deriva automáticamente: mitad del precio de pieza,
+                  redondeado al peso entero (.50 hacia arriba).
+                </p>
+              </label>
+            )}
+
             {/* Stock inicial: solamente para productos nuevos */}
             {productoEditando === null && (
               <label className="space-y-1 text-sm font-medium">
@@ -307,7 +413,7 @@ export default function Productos() {
                   required
                   type="number"
                   min="0"
-                  step={nuevoProducto.unidadMedida === "kg" ? "0.001" : "1"}
+                  step="1"
                   value={nuevoProducto.stock}
                   onChange={(e) =>
                     setNuevoProducto({
@@ -328,7 +434,7 @@ export default function Productos() {
                 required
                 type="number"
                 min="0"
-                step={nuevoProducto.unidadMedida === "kg" ? "0.001" : "1"}
+                step="1"
                 value={nuevoProducto.stockMinimo}
                 onChange={(e) =>
                   setNuevoProducto({
@@ -345,6 +451,7 @@ export default function Productos() {
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="submit"
+              disabled={estadoOperacion.bloqueado}
               className="min-h-11 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700"
             >
               {productoEditando !== null
@@ -427,7 +534,15 @@ export default function Productos() {
 
                   {/* Precio */}
                   <td className="px-5 py-4">
-                    {formatoMoneda(producto.precio)}
+                    {producto.unidadMedida === "pieza" ? (
+                      <>
+                        {formatoMoneda(producto.precio)} pieza
+                        <br />
+                        {formatoMoneda(precio_media_pieza(producto.precio))} media
+                      </>
+                    ) : (
+                      formatoMoneda(producto.precio)
+                    )}
                   </td>
 
                   {/* Estado */}
@@ -466,7 +581,6 @@ export default function Productos() {
             No se encontraron productos.
           </p>
         )}
-      </div>
 
       {/* Advertencia de prototipo */}
       <p className="text-sm text-slate-500">
@@ -475,5 +589,6 @@ export default function Productos() {
         y todavía no está conectado con PostgreSQL.
       </p>
     </div>
+  </div>
   );
 }

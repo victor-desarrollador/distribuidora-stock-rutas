@@ -1,113 +1,169 @@
 
 import { useState } from "react";
 
-import {
-  type MovimientoReparto,
-} from "../data/mockMovimientos";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
 
-const STORAGE_KEY = "distribuidora_movimientos_demo_v1";
+import { type MovimientoReparto } from "../data/mockMovimientos";
+import { movimiento_valido } from "../domain/movimientos";
 
-export function leerMovimientos(): MovimientoReparto[] {
+const STORAGE_KEY = CLAVES_STORAGE.movimientos;
+
+/** Resultado discriminado de la lectura del ledger de movimientos. */
+export type ResultadoLecturaMovimientos =
+  | { ok: true; movimientos: MovimientoReparto[]; estado: "valido" | "inicial" }
+  | { ok: false; error: string; estado: "corrupto" };
+
+/**
+ * Lectura que distingue explícitamente:
+ * - clave ausente: ledger inicial válido ([])
+ * - clave presente y válida: movimientos cargados
+ * - clave presente pero corrupta: error explícito
+ * Es la única autoridad tanto para la frontera de escritura como para el
+ * estado que la UI usa para advertir corrupción.
+ */
+export function leerMovimientosDiscriminado(): ResultadoLecturaMovimientos {
   try {
     const guardado = localStorage.getItem(STORAGE_KEY);
 
-    if (!guardado) return [];
+    if (guardado === null) {
+      return { ok: true, movimientos: [], estado: "inicial" };
+    }
 
-    const datos: unknown = JSON.parse(guardado);
+    let datos: unknown;
+    try {
+      datos = JSON.parse(guardado);
+    } catch {
+      return {
+        ok: false,
+        error: "JSON inválido en almacenamiento de movimientos.",
+        estado: "corrupto",
+      };
+    }
 
-    if (!Array.isArray(datos)) return [];
+    if (!Array.isArray(datos)) {
+      return {
+        ok: false,
+        error: "Estructura inválida: se esperaba un array de movimientos.",
+        estado: "corrupto",
+      };
+    }
 
-    const productoValido = (p: any) =>
-      p !== null &&
-      typeof p === "object" &&
-      Number.isSafeInteger(p.productoId) &&
-      typeof p.nombreProducto === "string" &&
-      ["unidad", "pieza", "kg"].includes(p.unidadMedida) &&
-      Number.isFinite(p.cantidad) &&
-      p.cantidad > 0;
+    const valido = datos.every(movimiento_valido);
 
-    const valido = datos.every((m) => {
-      if (!m || typeof m !== "object") return false;
+    if (!valido) {
+      return {
+        ok: false,
+        error: "Uno o más movimientos no pasan la validación estructural.",
+        estado: "corrupto",
+      };
+    }
 
-      const baseValida =
-        typeof m.id === "string" &&
-        typeof m.jornadaId === "string" &&
-        Number.isSafeInteger(m.camionId) &&
-        typeof m.fecha === "string" &&
-        typeof m.motivo === "string";
+    return { ok: true, movimientos: datos as MovimientoReparto[], estado: "valido" };
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Error inesperado al leer movimientos: ${String(e)}`,
+      estado: "corrupto",
+    };
+  }
+}
 
-      if (!baseValida) return false;
+/**
+ * Lectura para UI: comportamiento visual fail-closed.
+ * Devuelve [] tanto para ausente como para corrupto (semántica existente).
+ * NO usar en la frontera de escritura.
+ */
+export function leerMovimientos(): MovimientoReparto[] {
+  const lectura = leerMovimientosDiscriminado();
+  return lectura.ok ? lectura.movimientos : [];
+}
 
-      if (m.tipo === "merma") {
-        return (
-          m.clienteId === null &&
-          m.nombreCliente === null &&
-          productoValido(m.producto)
-        );
+/**
+ * Operación pura de registro de movimiento: valida, persiste y devuelve el
+ * resultado. Separada del hook para ser testeable sin React.
+ *
+ * @param cargarActuales - Función que devuelve el estado actual con discriminación de corrupción.
+ *   En producción usa `leerMovimientosDiscriminado()`. En tests puede inyectarse un mock.
+ */
+export function registrarMovimientoOperacion(
+  movimiento: MovimientoReparto,
+  validar: (actuales: MovimientoReparto[]) => string | null,
+  cargarActuales: () => ResultadoLecturaMovimientos,
+  guardarActualizados: (movimientos: MovimientoReparto[]) => void
+): string | null {
+  // 1. Validación estructural y de cantidades ANTES de cualquier efecto.
+  if (!movimiento_valido(movimiento)) {
+    return "El movimiento no es válido: las cantidades deben ser enteros positivos y seguros.";
+  }
+
+  // 2. Cargar estado previo con discriminación de corrupción (usa función inyectada).
+  const lectura = cargarActuales();
+
+  // 2b. Si el almacenamiento está corrupto, ABORTAR antes de cualquier efecto lateral.
+  if (!lectura.ok) {
+    return `No se puede registrar: ${lectura.error}`;
+  }
+
+  const actuales = lectura.movimientos;
+
+  // 3. Duplicado por ID.
+  if (actuales.some((m) => m.id === movimiento.id)) {
+    return "Este movimiento ya está registrado.";
+  }
+
+  // 4. Validación externa de stock/disponibilidad.
+  const error = validar(actuales);
+
+  if (error) return error;
+
+  // 5. Persistencia SOLO si todo pasa.
+  guardarActualizados([...actuales, movimiento]);
+
+  return null;
+}
+
+/**
+ * Frontera REAL de escritura sin React: lee el ledger de localStorage con
+ * discriminación de corrupción, valida y persiste. Es lo que ejecuta el hook.
+ * Si el almacenamiento está corrupto no escribe nada (no lo reinterpreta
+ * como vacío ni lo pisa con solo el movimiento nuevo).
+ */
+export function registrarMovimientoPersistido(
+  movimiento: MovimientoReparto,
+  validar: (actuales: MovimientoReparto[]) => string | null,
+  alGuardar?: (nuevos: MovimientoReparto[]) => void
+): string | null {
+  try {
+    return registrarMovimientoOperacion(
+      movimiento,
+      validar,
+      leerMovimientosDiscriminado,
+      (nuevos) => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos));
+        alGuardar?.(nuevos);
       }
-
-      const clienteValido =
-        Number.isSafeInteger(m.clienteId) &&
-        typeof m.nombreCliente === "string";
-
-      if (!clienteValido) return false;
-
-      if (m.tipo === "devolucion") {
-        return productoValido(m.producto);
-      }
-
-      if (m.tipo === "cambio") {
-        return (
-          productoValido(m.productoDevuelto) &&
-          productoValido(m.productoEntregado)
-        );
-      }
-
-      return false;
-    });
-
-    return valido ? datos as MovimientoReparto[] : [];
+    );
   } catch {
-    return [];
+    return "No se pudo guardar el movimiento.";
   }
 }
 
 export function useMovimientos() {
-  const [movimientos, setMovimientos] =
-    useState<MovimientoReparto[]>(leerMovimientos);
+  const [lectura] = useState(leerMovimientosDiscriminado);
+  const [movimientos, setMovimientos] = useState<MovimientoReparto[]>(
+    lectura.ok ? lectura.movimientos : []
+  );
 
   function registrarMovimiento(
     movimiento: MovimientoReparto,
     validar: (actuales: MovimientoReparto[]) => string | null
   ): string | null {
-    try {
-      const actuales = leerMovimientos();
-
-      if (actuales.some((m) => m.id === movimiento.id)) {
-        return "Este movimiento ya está registrado.";
-      }
-
-      const error = validar(actuales);
-
-      if (error) return error;
-
-      const actualizados = [...actuales, movimiento];
-
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(actualizados)
-      );
-
-      setMovimientos(actualizados);
-
-      return null;
-    } catch {
-      return "No se pudo guardar el movimiento.";
-    }
+    return registrarMovimientoPersistido(movimiento, validar, setMovimientos);
   }
 
   return {
     movimientos,
     registrarMovimiento,
+    estadoLectura: lectura.estado,
   };
 }

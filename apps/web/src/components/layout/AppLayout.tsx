@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { ShoppingCart } from "lucide-react";
 
 import Sidebar from "./Sidebar";
-import { useAuth } from "../../AuthContext";
+import { useAuth } from "../../auth/useAuth";
 
 type Props = {
   children: ReactNode;

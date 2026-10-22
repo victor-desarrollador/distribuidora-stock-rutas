@@ -1,55 +1,88 @@
-
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   productosIniciales,
   type Producto,
 } from "../data/mockProductos";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
+import {
+  stock_producto_valido,
+  validar_combinacion_categoria_unidad,
+} from "../domain/productos";
+import { precio_valido } from "../domain/precios";
+import {
+  actualizarCatalogoPersistido,
+  leerCatalogo,
+  type ResultadoLectura,
+} from "./catalogoStorage";
 
-const STORAGE_KEY = "distribuidora_productos_demo_v1";
+const STORAGE_KEY = CLAVES_STORAGE.productos;
 
-function cargarProductos(): Producto[] {
-  try {
-    const guardados = localStorage.getItem(STORAGE_KEY);
+function productoValido(producto: unknown): boolean {
+  if (producto === null || typeof producto !== "object") return false;
 
-    if (!guardados) return productosIniciales;
+  const p = producto as Partial<Producto>;
 
-    const datos: unknown = JSON.parse(guardados);
+  return (
+    Number.isSafeInteger(p.id) &&
+    typeof p.nombre === "string" &&
+    ["Lácteos", "Fiambres"].includes(p.categoria ?? "") &&
+    ["unidad", "pieza"].includes(p.unidadMedida ?? "") &&
+    // Frontera de persistencia: la combinación categoría ↔ unidad
+    // debe ser la canónica (Lácteos -> unidad; Fiambres -> pieza).
+    // Nada se corrige aquí (no se cambia categoría ni unidad ni se
+    // reinterpreta stock): un dato inválido invalida el payload
+    // igual que cualquier otro campo inválido.
+    validar_combinacion_categoria_unidad(
+      p.categoria as Producto["categoria"],
+      p.unidadMedida as Producto["unidadMedida"]
+    ).valido &&
+    // Precios (ADR-003): máximo 2 decimales; NO hay precioMediaPieza configurable.
+    // pieza: solo precio; unidad: solo precio.
+    precio_valido(p.precio as number) &&
+    // Stock y stock mínimo: enteros seguros >= 0 (dominio compartido).
+    stock_producto_valido(p.stock as number, p.stockMinimo as number)
+  );
+}
 
-    if (!Array.isArray(datos)) return productosIniciales;
+/** Lectura discriminada (ausente / válido / corrupto). */
+export function leerProductos(): ResultadoLectura<Producto> {
+  return leerCatalogo(STORAGE_KEY, productoValido, productosIniciales);
+}
 
-    const validos = datos.every(
-      (producto) =>
-        producto !== null &&
-        typeof producto === "object" &&
-        Number.isSafeInteger(producto.id) &&
-        typeof producto.nombre === "string" &&
-        ["Lácteos", "Fiambres"].includes(producto.categoria) &&
-        ["unidad", "pieza", "kg"].includes(producto.unidadMedida) &&
-        Number.isFinite(producto.precio) &&
-        producto.precio >= 0 &&
-        Number.isFinite(producto.stock) &&
-        producto.stock >= 0 &&
-        Number.isFinite(producto.stockMinimo) &&
-        producto.stockMinimo >= 0
-    );
-
-    return validos ? (datos as Producto[]) : productosIniciales;
-  } catch {
-    return productosIniciales;
-  }
+/** Datos para la UI: iniciales si está ausente o corrupto (nunca persiste). */
+export function cargarProductos(): Producto[] {
+  const lectura = leerProductos();
+  return lectura.ok ? lectura.datos : productosIniciales;
 }
 
 export function useProductos() {
-  const [productos, setProductos] = useState<Producto[]>(cargarProductos);
+  const [lectura] = useState(leerProductos);
+  const [productos, setProductosEstado] = useState<Producto[]>(
+    lectura.ok ? lectura.datos : []
+  );
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(productos));
-    } catch (error) {
-      console.error("No se pudieron guardar los productos:", error);
-    }
-  }, [productos]);
+  /**
+   * Frontera explícita de edición (bloque E / M-1): relee la clave, aborta si
+   * está corrupta (sin escribir ni cambiar React), persiste y solo si la
+   * escritura tuvo éxito actualiza el estado. Devuelve false cuando la
+   * operación no se guardó.
+   */
+  function actualizarProductos(
+    transformar: (actuales: Producto[]) => Producto[]
+  ): boolean {
+    const nuevos = actualizarCatalogoPersistido(
+      STORAGE_KEY,
+      productoValido,
+      productosIniciales,
+      transformar
+    );
 
-  return { productos, setProductos };
+    if (nuevos === null) return false;
+
+    setProductosEstado(nuevos);
+    return true;
+  }
+
+  return { productos, actualizarProductos, estadoLectura: lectura.estado };
 }

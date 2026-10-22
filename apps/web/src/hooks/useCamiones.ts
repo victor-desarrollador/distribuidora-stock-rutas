@@ -1,54 +1,76 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { CLAVES_STORAGE } from "../data/clavesStorage";
 import {
   camionesIniciales,
   type Camion,
 } from "../data/mockCamiones";
 
-const STORAGE_KEY = "distribuidora_camiones_demo_v1";
+import {
+  actualizarCatalogoPersistido,
+  leerCatalogo,
+  type ResultadoLectura,
+} from "./catalogoStorage";
 
-function cargarCamiones(): Camion[] {
-  try {
-    const guardados = localStorage.getItem(STORAGE_KEY);
+const STORAGE_KEY = CLAVES_STORAGE.camiones;
 
-    if (!guardados) return camionesIniciales;
+function camionValido(camion: unknown): boolean {
+  if (camion === null || typeof camion !== "object") return false;
 
-    const datos: unknown = JSON.parse(guardados);
+  const c = camion as Partial<Camion>;
 
-    if (!Array.isArray(datos)) return camionesIniciales;
+  return (
+    Number.isSafeInteger(c.id) &&
+    typeof c.nombre === "string" &&
+    typeof c.patente === "string" &&
+    typeof c.marca === "string" &&
+    typeof c.modelo === "string" &&
+    typeof c.observaciones === "string" &&
+    ["disponible", "en_reparto", "mantenimiento"].includes(
+      c.estado ?? ""
+    )
+  );
+}
 
-    const validos = datos.every(
-      (camion) =>
-        camion !== null &&
-        typeof camion === "object" &&
-        Number.isSafeInteger(camion.id) &&
-        typeof camion.nombre === "string" &&
-        typeof camion.patente === "string" &&
-        typeof camion.marca === "string" &&
-        typeof camion.modelo === "string" &&
-        typeof camion.observaciones === "string" &&
-        ["disponible", "en_reparto", "mantenimiento"].includes(
-          camion.estado
-        )
-    );
+/** Lectura discriminada (ausente / válido / corrupto). */
+export function leerCamiones(): ResultadoLectura<Camion> {
+  return leerCatalogo(STORAGE_KEY, camionValido, camionesIniciales);
+}
 
-    return validos ? (datos as Camion[]) : camionesIniciales;
-  } catch {
-    return camionesIniciales;
-  }
+/** Datos para la UI: iniciales si está ausente o corrupto (nunca persiste). */
+export function cargarCamiones(): Camion[] {
+  const lectura = leerCamiones();
+  return lectura.ok ? lectura.datos : camionesIniciales;
 }
 
 export function useCamiones() {
-  const [camiones, setCamiones] = useState<Camion[]>(cargarCamiones);
+  const [lectura] = useState(leerCamiones);
+  const [camiones, setCamionesEstado] = useState<Camion[]>(
+    lectura.ok ? lectura.datos : []
+  );
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(camiones));
-    } catch (error) {
-      console.error("Error al guardar camiones:", error);
-    }
-  }, [camiones]);
+  /**
+   * Frontera explícita de edición (bloque E / M-1): relee la clave, aborta si
+   * está corrupta (sin escribir ni cambiar React), persiste y solo si la
+   * escritura tuvo éxito actualiza el estado. Devuelve false cuando la
+   * operación no se guardó.
+   */
+  function actualizarCamiones(
+    transformar: (actuales: Camion[]) => Camion[]
+  ): boolean {
+    const nuevos = actualizarCatalogoPersistido(
+      STORAGE_KEY,
+      camionValido,
+      camionesIniciales,
+      transformar
+    );
 
-  return { camiones, setCamiones };
+    if (nuevos === null) return false;
+
+    setCamionesEstado(nuevos);
+    return true;
+  }
+
+  return { camiones, actualizarCamiones, estadoLectura: lectura.estado };
 }

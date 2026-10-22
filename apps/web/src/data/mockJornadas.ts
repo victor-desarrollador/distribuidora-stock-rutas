@@ -1,4 +1,3 @@
-
 export type EstadoJornada =
   | "preparacion"
   | "abierta"
@@ -7,8 +6,9 @@ export type EstadoJornada =
 export interface ItemCarga {
   productoId: number;
   nombreProducto: string;
-  unidadMedida: "unidad" | "pieza" | "kg";
+  unidadMedida: "unidad" | "pieza";
   cantidad: number;
+  // unidad: precio unitario snapshot. pieza: precio de pieza completa snapshot.
   precioReferencia: number;
 }
 

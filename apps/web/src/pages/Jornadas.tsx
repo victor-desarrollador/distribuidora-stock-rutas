@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Truck,
   Plus,
@@ -12,9 +12,21 @@ import { useProductos } from "../hooks/useProductos";
 import { useJornadas } from "../hooks/useJornadas";
 import { useRetornos } from "../hooks/useRetornos";
 import {
+  cantidad_unidad_desde_texto,
+  es_cantidad_valida,
+  maximo_piezas_segun_disponible,
+  medias_a_texto,
+  puede_agregar_media,
+  recomponer_medias,
+} from "../domain/cantidades";
+import { subtotal_linea, sumar_importes } from "../domain/precios";
+import {
   type Jornada,
   type ItemCarga,
 } from "../data/mockJornadas";
+import type { RetornoDeposito } from "../data/mockRetornos";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -24,69 +36,96 @@ const moneda = (valor: number) =>
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
+// Valor de referencia de un ítem de carga. La fórmula vive en el dominio de
+// precios (ADR-003): la cantidad canónica está en medias piezas y no se
+// multiplica por el precio de pieza.
+function valorItem(item: ItemCarga): number {
+  return subtotal_linea({
+    unidad_medida: item.unidadMedida,
+    cantidad: item.cantidad,
+    precio: item.precioReferencia,
+  });
+}
+
+function calcularStockReservado(
+  jornadas: Jornada[],
+  retornos: RetornoDeposito[]
+): Record<number, number> {
+  const reservado: Record<number, number> = {};
+
+  for (const jornada of jornadas) {
+    for (const item of jornada.items) {
+      reservado[item.productoId] =
+        (reservado[item.productoId] ?? 0) + item.cantidad;
+    }
+  }
+
+  for (const retorno of retornos) {
+    const jornadaOrigen = jornadas.find(
+      (j) => j.id === retorno.jornadaId
+    );
+    if (
+      !jornadaOrigen ||
+      jornadaOrigen.estado !== "cerrada" ||
+      jornadaOrigen.camionId !== retorno.camionId
+    ) {
+      continue;
+    }
+    for (const item of retorno.items) {
+      const cargado = jornadaOrigen.items.find(
+        (p) => p.productoId === item.productoId
+      );
+      if (
+        !cargado ||
+        cargado.unidadMedida !== item.unidadMedida ||
+        !Number.isFinite(item.cantidadAprobada) ||
+        item.cantidadAprobada < 0 ||
+        item.cantidadAprobada > item.cantidadContada
+      ) {
+        continue;
+      }
+      reservado[item.productoId] =
+        (reservado[item.productoId] ?? 0) - item.cantidadAprobada;
+    }
+  }
+
+  return reservado;
+}
+
 export default function Jornadas() {
-  const { camiones } = useCamiones();
-  const { productos } = useProductos();
-  const { retornos } = useRetornos();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const { productos, estadoLectura: estadoProductos } = useProductos();
+  const { retornos, estadoLectura: estadoRetornos } = useRetornos();
   const {
     jornadas,
-    crearJornada,
+    crearPreparacion,
     confirmarSalida,
+    estadoLectura: estadoJornadas,
   } = useJornadas();
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    productos: estadoProductos,
+    camiones: estadoCamiones,
+    retornos: estadoRetornos,
+  });
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [camionId, setCamionId] = useState("");
   const [chofer, setChofer] = useState("");
   const [zona, setZona] = useState("");
+  // Para productos "unidad": string con el entero.
+  // Para productos "pieza": objeto { piezas: number, media: boolean }.
   const [cantidades, setCantidades] = useState<
-    Record<number, string>
+    Record<number, string | { piezas: number; media: boolean }>
   >({});
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
   // Stock comprometido en las cargas, menos los retornos aprobados.
   // Las jornadas cerradas siguen reservando lo que no regresó.
-  const stockReservado = useMemo(() => {
-    const reservado: Record<number, number> = {};
-    // Toda mercadería cargada salió del depósito central.
-    for (const jornada of jornadas) {
-      for (const item of jornada.items) {
-        reservado[item.productoId] =
-          (reservado[item.productoId] ?? 0) + item.cantidad;
-      }
-    }
-    // Solo reincorporamos los retornos aprobados de jornadas cerradas.
-    for (const retorno of retornos) {
-      const jornadaOrigen = jornadas.find(
-        (j) => j.id === retorno.jornadaId
-      );
-      if (
-        !jornadaOrigen ||
-        jornadaOrigen.estado !== "cerrada" ||
-        jornadaOrigen.camionId !== retorno.camionId
-      ) {
-        continue;
-      }
-      for (const item of retorno.items) {
-        // Evitar contar un producto ajeno a la carga original.
-        const cargado = jornadaOrigen.items.find(
-          (p) => p.productoId === item.productoId
-        );
-        if (
-          !cargado ||
-          cargado.unidadMedida !== item.unidadMedida ||
-          !Number.isFinite(item.cantidadAprobada) ||
-          item.cantidadAprobada < 0 ||
-          item.cantidadAprobada > item.cantidadContada
-        ) {
-          continue;
-        }
-        reservado[item.productoId] =
-          (reservado[item.productoId] ?? 0) - item.cantidadAprobada;
-      }
-    }
-    return reservado;
-  }, [jornadas, retornos]);
+  const stockReservado = useMemo(
+    () => calcularStockReservado(jornadas, retornos),
+    [jornadas, retornos]
+  );
   // Camiones sin otra jornada activa y fuera de mantenimiento.
   const camionesDisponibles = camiones.filter((camion) => {
     if (camion.estado !== "disponible") return false;
@@ -104,25 +143,67 @@ export default function Jornadas() {
       producto.stock - (stockReservado[productoId] ?? 0)
     );
   }
+  // Convierte el estado de la UX (string para "unidad", {piezas, media} para "pieza")
+  // a la cantidad canónica (entero en unidad mínima) para persistir.
+  const obtenerCantidadCanonica = useCallback(
+    (productoId: number): number => {
+      const valor = cantidades[productoId];
+      if (!valor) return 0;
+      const producto = productos.find((p) => p.id === productoId);
+      if (!producto) return 0;
+      if (producto.unidadMedida === "unidad") {
+        // Una cantidad de unidad inválida no cuenta como cantidad: devuelve 0
+        // y guardarPreparacion la reporta como error.
+        return typeof valor === "string"
+          ? (cantidad_unidad_desde_texto(valor) ?? 0)
+          : 0;
+      }
+      // producto.unidadMedida === "pieza": el estado es { piezas, media }.
+      if (typeof valor === "object") {
+        try {
+          return recomponer_medias(valor);
+        } catch {
+          return 0;
+        }
+      }
+      return 0;
+    },
+    [cantidades, productos]
+  );
+
+  // Texto de unidad no vacío que no es un entero finito >= 0.
+  const hayCantidadUnidadInvalida = useCallback(
+    (productoId: number): boolean => {
+      const valor = cantidades[productoId];
+      const producto = productos.find((p) => p.id === productoId);
+      return (
+        producto?.unidadMedida === "unidad" &&
+        typeof valor === "string" &&
+        cantidad_unidad_desde_texto(valor) === null
+      );
+    },
+    [cantidades, productos]
+  );
+
+  const hayCantidadPositiva = useCallback(
+    (productoId: number): boolean => {
+      return obtenerCantidadCanonica(productoId) > 0;
+    },
+    [obtenerCantidadCanonica]
+  );
+
   const itemsSeleccionados = useMemo(() => {
     return productos
-      .filter((producto) => {
-        const cantidad = Number(cantidades[producto.id] ?? 0);
-        return cantidad > 0;
-      })
+      .filter((producto) => hayCantidadPositiva(producto.id))
       .map((producto): ItemCarga => ({
         productoId: producto.id,
         nombreProducto: producto.nombre,
         unidadMedida: producto.unidadMedida,
-        cantidad: Number(cantidades[producto.id]),
+        cantidad: obtenerCantidadCanonica(producto.id),
         precioReferencia: producto.precio,
       }));
-  }, [productos, cantidades]);
-  const valorCarga = itemsSeleccionados.reduce(
-    (total, item) =>
-      total + item.cantidad * item.precioReferencia,
-    0
-  );
+  }, [productos, hayCantidadPositiva, obtenerCantidadCanonica]);
+  const valorCarga = sumar_importes(itemsSeleccionados.map(valorItem));
   const jornadasOrdenadas = [...jornadas].sort((a, b) =>
     b.fechaCreacion.localeCompare(a.fechaCreacion)
   );
@@ -140,6 +221,7 @@ export default function Jornadas() {
     setCantidades({});
   }
   function abrirFormulario() {
+    if (estadoOperacion.bloqueado) return;
     setError("");
     setMensaje("");
     setMostrarFormulario(true);
@@ -147,6 +229,7 @@ export default function Jornadas() {
   function guardarPreparacion() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
     const idCamion = Number(camionId);
     if (
       !camionId ||
@@ -163,27 +246,62 @@ export default function Jornadas() {
       setError("Agregá al menos un producto a la carga.");
       return;
     }
-    // Comprobamos todas las cantidades antes de guardar.
+
+    // M-3 (bloque E): el stock NO se comprueba aquí con el snapshot del
+    // render. Las cantidades de la UX sí; el stock se valida dentro de la
+    // frontera, con Jornadas y Retornos reídos en el momento de persistir.
     for (const producto of productos) {
-      const texto = cantidades[producto.id] ?? "";
-      if (!texto.trim()) continue;
-      const cantidad = Number(texto);
-      const cantidadValida =
-        Number.isFinite(cantidad) &&
-        cantidad >= 0 &&
-        (producto.unidadMedida === "kg" ||
-          Number.isInteger(cantidad));
+      if (hayCantidadUnidadInvalida(producto.id)) {
+        setError(`Cantidad inválida: ${producto.nombre}`);
+        return;
+      }
+      const canonica = obtenerCantidadCanonica(producto.id);
+      if (canonica === 0) continue;
+      const cantidadValida = es_cantidad_valida(canonica);
       if (!cantidadValida) {
         setError(`Cantidad inválida: ${producto.nombre}`);
         return;
       }
-      if (cantidad > disponibilidad(producto.id)) {
-        setError(
-          `No hay stock suficiente de ${producto.nombre}.`
-        );
+    }
+
+    // Validación defensiva de precios: no se persiste un ítem cuyo valor no
+    // se pueda calcular con el dominio de precios.
+    for (const item of itemsSeleccionados) {
+      try {
+        valorItem(item);
+      } catch {
+        setError(`Precio inválido: ${item.nombreProducto}`);
         return;
       }
     }
+
+    // Validación de stock sobre lecturas frescas: la frontera relee Jornadas
+    // y Retornos justo antes de persistir y pasa esos conjuntos a esta
+    // función pura. El snapshot del render no participa en la persistencia.
+    const validarStockConLecturas = (
+      jornadasActuales: Jornada[],
+      retornosActuales: RetornoDeposito[]
+    ): string | null => {
+      const reservadoActual = calcularStockReservado(
+        jornadasActuales,
+        retornosActuales
+      );
+
+      for (const producto of productos) {
+        const canonica = obtenerCantidadCanonica(producto.id);
+        if (canonica === 0) continue;
+        const disponible = Math.max(
+          0,
+          producto.stock - (reservadoActual[producto.id] ?? 0)
+        );
+        if (canonica > disponible) {
+          return `No hay stock suficiente de ${producto.nombre}.`;
+        }
+      }
+
+      return null;
+    };
+
     const jornada: Jornada = {
       id: crypto.randomUUID(),
       camionId: idCamion,
@@ -194,16 +312,24 @@ export default function Jornadas() {
       estado: "preparacion",
       items: itemsSeleccionados,
     };
-    if (!crearJornada(jornada)) {
-      setError("No se pudo guardar la jornada.");
+
+    const errorPreparacion = crearPreparacion(
+      jornada,
+      validarStockConLecturas
+    );
+
+    if (errorPreparacion) {
+      setError(errorPreparacion);
       return;
     }
+
     limpiarFormulario();
     setMensaje("Carga preparada correctamente.");
   }
   function iniciarReparto(jornada: Jornada) {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
     if (jornada.estado !== "preparacion") return;
     const camion = camiones.find(
       (c) => c.id === jornada.camionId
@@ -235,12 +361,14 @@ export default function Jornadas() {
         <button
           type="button"
           onClick={abrirFormulario}
+          disabled={estadoOperacion.bloqueado}
           className="flex min-h-12 items-center gap-2 rounded-lg bg-blue-600 px-5 font-medium text-white hover:bg-blue-700"
         >
           <Plus size={20} />
           Nueva jornada
         </button>
       </div>
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
       {/* Estadísticas */}
       <div className="grid gap-4 sm:grid-cols-3">
         {[
@@ -343,6 +471,117 @@ export default function Jornadas() {
           <div className="space-y-3">
             {productos.map((producto) => {
               const disponible = disponibilidad(producto.id);
+              const esPieza = producto.unidadMedida === "pieza";
+              const valorActual = cantidades[producto.id];
+              const disponibleTexto = esPieza
+                ? medias_a_texto(disponible)
+                : `${disponible} ${unidades[producto.unidadMedida]}`;
+
+              if (esPieza) {
+                // UX para fiambres: piezas enteras + media pieza opcional
+                const { piezas, media } = valorActual
+                  ? (typeof valorActual === "object"
+                      ? valorActual
+                      : { piezas: 0, media: false })
+                  : { piezas: 0, media: false };
+
+                // Calcula la cantidad canónica actual de la UX
+                const cantidadCanonicaActual = recomponer_medias({ piezas, media });
+
+                // Máximo de piezas enteras permitidas, considerando si media ya está marcada.
+                // Si media=true, restamos 1 del disponible antes de dividir por 2.
+                const maxPiezas = maximo_piezas_segun_disponible(
+                  disponible,
+                  media
+                );
+
+                // Media está deshabilitada si:
+                // - no hay stock disponible (disponible < 1), o
+                // - las piezas actuales * 2 ya consumen todo el stock disponible (no queda espacio para media)
+                const mediaDisabled = !puede_agregar_media(disponible, piezas);
+
+                // Helper para actualizar estado validando contra stock total
+                const actualizarCantidades = (nuevasPiezas: number, nuevaMedia: boolean) => {
+                  const canonica = recomponer_medias({ piezas: nuevasPiezas, media: nuevaMedia });
+                  if (canonica > disponible) {
+                    // No permitir transición que exceda el stock
+                    return;
+                  }
+                  setCantidades((actuales) => ({
+                    ...actuales,
+                    [producto.id]: { piezas: nuevasPiezas, media: nuevaMedia },
+                  }));
+                };
+
+                return (
+                  <div
+                    key={producto.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-4"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Package
+                        className="shrink-0 text-blue-600"
+                        size={23}
+                      />
+                      <div>
+                        <p className="font-medium text-slate-800">
+                          {producto.nombre}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          Disponible: {disponibleTexto}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {moneda(producto.precio)} por pieza
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <span>Piezas:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max={maxPiezas}
+                          step="1"
+                          value={piezas}
+                          onChange={(e) => {
+                            const nuevasPiezas = Number(e.target.value);
+                            if (!es_cantidad_valida(nuevasPiezas)) {
+                              setError(
+                                `Piezas inválidas de ${producto.nombre}: se esperaba un entero mayor o igual que cero.`
+                              );
+                              return;
+                            }
+                            setError("");
+                            actualizarCantidades(nuevasPiezas, media);
+                          }}
+                          className="min-h-12 w-20 rounded-lg border border-slate-300 p-3 text-right"
+                          aria-label={`Piezas enteras de ${producto.nombre}`}
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={media}
+                          disabled={mediaDisabled}
+                          onChange={(e) => {
+                            const nuevaMedia = e.target.checked;
+                            actualizarCantidades(piezas, nuevaMedia);
+                          }}
+                          className="w-4 h-4 rounded border-slate-300"
+                          aria-label={`Media pieza de ${producto.nombre}`}
+                        />
+                        <span>Media pieza</span>
+                      </label>
+                      <span className="text-slate-500 text-sm">
+                        = {medias_a_texto(cantidadCanonicaActual)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              // UX para lácteos: solo entero
               return (
                 <div
                   key={producto.id}
@@ -358,8 +597,7 @@ export default function Jornadas() {
                         {producto.nombre}
                       </p>
                       <p className="text-sm text-slate-500">
-                        Disponible: {disponible}{" "}
-                        {unidades[producto.unidadMedida]}
+                        Disponible: {disponible} {unidades[producto.unidadMedida]}
                       </p>
                       <p className="text-xs text-slate-400">
                         {moneda(producto.precio)} por{" "}
@@ -373,12 +611,8 @@ export default function Jornadas() {
                       type="number"
                       min="0"
                       max={disponible}
-                      step={
-                        producto.unidadMedida === "kg"
-                          ? "0.001"
-                          : "1"
-                      }
-                      value={cantidades[producto.id] ?? ""}
+                      step="1"
+                      value={(cantidades[producto.id] as string) ?? ""}
                       onChange={(e) =>
                         setCantidades((actuales) => ({
                           ...actuales,
@@ -412,6 +646,7 @@ export default function Jornadas() {
             <button
               type="button"
               onClick={guardarPreparacion}
+              disabled={estadoOperacion.bloqueado}
               className="min-h-12 rounded-lg bg-blue-600 px-5 font-semibold text-white"
             >
               Guardar preparación
@@ -444,12 +679,7 @@ export default function Jornadas() {
           const camion = camiones.find(
             (c) => c.id === jornada.camionId
           );
-          const total = jornada.items.reduce(
-            (acumulado, item) =>
-              acumulado +
-              item.cantidad * item.precioReferencia,
-            0
-          );
+          const total = sumar_importes(jornada.items.map(valorItem));
           return (
             <article
               key={jornada.id}
@@ -512,8 +742,9 @@ export default function Jornadas() {
                           {item.nombreProducto}
                         </td>
                         <td className="py-3 text-right">
-                          {item.cantidad}{" "}
-                          {unidades[item.unidadMedida]}
+                          {item.unidadMedida === "pieza"
+                            ? medias_a_texto(item.cantidad)
+                            : `${item.cantidad} ${unidades[item.unidadMedida]}`}
                         </td>
                       </tr>
                     ))}
@@ -533,6 +764,7 @@ export default function Jornadas() {
                   <button
                     type="button"
                     onClick={() => iniciarReparto(jornada)}
+                    disabled={estadoOperacion.bloqueado}
                     className="min-h-12 rounded-lg bg-green-600 px-5 font-semibold text-white hover:bg-green-700"
                   >
                     Confirmar salida

@@ -1,51 +1,12 @@
 
+import { useState, type ReactNode } from "react";
+
 import {
-  createContext,
-  useContext,
-  useState,
-  type ReactNode,
-} from "react";
-
-export type RolUsuario =
-  | "administrador"
-  | "vendedor"
-  | "deposito";
-
-export interface UsuarioDemo {
-  id: string;
-  nombre: string;
-  rol: RolUsuario;
-}
-
-const CLAVE_SESION = "distribuidora_sesion_demo_v1";
-
-export const usuariosDemo: UsuarioDemo[] = [
-  {
-    id: "admin-demo",
-    nombre: "Administrador",
-    rol: "administrador",
-  },
-  {
-    id: "vendedor-demo",
-    nombre: "Vendedor de reparto",
-    rol: "vendedor",
-  },
-  {
-    id: "deposito-demo",
-    nombre: "Encargado de depósito",
-    rol: "deposito",
-  },
-];
-
-interface AuthContextType {
-  usuario: UsuarioDemo | null;
-  iniciarSesion: (usuarioId: string) => boolean;
-  cerrarSesion: () => void;
-}
-
-const AuthContext = createContext<
-  AuthContextType | undefined
->(undefined);
+  CLAVE_SESION,
+  usuariosDemo,
+  type UsuarioDemo,
+} from "./auth/usuariosDemo";
+import { AuthContext } from "./auth/AuthContextValue";
 
 function recuperarSesion(): UsuarioDemo | null {
   try {
@@ -108,16 +69,4 @@ export function AuthProvider({
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const contexto = useContext(AuthContext);
-
-  if (!contexto) {
-    throw new Error(
-      "useAuth debe utilizarse dentro de AuthProvider"
-    );
-  }
-
-  return contexto;
 }

@@ -9,10 +9,39 @@ import {
 
 import { useJornadas } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
-import { useVentas } from "../hooks/useVentas";
-import { useMovimientos } from "../hooks/useMovimientos";
-import { useCobros } from "../hooks/useCobros";
-import { salidasPorMovimiento } from "../data/mockMovimientos";
+import { leerVentas, useVentas } from "../hooks/useVentas";
+import {
+  leerMovimientosDiscriminado,
+  useMovimientos,
+} from "../hooks/useMovimientos";
+import {
+  leerCobrosDiscriminado,
+  useCobros,
+} from "../hooks/useCobros";
+import {
+  acumularCuarentena,
+  bloqueaRendicion,
+  calcularFilasMercaderia,
+  calcularResumenCaja,
+  conteoDesdeEntrada,
+  leerCantidad,
+  type EntradaConteo,
+} from "./rendicion_calculos";
+import { entrada_desde_cantidad, cantidad_a_texto } from "../domain/retornos";
+import {
+  NO_DISPONIBLE,
+  disponibilidadRendicion,
+} from "./avisosStorage";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
+
+const conteoInicial: EntradaConteo = { texto: "", media: false };
+
+// Presentación de una cantidad canónica; "—" si no pudo calcularse.
+const textoCantidad = (
+  unidad: "unidad" | "pieza",
+  cantidad: number | null
+) => (cantidad === null ? "—" : cantidad_a_texto(unidad, cantidad));
 
 const moneda = (cantidad: number) =>
   new Intl.NumberFormat("es-AR", {
@@ -20,54 +49,40 @@ const moneda = (cantidad: number) =>
     currency: "ARS",
   }).format(cantidad);
 
-const unidades = {
-  unidad: "un.",
-  pieza: "pzas.",
-  kg: "kg",
-} as const;
-
-const redondear = (cantidad: number) =>
-  Math.round((cantidad + Number.EPSILON) * 1000) / 1000;
-
-function leerCantidad(
-  texto: string | undefined
-): number | null {
-  if (texto === undefined || texto.trim() === "") {
-    return null;
-  }
-
-  const cantidad = Number(texto);
-
-  return Number.isFinite(cantidad) && cantidad >= 0
-    ? cantidad
-    : null;
-}
-
-function cantidadValida(
-  cantidad: number,
-  unidad: "unidad" | "pieza" | "kg"
-): boolean {
-  return (
-    Number.isFinite(cantidad) &&
-    cantidad >= 0 &&
-    (unidad === "kg"
-      ? Math.abs(
-          cantidad * 1000 - Math.round(cantidad * 1000)
-        ) < 0.000001
-      : Number.isInteger(cantidad))
-  );
-}
+// Aviso cuando la mercadería no se puede conciliar por alguno de los dos
+// motivos reales del estado `inconsistente`: las salidas superan lo cargado o
+// hay cantidades fuera del dominio canónico (no enteras / negativas). El bloqueo
+// lo decide `bloqueaRendicion`; esto es solo el texto que ve el usuario.
+const MENSAJE_INCONSISTENCIA_MERCADERIA =
+  "Hay una inconsistencia de mercadería: las salidas superan lo cargado o existen cantidades inválidas. Revisá los datos antes de cerrar.";
 
 export default function Rendicion() {
-  const { jornadas, cerrarJornada } = useJornadas();
-  const { camiones } = useCamiones();
-  const { ventas } = useVentas();
-  const { movimientos } = useMovimientos();
-  const { cobros } = useCobros();
+  const {
+    jornadas,
+    cerrarJornada,
+    estadoLectura: estadoJornadas,
+  } = useJornadas();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const { ventas, estadoLectura: estadoVentas } = useVentas();
+  const { movimientos, estadoLectura: estadoMovimientos } = useMovimientos();
+  const { cobros, estadoLectura: estadoCobros } = useCobros();
+
+  // Un ledger corrupto NO equivale a ausencia: cada cálculo dependiente se
+  // marca no disponible y la rendición no se cierra.
+  const disponibilidad = disponibilidadRendicion(
+    estadoVentas,
+    estadoCobros,
+    estadoMovimientos
+  );
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    camiones: estadoCamiones,
+  });
 
   const [jornadaId, setJornadaId] = useState("");
+  // Entrada de UI por producto; solo se persiste la cantidad canónica.
   const [conteos, setConteos] = useState<
-    Record<string, string>
+    Record<string, EntradaConteo>
   >({});
   const [efectivoEntregado, setEfectivoEntregado] =
     useState("");
@@ -92,204 +107,68 @@ export default function Rendicion() {
   // Una venta fiada genera deuda, NO efectivo.
   // Un cobro de deuda anterior suma a la caja
   // cuando se realizó durante esta jornada.
-  const resumenCaja = useMemo(() => {
-    let ventasEfectivo = 0;
-    let ventasTransferencia = 0;
-    let ventasCuentaCorriente = 0;
-    let cobrosEfectivo = 0;
-    let cobrosTransferencia = 0;
-    let cantidadVentas = 0;
-    let cantidadCobros = 0;
-
-    for (const venta of ventas) {
-      if (venta.jornadaId !== jornadaId) continue;
-
-      cantidadVentas += 1;
-
-      if (venta.medioPago === "efectivo") {
-        ventasEfectivo += venta.total;
-      } else if (venta.medioPago === "transferencia") {
-        ventasTransferencia += venta.total;
-      } else {
-        ventasCuentaCorriente += venta.total;
-      }
-    }
-
-    for (const cobro of cobros) {
-      if (cobro.jornadaId !== jornadaId) continue;
-
-      cantidadCobros += 1;
-
-      if (cobro.medio === "efectivo") {
-        cobrosEfectivo += cobro.importe;
-      } else {
-        cobrosTransferencia += cobro.importe;
-      }
-    }
-
-    const dinero = (valor: number) =>
-      Math.round(valor * 100) / 100;
-
-    return {
-      ventasEfectivo: dinero(ventasEfectivo),
-      ventasTransferencia: dinero(ventasTransferencia),
-      cuentaCorriente: dinero(ventasCuentaCorriente),
-      cobrosEfectivo: dinero(cobrosEfectivo),
-      cobrosTransferencia: dinero(cobrosTransferencia),
-
-      efectivo: dinero(
-        ventasEfectivo + cobrosEfectivo
-      ),
-
-      transferencias: dinero(
-        ventasTransferencia + cobrosTransferencia
-      ),
-
-      totalVendido: dinero(
-        ventasEfectivo +
-          ventasTransferencia +
-          ventasCuentaCorriente
-      ),
-
-      cantidadVentas,
-      cantidadCobros,
-    };
-  }, [ventas, cobros, jornadaId]);
+  const resumenCaja = useMemo(
+    () => calcularResumenCaja(jornadaId, ventas, cobros),
+    [ventas, cobros, jornadaId]
+  );
 
   const filasMercaderia = useMemo(() => {
-    if (!jornada) return [];
-
-    return jornada.items.map((item) => {
-      let vendido = 0;
-      let merma = 0;
-      let reemplazos = 0;
-
-      for (const venta of ventas) {
-        if (venta.jornadaId !== jornada.id) continue;
-
-        for (const detalle of venta.items) {
-          if (detalle.productoId === item.productoId) {
-            vendido += detalle.cantidad;
-          }
-        }
-      }
-
-      for (const movimiento of movimientos) {
-        if (movimiento.jornadaId !== jornada.id) {
-          continue;
-        }
-
-        if (
-          movimiento.tipo === "merma" &&
-          movimiento.producto.productoId ===
-            item.productoId
-        ) {
-          merma += movimiento.producto.cantidad;
-        }
-
-        if (movimiento.tipo === "cambio") {
-          for (const salida of salidasPorMovimiento(
-            movimiento
-          )) {
-            if (salida.productoId === item.productoId) {
-              reemplazos += salida.cantidad;
-            }
-          }
-        }
-      }
-
-      const esperado = redondear(
-        item.cantidad - vendido - merma - reemplazos
-      );
-
-      const contado = leerCantidad(
-        conteos[String(item.productoId)]
-      );
-
-      const diferencia =
-        contado === null
-          ? null
-          : redondear(contado - esperado);
-
-      return {
-        ...item,
-        vendido: redondear(vendido),
-        merma: redondear(merma),
-        reemplazos: redondear(reemplazos),
-        esperado,
-        contado,
-        diferencia,
-      };
-    });
-  }, [jornada, ventas, movimientos, conteos]);
-
-  const productosCuarentena = useMemo(() => {
-    const acumulado = new Map<
-      number,
+    return calcularFilasMercaderia(
+      jornada,
+      ventas,
+      movimientos,
+      conteos,
       {
-        productoId: number;
-        nombre: string;
-        cantidad: number;
-        unidad: string;
+        mercaderiaDisponible: disponibilidad.mercaderiaDisponible,
+        ventasDisponibles: disponibilidad.ventasDisponibles,
+        movimientosDisponibles: disponibilidad.movimientosDisponibles,
       }
-    >();
+    );
+  }, [
+    jornada,
+    ventas,
+    movimientos,
+    conteos,
+    disponibilidad.mercaderiaDisponible,
+    disponibilidad.movimientosDisponibles,
+    disponibilidad.ventasDisponibles,
+  ]);
 
-    for (const movimiento of movimientos) {
-      if (
-        movimiento.jornadaId !== jornadaId ||
-        movimiento.tipo === "merma"
-      ) {
-        continue;
-      }
-
-      const producto =
-        movimiento.tipo === "cambio"
-          ? movimiento.productoDevuelto
-          : movimiento.producto;
-
-      const anterior = acumulado.get(
-        producto.productoId
-      );
-
-      acumulado.set(producto.productoId, {
-        productoId: producto.productoId,
-        nombre: producto.nombreProducto,
-        cantidad: redondear(
-          (anterior?.cantidad ?? 0) +
-            producto.cantidad
-        ),
-        unidad: unidades[producto.unidadMedida],
-      });
-    }
-
-    return [...acumulado.values()];
-  }, [movimientos, jornadaId]);
+  const productosCuarentena = useMemo(
+    () => acumularCuarentena(jornadaId, movimientos),
+    [movimientos, jornadaId]
+  );
 
   const efectivoContado = leerCantidad(
     efectivoEntregado
   );
 
   const diferenciaEfectivo =
-    efectivoContado === null
+    efectivoContado === null || !disponibilidad.cajaDisponible
       ? null
       : Math.round(
           (efectivoContado - resumenCaja.efectivo) *
             100
         ) / 100;
 
+  const stockInconsistente = filasMercaderia.some(
+    (fila) => fila.estado === "inconsistente"
+  );
+
+  const hayUnidadNoSoportada = filasMercaderia.some(
+    (fila) => fila.estado === "no_soportada"
+  );
+
+  const rendicionBloqueada =
+    bloqueaRendicion(filasMercaderia);
+
   const tieneDiferencias =
     filasMercaderia.some(
       (fila) =>
-        fila.diferencia !== null &&
-        Math.abs(fila.diferencia) > 0.000001
+        fila.diferencia !== null && fila.diferencia !== 0
     ) ||
     (diferenciaEfectivo !== null &&
       Math.abs(diferenciaEfectivo) > 0.009);
-
-  const stockInconsistente =
-    filasMercaderia.some(
-      (fila) => fila.esperado < -0.000001
-    );
 
   function seleccionarJornada(id: string) {
     setJornadaId(id);
@@ -304,14 +183,18 @@ export default function Rendicion() {
     );
 
     if (elegida?.cierre) {
+      // Los conteos guardados ya son canónicos: se reconstruye piezas + media.
       setConteos(
         Object.fromEntries(
-          Object.entries(
-            elegida.cierre.conteos
-          ).map(([clave, cantidad]) => [
-            clave,
-            String(cantidad),
-          ])
+          elegida.items.flatMap((item) => {
+            const entrada = entrada_desde_cantidad(
+              item.unidadMedida,
+              elegida.cierre!.conteos[String(item.productoId)]
+            );
+            return entrada
+              ? [[String(item.productoId), entrada] as const]
+              : [];
+          })
         )
       );
 
@@ -329,17 +212,23 @@ export default function Rendicion() {
     if (
       !jornada ||
       jornada.estado !== "abierta" ||
-      stockInconsistente
+      rendicionBloqueada ||
+      !disponibilidad.mercaderiaDisponible
     ) {
       return;
     }
 
     setConteos(
       Object.fromEntries(
-        filasMercaderia.map((fila) => [
-          String(fila.productoId),
-          String(fila.esperado),
-        ])
+        filasMercaderia.flatMap((fila) => {
+          const entrada =
+            fila.esperado === null
+              ? null
+              : entrada_desde_cantidad(fila.unidadMedida, fila.esperado);
+          return entrada
+            ? [[String(fila.productoId), entrada] as const]
+            : [];
+        })
       )
     );
 
@@ -353,6 +242,7 @@ export default function Rendicion() {
   function confirmarCierre() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
 
     if (
       !jornada ||
@@ -364,63 +254,16 @@ export default function Rendicion() {
       return;
     }
 
-    if (stockInconsistente) {
-      setError(
-        "Hay productos con stock esperado negativo. Revisá las ventas y movimientos antes de cerrar."
-      );
+    if (!disponibilidad.cierreDisponible) {
+      setError(disponibilidad.avisos.join(" "));
       return;
     }
 
-    const conteosFinales: Record<
-      string,
-      number
-    > = {};
-
-    for (const fila of filasMercaderia) {
-      const valor = leerCantidad(
-        conteos[String(fila.productoId)]
-      );
-
-      if (
-        valor === null ||
-        !cantidadValida(
-          valor,
-          fila.unidadMedida
-        )
-      ) {
-        setError(
-          `Ingresá un conteo válido para ${fila.nombreProducto}.`
-        );
-        return;
-      }
-
-      conteosFinales[
-        String(fila.productoId)
-      ] = valor;
-    }
-
-    if (
-      efectivoContado === null ||
-      Math.abs(
-        efectivoContado * 100 -
-          Math.round(
-            efectivoContado * 100
-          )
-      ) > 0.000001
-    ) {
-      setError(
-        "Ingresá un importe válido de efectivo entregado (puede ser 0)."
-      );
-      return;
-    }
-
-    if (
-      tieneDiferencias &&
-      !observaciones.trim()
-    ) {
-      setError(
-        "Hay diferencias de stock o de caja. Es obligatorio explicar el motivo."
-      );
+    // L-1 (bloque E): primer armado del cierre, con lecturas frescas de
+    // Ventas, Cobros y Movimientos y todas las comprobaciones vigentes.
+    const armadoPrevio = armarCierre();
+    if (!armadoPrevio.ok) {
+      setError(armadoPrevio.error);
       return;
     }
 
@@ -431,22 +274,20 @@ export default function Rendicion() {
 
     if (!confirmado) return;
 
-    const cierre = {
-      fecha: new Date().toISOString(),
-      conteos: conteosFinales,
-      efectivoEntregado: efectivoContado,
-      efectivoEsperado: resumenCaja.efectivo,
-      transferenciasInformadas:
-        resumenCaja.transferencias,
-      ventasCuentaCorriente:
-        resumenCaja.cuentaCorriente,
-      observaciones: observaciones.trim(),
-    };
+    // L-1 (bloque E): la ventana que abre el confirm también es una ventana
+    // en la que los ledgers pueden corromperse. Releer y rearmar el cierre
+    // completo con lecturas nuevas: lo que se persiste es ese armado final,
+    // no el previo al confirm. Si algo falla, no se escribe nada.
+    const armadoFinal = armarCierre();
+    if (!armadoFinal.ok) {
+      setError(armadoFinal.error);
+      return;
+    }
 
     if (
       !cerrarJornada(
         jornada.id,
-        cierre
+        armadoFinal.cierre
       )
     ) {
       setError(
@@ -458,6 +299,163 @@ export default function Rendicion() {
     setMensaje(
       "Jornada cerrada correctamente."
     );
+  }
+
+  /**
+   * L-1 (bloque E): arma el cierre completo con lecturas FRESCAS de Ventas,
+   * Cobros y Movimientos. Es la misma secuencia de comprobaciones que la
+   * pantalla hacía antes de confirmar; se ejecuta dos veces (antes y después
+   * del confirm) para que la ventana del confirm no pueda cerrar la jornada
+   * con datos leídos antes de que el storage cambiara.
+   */
+  function armarCierre():
+    | { ok: true; cierre: Parameters<typeof cerrarJornada>[1] }
+    | { ok: false; error: string } {
+    if (!jornada || jornada.estado !== "abierta") {
+      return {
+        ok: false,
+        error: "Seleccioná una jornada abierta.",
+      };
+    }
+
+    const lecturaVentas = leerVentas();
+    if (!lecturaVentas.ok) {
+      return {
+        ok: false,
+        error: `No se puede cerrar: ${lecturaVentas.error}`,
+      };
+    }
+
+    const lecturaCobros = leerCobrosDiscriminado();
+    if (!lecturaCobros.ok) {
+      return {
+        ok: false,
+        error: `No se puede cerrar: ${lecturaCobros.error}`,
+      };
+    }
+
+    const lecturaMovimientos = leerMovimientosDiscriminado();
+    if (!lecturaMovimientos.ok) {
+      return {
+        ok: false,
+        error: `No se puede cerrar: ${lecturaMovimientos.error}`,
+      };
+    }
+
+    const disponibilidadActual = disponibilidadRendicion(
+      lecturaVentas.estado,
+      lecturaCobros.estado,
+      lecturaMovimientos.estado
+    );
+    const filasMercaderiaActuales = calcularFilasMercaderia(
+      jornada,
+      lecturaVentas.ventas,
+      lecturaMovimientos.movimientos,
+      conteos,
+      disponibilidadActual
+    );
+    const resumenCajaActual = calcularResumenCaja(
+      jornada.id,
+      lecturaVentas.ventas,
+      lecturaCobros.cobros
+    );
+
+    const stockInconsistenteActual = filasMercaderiaActuales.some(
+      (fila) => fila.estado === "inconsistente"
+    );
+
+    if (stockInconsistenteActual) {
+      return {
+        ok: false,
+        error: MENSAJE_INCONSISTENCIA_MERCADERIA,
+      };
+    }
+
+    const hayUnidadNoSoportadaActual = filasMercaderiaActuales.some(
+      (fila) => fila.estado === "no_soportada"
+    );
+
+    if (hayUnidadNoSoportadaActual) {
+      return {
+        ok: false,
+        error:
+          "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar.",
+      };
+    }
+
+    const conteosFinales: Record<
+      string,
+      number
+    > = {};
+
+    for (const fila of filasMercaderiaActuales) {
+      const valor = conteoDesdeEntrada(
+        fila.unidadMedida,
+        conteos[String(fila.productoId)]
+      );
+
+      if (valor === null) {
+        return {
+          ok: false,
+          error: `Ingresá un conteo válido para ${fila.nombreProducto}.`,
+        };
+      }
+
+      conteosFinales[
+        String(fila.productoId)
+      ] = valor;
+    }
+
+    const efectivoContadoActual = leerCantidad(
+      efectivoEntregado
+    );
+
+    if (
+      efectivoContadoActual === null ||
+      Math.abs(
+        efectivoContadoActual * 100 -
+          Math.round(
+            efectivoContadoActual * 100
+          )
+      ) > 0.000001
+    ) {
+      return {
+        ok: false,
+        error:
+          "Ingresá un importe válido de efectivo entregado (puede ser 0).",
+      };
+    }
+
+    const diferenciaEfectivoActual = Math.round(
+      (efectivoContadoActual - resumenCajaActual.efectivo) * 100
+    ) / 100;
+    const tieneDiferenciasActuales =
+      filasMercaderiaActuales.some(
+        (fila) => fila.diferencia !== null && fila.diferencia !== 0
+      ) || Math.abs(diferenciaEfectivoActual) > 0.009;
+
+    if (tieneDiferenciasActuales && !observaciones.trim()) {
+      return {
+        ok: false,
+        error:
+          "Hay diferencias de stock o de caja. Es obligatorio explicar el motivo.",
+      };
+    }
+
+    return {
+      ok: true,
+      cierre: {
+        fecha: new Date().toISOString(),
+        conteos: conteosFinales,
+        efectivoEntregado: efectivoContadoActual,
+        efectivoEsperado: resumenCajaActual.efectivo,
+        transferenciasInformadas:
+          resumenCajaActual.transferencias,
+        ventasCuentaCorriente:
+          resumenCajaActual.cuentaCorriente,
+        observaciones: observaciones.trim(),
+      },
+    };
   }
 
   return (
@@ -475,6 +473,8 @@ export default function Rendicion() {
           Conciliación de mercadería y dinero por jornada
         </p>
       </header>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {mensaje && (
         <div
@@ -574,6 +574,20 @@ export default function Rendicion() {
 
       {jornada && (
         <>
+          {disponibilidad.avisos.map((aviso) => (
+            <div
+              key={aviso}
+              role="alert"
+              className="flex items-start gap-2 rounded-xl bg-red-50 p-4 text-sm font-medium text-red-800"
+            >
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+              <span>
+                <strong>Datos dañados: </strong>
+                {aviso}
+              </span>
+            </div>
+          ))}
+
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -587,7 +601,10 @@ export default function Rendicion() {
                 <button
                   type="button"
                   onClick={completarConEsperados}
-                  disabled={stockInconsistente}
+                  disabled={
+                    rendicionBloqueada ||
+                    !disponibilidad.mercaderiaDisponible
+                  }
                   className="min-h-11 rounded-lg border border-blue-300 px-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40"
                 >
                   Completar con esperados
@@ -602,13 +619,26 @@ export default function Rendicion() {
               es una ayuda: no sustituye el recuento físico.
             </p>
 
-            {stockInconsistente && (
+            {stockInconsistente && !disponibilidad.avisos.length && (
               <p
                 role="alert"
                 className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800"
               >
-                Se detectó stock esperado negativo.
-                Revisá el historial de ventas y movimientos.
+                {MENSAJE_INCONSISTENCIA_MERCADERIA}
+              </p>
+            )}
+
+            {hayUnidadNoSoportada && (
+              <p
+                role="alert"
+                className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800"
+              >
+                Hay productos con una unidad que el
+                sistema no soporta. El dominio
+                aprobado solo admite unidades y
+                piezas (media pieza): no existe venta
+                por kilogramo. Revisá esos productos
+                antes de rendir.
               </p>
             )}
 
@@ -623,166 +653,255 @@ export default function Rendicion() {
                       {fila.nombreProducto}
                     </h3>
 
-                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                      <div>
-                        <p className="text-slate-500">
-                          Cargado
-                        </p>
-                        <strong>
-                          {fila.cantidad}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <p className="text-slate-500">
-                          Vendido
-                        </p>
-                        <strong>
-                          {fila.vendido}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <p className="text-slate-500">
-                          Mermas / cambios
-                        </p>
-                        <strong>
-                          {redondear(
-                            fila.merma +
-                              fila.reemplazos
-                          )}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <p className="text-slate-500">
-                          Esperado
-                        </p>
-                        <strong>
-                          {fila.esperado}{" "}
-                          {unidades[
-                            fila.unidadMedida
-                          ]}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-slate-100 pt-4">
-                      <label className="space-y-1 text-sm font-medium">
-                        <span>
-                          Stock físico contado *
-                        </span>
-
-                        <input
-                          type="number"
-                          min="0"
-                          step={
-                            fila.unidadMedida ===
-                            "kg"
-                              ? "0.001"
-                              : "1"
-                          }
-                          value={
-                            conteos[
-                              String(
-                                fila.productoId
-                              )
-                            ] ?? ""
-                          }
-                          disabled={
-                            jornada.estado ===
-                            "cerrada"
-                          }
-                          onChange={(e) =>
-                            setConteos(
-                              (actual) => ({
-                                ...actual,
-                                [String(
-                                  fila.productoId
-                                )]:
-                                  e.target.value,
-                              })
-                            )
-                          }
-                          className="block min-h-12 w-36 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
-                          placeholder="Ej: 45"
-                        />
-                      </label>
-
-                      <div
-                        className="text-right text-sm"
-                        aria-live="polite"
-                      >
-                        <p className="text-slate-500">
-                          Diferencia
-                        </p>
-
-                        {fila.diferencia ===
-                        null ? (
-                          <span className="text-slate-500">
-                            Sin contar
-                          </span>
-                        ) : (
-                          <strong
-                            className={
-                              fila.diferencia ===
-                              0
-                                ? "text-green-700"
-                                : fila.diferencia >
-                                    0
-                                  ? "text-amber-700"
-                                  : "text-red-700"
-                            }
-                          >
-                            {fila.diferencia >
-                            0
-                              ? "+"
-                              : ""}
-                            {fila.diferencia}{" "}
-                            {
-                              unidades[
-                                fila.unidadMedida
-                              ]
-                            }{" "}
-                            ·{" "}
-                            {fila.diferencia ===
-                            0
-                              ? "Exacto"
-                              : fila.diferencia >
-                                  0
-                                ? "Sobrante"
-                                : "Faltante"}
-                          </strong>
-                        )}
-                      </div>
-                    </div>
-
-                    {fila.contado !==
-                      null && (
-                      <p className="mt-3 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
-                        Cálculo:{" "}
-                        {fila.contado}{" "}
-                        contados −{" "}
-                        {fila.esperado}{" "}
-                        esperados ={" "}
-                        <strong>
-                          {fila.diferencia}{" "}
-                          {
-                            unidades[
-                              fila.unidadMedida
-                            ]
-                          }
-                        </strong>
+                    {fila.estado ===
+                    "no_soportada" ? (
+                      <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                        Unidad no soportada por el
+                        sistema. Esta fila no se
+                        puede conciliar ni cerrar.
                       </p>
+                    ) : (
+                      <>
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                          <div>
+                            <p className="text-slate-500">
+                              Cargado
+                            </p>
+                            <strong>
+                              {textoCantidad(
+                                fila.unidadMedida,
+                                fila.cargado
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <p className="text-slate-500">
+                              Vendido
+                            </p>
+                            <strong>
+                              {fila.vendidoDisponible
+                                ? textoCantidad(
+                                    fila.unidadMedida,
+                                    fila.vendido
+                                  )
+                                : NO_DISPONIBLE}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <p className="text-slate-500">
+                              Mermas / cambios
+                            </p>
+                            <strong>
+                              {fila.movimientosDisponibles
+                                ? textoCantidad(
+                                    fila.unidadMedida,
+                                    fila.mermaYCambios
+                                  )
+                                : NO_DISPONIBLE}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <p className="text-slate-500">
+                              Esperado
+                            </p>
+                            <strong>
+                              {disponibilidad.mercaderiaDisponible
+                                ? textoCantidad(
+                                    fila.unidadMedida,
+                                    fila.esperado
+                                  )
+                                : NO_DISPONIBLE}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-slate-100 pt-4">
+                          <label className="space-y-1 text-sm font-medium">
+                            <span>
+                              Stock físico contado *
+                            </span>
+
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={
+                                (
+                                  conteos[
+                                    String(fila.productoId)
+                                  ] ?? conteoInicial
+                                ).texto
+                              }
+                              disabled={
+                                jornada.estado ===
+                                "cerrada"
+                              }
+                              onChange={(e) =>
+                                setConteos(
+                                  (actual) => ({
+                                    ...actual,
+                                    [String(
+                                      fila.productoId
+                                    )]: {
+                                      texto:
+                                        e.target.value,
+                                      media: (
+                                        actual[
+                                          String(
+                                            fila.productoId
+                                          )
+                                        ] ?? conteoInicial
+                                      ).media,
+                                    },
+                                  })
+                                )
+                              }
+                              className="block min-h-12 w-36 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
+                              placeholder={
+                                fila.unidadMedida === "pieza"
+                                  ? "Piezas enteras"
+                                  : "Ej: 45"
+                              }
+                              aria-label={`Stock físico contado de ${fila.nombreProducto}`}
+                            />
+
+                            {fila.unidadMedida ===
+                              "pieza" && (
+                              <span className="mt-2 flex items-center gap-2 text-sm font-normal">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    (
+                                      conteos[
+                                        String(
+                                          fila.productoId
+                                        )
+                                      ] ?? conteoInicial
+                                    ).media
+                                  }
+                                  disabled={
+                                    jornada.estado ===
+                                    "cerrada"
+                                  }
+                                  onChange={(e) =>
+                                    setConteos(
+                                      (actual) => ({
+                                        ...actual,
+                                        [String(
+                                          fila.productoId
+                                        )]: {
+                                          texto: (
+                                            actual[
+                                              String(
+                                                fila.productoId
+                                              )
+                                            ] ??
+                                            conteoInicial
+                                          ).texto,
+                                          media:
+                                            e.target
+                                              .checked,
+                                        },
+                                      })
+                                    )
+                                  }
+                                  className="h-4 w-4 rounded border-slate-300"
+                                  aria-label={`Media pieza contada de ${fila.nombreProducto}`}
+                                />
+                                <span>Media pieza</span>
+                                {fila.contado !== null && (
+                                  <span className="text-slate-600">
+                                    ={" "}
+                                    {textoCantidad(
+                                      "pieza",
+                                      fila.contado
+                                    )}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </label>
+
+                          <div
+                            className="text-right text-sm"
+                            aria-live="polite"
+                          >
+                            <p className="text-slate-500">
+                              Diferencia
+                            </p>
+
+                            {!disponibilidad.mercaderiaDisponible ? (
+                              <span className="text-slate-500">
+                                {NO_DISPONIBLE}
+                              </span>
+                            ) : fila.diferencia === null ? (
+                              <span className="text-slate-500">
+                                Sin contar
+                              </span>
+                            ) : (
+                              <strong
+                                className={
+                                  fila.diferencia ===
+                                  0
+                                    ? "text-green-700"
+                                    : fila.diferencia >
+                                        0
+                                      ? "text-amber-700"
+                                      : "text-red-700"
+                                }
+                              >
+                                {fila.diferencia >
+                                0
+                                  ? "+"
+                                  : fila.diferencia < 0
+                                    ? "−"
+                                    : ""}
+                                {textoCantidad(
+                                  fila.unidadMedida,
+                                  Math.abs(fila.diferencia)
+                                )}{" "}
+                                ·{" "}
+                                {fila.diferencia ===
+                                0
+                                  ? "Exacto"
+                                  : fila.diferencia >
+                                      0
+                                    ? "Sobrante"
+                                    : "Faltante"}
+                              </strong>
+                            )}
+                          </div>
+                        </div>
+
+                        {disponibilidad.mercaderiaDisponible &&
+                          fila.contado !==
+                          null &&
+                          fila.diferencia !==
+                            null && (
+                          <p className="mt-3 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
+                            Cálculo:{" "}
+                            {textoCantidad(
+                              fila.unidadMedida,
+                              fila.contado
+                            )}{" "}
+                            contados −{" "}
+                            {textoCantidad(
+                              fila.unidadMedida,
+                              fila.esperado
+                            )}{" "}
+                            esperados ={" "}
+                            <strong>
+                              {fila.diferencia}{" "}
+                              {fila.unidadMedida === "pieza"
+                                ? "medias piezas"
+                                : "un."}
+                            </strong>
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 )
@@ -794,7 +913,11 @@ export default function Rendicion() {
                 Productos devueltos en cuarentena
               </h3>
 
-              {productosCuarentena.length ===
+              {!disponibilidad.movimientosDisponibles ? (
+                <p className="mt-2 text-sm font-semibold text-amber-900">
+                  {NO_DISPONIBLE}
+                </p>
+              ) : productosCuarentena.length ===
               0 ? (
                 <p className="mt-2 text-sm text-amber-800">
                   No hay devoluciones registradas.
@@ -813,8 +936,12 @@ export default function Rendicion() {
                           {producto.nombre}
                         </span>
                         <strong>
-                          {producto.cantidad}{" "}
-                          {producto.unidad}
+                          {producto.cantidad === null
+                            ? "No calculable"
+                            : cantidad_a_texto(
+                                producto.unidadMedida,
+                                producto.cantidad
+                              )}
                         </strong>
                       </div>
                     )
@@ -837,13 +964,17 @@ export default function Rendicion() {
             <p className="mb-4 text-sm text-slate-500">
               Ventas registradas:{" "}
               <strong>
-                {resumenCaja.cantidadVentas}
+                {estadoVentas === "corrupto"
+                  ? NO_DISPONIBLE
+                  : resumenCaja.cantidadVentas}
               </strong>
               {" · "}
               Cobros de deuda registrados
               en la jornada:{" "}
               <strong>
-                {resumenCaja.cantidadCobros}
+                {estadoCobros === "corrupto"
+                  ? NO_DISPONIBLE
+                  : resumenCaja.cantidadCobros}
               </strong>
               .
             </p>
@@ -907,7 +1038,9 @@ export default function Rendicion() {
                     {dato.titulo}
                   </p>
                   <p className="mt-1 text-xl font-bold">
-                    {moneda(dato.valor)}
+                    {disponibilidad.cajaDisponible
+                      ? moneda(dato.valor)
+                      : NO_DISPONIBLE}
                   </p>
                 </div>
               ))}
@@ -1025,7 +1158,9 @@ export default function Rendicion() {
                   confirmarCierre
                 }
                 disabled={
-                  stockInconsistente
+                  rendicionBloqueada ||
+                  !disponibilidad.cierreDisponible ||
+                  estadoOperacion.bloqueado
                 }
                 className="mt-5 min-h-14 w-full rounded-xl bg-green-600 px-5 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40"
               >

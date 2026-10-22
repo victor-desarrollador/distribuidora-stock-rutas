@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 
 import {
   LayoutDashboard,
@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 
-import { useAuth } from "../../AuthContext";
+import { useAuth } from "../../auth/useAuth";
 
 const menu = [
   { nombre: "Inicio", icono: LayoutDashboard, ruta: "/" },
@@ -42,14 +42,8 @@ const menu = [
 
 export default function Sidebar() {
   const { usuario, cerrarSesion } = useAuth();
-  const location = useLocation();
 
   const [menuAbierto, setMenuAbierto] = useState(false);
-
-  // Cerrar el menú al cambiar de página.
-  useEffect(() => {
-    setMenuAbierto(false);
-  }, [location.pathname]);
 
   // Permitir cerrar el menú con Escape.
   useEffect(() => {

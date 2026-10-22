@@ -1,24 +1,22 @@
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Truck,
   ShoppingCart,
-  Plus,
-  Minus,
   CheckCircle2,
   AlertTriangle,
   Package,
   Receipt,
 } from "lucide-react";
 
-import { useJornadas } from "../hooks/useJornadas";
+import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
 import { useClientes } from "../hooks/useClientes";
 import { useCamiones } from "../hooks/useCamiones";
 import { useVentas } from "../hooks/useVentas";
 
 import {
   useMovimientos,
-  leerMovimientos,
+  leerMovimientosDiscriminado,
 } from "../hooks/useMovimientos";
 
 import {
@@ -29,6 +27,25 @@ import type {
   Venta,
   MedioPago,
 } from "../data/mockVentas";
+
+
+
+import {
+  cantidad_unidad_desde_texto,
+  descomponer_medias,
+  es_cantidad_valida,
+  maximo_piezas_segun_disponible,
+  medias_a_texto,
+  puede_agregar_media,
+  recomponer_medias,
+} from "../domain/cantidades";
+import {
+  sumar_importes,
+} from "../domain/precios";
+import { construirItemsVenta } from "../domain/venta";
+import { revalidar_jornada_para_operacion } from "../domain/jornadas";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 // --------------------------------------------------
 // FUNCIONES AUXILIARES
@@ -44,7 +61,6 @@ const moneda = (valor: number) =>
 const unidades = {
   unidad: "un.",
   pieza: "pzas.",
-  kg: "kg",
 };
 
 // --------------------------------------------------
@@ -53,20 +69,27 @@ const unidades = {
 
 export default function Autoventa() {
   // Datos de los módulos existentes.
-  const { jornadas } = useJornadas();
-  const { clientes } = useClientes();
-  const { camiones } = useCamiones();
-  const { ventas, registrarVenta } = useVentas();
+  const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
+  const { clientes, estadoLectura: estadoClientes } = useClientes();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const { ventas, registrarVenta, estadoLectura: estadoVentas } = useVentas();
 
   // Movimientos: mermas, devoluciones y cambios.
-  const { movimientos } = useMovimientos();
+  const { movimientos, estadoLectura: estadoMovimientos } = useMovimientos();
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    clientes: estadoClientes,
+    camiones: estadoCamiones,
+    ventas: estadoVentas,
+    movimientos: estadoMovimientos,
+  });
 
   // Formulario de venta.
   const [jornadaId, setJornadaId] = useState("");
   const [clienteId, setClienteId] = useState("");
 
   const [cantidades, setCantidades] = useState<
-    Record<number, number>
+    Record<number, string | { piezas: number; media: boolean }>
   >({});
 
   const [medioPago, setMedioPago] =
@@ -80,12 +103,19 @@ export default function Autoventa() {
   // --------------------------------------------------
 
   // Solo se puede vender en jornadas abiertas.
-  const jornadasAbiertas = jornadas.filter(
-    (jornada) => jornada.estado === "abierta"
+  const jornadasAbiertas = useMemo(
+    () =>
+      jornadas.filter(
+        (jornada) => jornada.estado === "abierta"
+      ),
+    [jornadas]
   );
 
-  const jornada = jornadasAbiertas.find(
-    (j) => j.id === jornadaId
+  // Referencia estable: evita recrear el objeto en cada render
+  // y así invalidar los useMemo que dependen de `jornada`.
+  const jornada = useMemo(
+    () => jornadasAbiertas.find((j) => j.id === jornadaId),
+    [jornadasAbiertas, jornadaId]
   );
 
   const camion = camiones.find(
@@ -151,40 +181,54 @@ export default function Autoventa() {
   }, [jornada, cantidadesDescontadas]);
 
   // --------------------------------------------------
+  // HELPERS PARA CANTIDADES CANÓNICAS
+  // --------------------------------------------------
+
+  // Helper para obtener la cantidad canónica (medias piezas) desde el estado
+  const obtenerCantidadCanonica = useCallback(
+    (productoId: number): number => {
+      const valor = cantidades[productoId];
+      if (!valor) return 0;
+      const producto = productosCamion.find((p) => p.productoId === productoId);
+      if (!producto) return 0;
+      if (producto.unidadMedida === "unidad") {
+        return typeof valor === "string"
+          ? (cantidad_unidad_desde_texto(valor) ?? 0)
+          : 0;
+      }
+      // producto.unidadMedida === "pieza": el estado es { piezas, media }.
+      if (typeof valor === "object") {
+        try {
+          return recomponer_medias(valor);
+        } catch {
+          return 0;
+        }
+      }
+      return 0;
+    },
+    [cantidades, productosCamion]
+  );
+
+
+
+  // --------------------------------------------------
   // ARMAR EL DETALLE DE VENTA
   // --------------------------------------------------
 
   const itemsVenta = useMemo(() => {
-    return productosCamion
-      .filter(
-        (item) => (cantidades[item.productoId] ?? 0) > 0
-      )
-      .map((item) => {
-        const cantidad = cantidades[item.productoId] ?? 0;
-
-        return {
-          productoId: item.productoId,
-          nombreProducto: item.nombreProducto,
-          unidadMedida: item.unidadMedida,
-          cantidad,
-          precioUnitario: item.precioReferencia,
-          subtotal:
-            Math.round(
-              cantidad * item.precioReferencia * 100
-            ) / 100,
-        };
-      });
-  }, [productosCamion, cantidades]);
+    return construirItemsVenta({
+      productos: productosCamion.map((p) => ({
+        productoId: p.productoId,
+        nombreProducto: p.nombreProducto,
+        unidadMedida: p.unidadMedida,
+        precioReferencia: p.precioReferencia,
+      })),
+      obtenerCantidadCanonica,
+    });
+  }, [productosCamion, obtenerCantidadCanonica]);
 
   // Importe total de la venta.
-  const total =
-    Math.round(
-      itemsVenta.reduce(
-        (acumulado, item) =>
-          acumulado + item.subtotal,
-        0
-      ) * 100
-    ) / 100;
+  const total = sumar_importes(itemsVenta.map((item) => item.subtotal));
 
   // Historial de ventas de la jornada seleccionada.
   const ventasJornada = ventas
@@ -205,39 +249,8 @@ export default function Autoventa() {
   }
 
   // --------------------------------------------------
-  // CAMBIAR CANTIDAD DE UN PRODUCTO
-  // --------------------------------------------------
+  // CAMBIAR CANTIDAD DE UN PRODUCTO (solo para "unidad")
 
-  function cambiarCantidad(
-    productoId: number,
-    nuevaCantidad: number
-  ) {
-    const producto = productosCamion.find(
-      (p) => p.productoId === productoId
-    );
-
-    if (!producto) return;
-
-    if (!Number.isFinite(nuevaCantidad)) return;
-
-    // Evitar valores negativos o superiores al stock.
-    const cantidad = Math.max(
-      0,
-      Math.min(nuevaCantidad, producto.disponible)
-    );
-
-    // Los kg admiten hasta 3 decimales.
-    // Las unidades y piezas se manejan como enteros.
-    const cantidadFinal =
-      producto.unidadMedida === "kg"
-        ? Math.round(cantidad * 1000) / 1000
-        : Math.floor(cantidad);
-
-    setCantidades((actuales) => ({
-      ...actuales,
-      [productoId]: cantidadFinal,
-    }));
-  }
 
   // --------------------------------------------------
   // REGISTRAR LA VENTA
@@ -246,6 +259,7 @@ export default function Autoventa() {
   function guardarVenta() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
 
     if (!jornada || !camion) {
       setError("Seleccioná una jornada abierta.");
@@ -292,12 +306,30 @@ export default function Autoventa() {
     const resultado = registrarVenta(
       venta,
       (ventasActuales) => {
+        // M-2 (bloque E): revalidar la Jornada vigente justo antes de
+        // persistir. La jornada del render es un snapshot: puede haberse
+        // cerrado, desaparecido o cambiado de camión, y el storage de
+        // Jornadas puede haberse corrompido, desde el montaje.
+        const revalidacionJornada = revalidar_jornada_para_operacion(
+          leerJornadasDiscriminado(),
+          jornada,
+          "abierta"
+        );
+
+        if (!revalidacionJornada.ok) {
+          return `No se puede registrar: ${revalidacionJornada.error}`;
+        }
+
         // Leemos los movimientos más recientes de la demo.
-        const movimientosActuales = leerMovimientos();
+        const lecturaMovimientos = leerMovimientosDiscriminado();
+        if (!lecturaMovimientos.ok) {
+          return `No se puede registrar: ${lecturaMovimientos.error}`;
+        }
+        const movimientosActuales = lecturaMovimientos.movimientos;
 
         for (const item of itemsVenta) {
           // Cantidad que salió cargada en el camión.
-          const cargado = jornada.items.find(
+          const cargado = revalidacionJornada.jornada.items.find(
             (producto) =>
               producto.productoId === item.productoId
           );
@@ -347,14 +379,7 @@ export default function Autoventa() {
           const cantidadValida =
             Number.isFinite(item.cantidad) &&
             item.cantidad > 0 &&
-            (
-              item.unidadMedida === "kg"
-                ? Math.abs(
-                    item.cantidad * 1000 -
-                    Math.round(item.cantidad * 1000)
-                  ) < 0.000001
-                : Number.isInteger(item.cantidad)
-            );
+            Number.isInteger(item.cantidad);
 
           if (!cantidadValida) {
             return (
@@ -363,7 +388,9 @@ export default function Autoventa() {
             );
           }
 
-          if (item.cantidad > restante + 0.000001) {
+          // Usar cantidad canónica para validar stock
+          const cantidadCanonica = item.cantidad;
+          if (cantidadCanonica > restante + 0.000001) {
             return (
               `Stock insuficiente de ` +
               item.nombreProducto
@@ -411,6 +438,8 @@ export default function Autoventa() {
           Registro de ventas desde el camión
         </p>
       </div>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {/* MENSAJES */}
       {mensaje && (
@@ -562,100 +591,163 @@ export default function Autoventa() {
 
             <div className="space-y-3">
               {productosCamion.map((producto) => {
-                const cantidad =
-                  cantidades[producto.productoId] ?? 0;
+                const disponible = producto.disponible;
+                const esPieza = producto.unidadMedida === "pieza";
+                const valorActual = cantidades[producto.productoId];
+                const disponibleTexto = esPieza
+                  ? medias_a_texto(disponible)
+                  : `${disponible} ${unidades[producto.unidadMedida]}`;
 
-                const incremento =
-                  producto.unidadMedida === "kg"
-                    ? 0.5
-                    : 1;
+                if (esPieza) {
+                  // UX para fiambres: piezas enteras + media pieza opcional
+                  const { piezas, media } = valorActual
+                    ? (typeof valorActual === "object"
+                        ? valorActual
+                        : descomponer_medias(Number(valorActual)))
+                    : { piezas: 0, media: false };
 
+                  // Calcula la cantidad canónica actual de la UX
+                  const cantidadCanonicaActual = recomponer_medias({ piezas, media });
+
+                  // Máximo de piezas enteras permitidas, considerando si media ya está marcada.
+                  // Si media=true, restamos 1 del disponible antes de dividir por 2.
+                  const maxPiezas = maximo_piezas_segun_disponible(
+                    disponible,
+                    media
+                  );
+
+                  // Media está deshabilitada si:
+                  // - no hay stock disponible (disponible < 1), o
+                  // - las piezas actuales * 2 ya consumen todo el stock disponible (no queda espacio para media)
+                  const mediaDisabled = !puede_agregar_media(disponible, piezas);
+
+                  // Helper para actualizar estado validando contra stock total
+                  const actualizarCantidades = (nuevasPiezas: number, nuevaMedia: boolean) => {
+                    const canonica = recomponer_medias({ piezas: nuevasPiezas, media: nuevaMedia });
+                    if (canonica > disponible) {
+                      // No permitir transición que exceda el stock
+                      return;
+                    }
+                    setCantidades((actuales: Record<number, string | { piezas: number; media: boolean }>) => ({
+                      ...actuales,
+                      [producto.productoId]: { piezas: nuevasPiezas, media: nuevaMedia },
+                    }));
+                  };
+
+                  return (
+                    <div
+                      key={producto.productoId}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Package
+                          className="shrink-0 text-blue-600"
+                          size={23}
+                        />
+                        <div>
+                          <p className="font-medium text-slate-800">
+                            {producto.nombreProducto}
+                          </p>
+                          <p className="text-sm text-slate-500">
+                            Disponible: {disponibleTexto}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {moneda(producto.precioReferencia)} por pieza
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 text-sm">
+                          <span>Piezas:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max={maxPiezas}
+                            step="1"
+                            value={piezas}
+                            onChange={(e) => {
+                              const nuevasPiezas = Math.max(0, Number(e.target.value));
+                              if (!es_cantidad_valida(nuevasPiezas)) {
+                                setError(
+                                  `Piezas inválidas de ${producto.nombreProducto}: se esperaba un entero mayor o igual que cero.`
+                                );
+                                return;
+                              }
+                              setError("");
+                              actualizarCantidades(nuevasPiezas, media);
+                            }}
+                            className="min-h-12 w-20 rounded-lg border border-slate-300 p-3 text-right"
+                            aria-label={`Piezas enteras de ${producto.nombreProducto}`}
+                          />
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={media}
+                            disabled={mediaDisabled}
+                            onChange={(e) => {
+                              const nuevaMedia = e.target.checked;
+                              actualizarCantidades(piezas, nuevaMedia);
+                            }}
+                            className="w-4 h-4 rounded border-slate-300"
+                            aria-label={`Media pieza de ${producto.nombreProducto}`}
+                          />
+                          <span>Media pieza</span>
+                        </label>
+                        <span className="text-slate-500 text-sm">
+                          = {medias_a_texto(cantidadCanonicaActual)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // UX para lácteos: solo entero
                 return (
                   <div
                     key={producto.productoId}
-                    className="rounded-xl border border-slate-200 p-4"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4"
                   >
-                    <p className="font-semibold text-slate-900">
-                      {producto.nombreProducto}
-                    </p>
-
-                    <p className="mt-1 text-sm text-slate-500">
-                      {moneda(producto.precioReferencia)}{" "}
-                      por {producto.unidadMedida}
-                    </p>
-
-                    <p className="mt-1 text-xs text-blue-700">
-                      Disponible:{" "}
-                      {producto.disponible}{" "}
-                      {unidades[producto.unidadMedida]}
-                    </p>
-
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-slate-600">
-                        Cantidad
-                      </span>
-
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        {/* QUITAR */}
-                        <button
-                          type="button"
-                          aria-label={`Quitar ${producto.nombreProducto}`}
-                          onClick={() =>
-                            cambiarCantidad(
-                              producto.productoId,
-                              cantidad - incremento
-                            )
-                          }
-                          disabled={cantidad === 0}
-                          className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-300 disabled:opacity-40"
-                        >
-                          <Minus size={22} />
-                        </button>
-
-                        {/* CANTIDAD */}
-                        <input
-                          type="number"
-                          min="0"
-                          max={producto.disponible}
-                          step={
-                            producto.unidadMedida === "kg"
-                              ? "0.001"
-                              : "1"
-                          }
-                          value={cantidad}
-                          aria-label={`Cantidad de ${producto.nombreProducto}`}
-                          onChange={(e) =>
-                            cambiarCantidad(
-                              producto.productoId,
-                              e.target.value === ""
-                                ? 0
-                                : Number(e.target.value)
-                            )
-                          }
-                          className="h-12 w-20 rounded-lg border border-slate-300 text-center text-lg font-bold"
-                        />
-
-                        {/* AGREGAR */}
-                        <button
-                          type="button"
-                          aria-label={`Agregar ${producto.nombreProducto}`}
-                          onClick={() =>
-                            cambiarCantidad(
-                              producto.productoId,
-                              cantidad + incremento
-                            )
-                          }
-                          disabled={
-                            cantidad + incremento >
-                            producto.disponible + 0.000001
-                          }
-                          className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white disabled:opacity-40"
-                        >
-                          <Plus size={22} />
-                        </button>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Package
+                        className="shrink-0 text-blue-600"
+                        size={23}
+                      />
+                      <div>
+                        <p className="font-medium text-slate-800">
+                          {producto.nombreProducto}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          Disponible: {disponible} {unidades[producto.unidadMedida]}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {moneda(producto.precioReferencia)} por{" "}
+                          {producto.unidadMedida}
+                        </p>
                       </div>
                     </div>
-                  </div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <span>Cargar:</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={disponible}
+                        step="1"
+                        value={(cantidades[producto.productoId] as string) ?? ""}
+                        onChange={(e) =>
+                          setCantidades((actuales: Record<number, string | { piezas: number; media: boolean }>) => ({
+                            ...actuales,
+                            [producto.productoId]: e.target.value,
+                          }))
+                        }
+                        className="min-h-12 w-24 rounded-lg border border-slate-300 p-3 text-right"
+                        aria-label={`Cantidad de ${producto.nombreProducto}`}
+                      />
+                    <span className="w-10 text-slate-500">
+                      {unidades[producto.unidadMedida]}
+                    </span>
+                  </label>
+                </div>
                 );
               })}
             </div>
@@ -697,7 +789,7 @@ export default function Autoventa() {
                       </p>
 
                       <p className="text-slate-500">
-                        {item.cantidad} ×{" "}
+                        {item.unidadMedida === "pieza" ? medias_a_texto(item.cantidad) : item.cantidad} ×{" "}
                         {moneda(item.precioUnitario)}
                       </p>
                     </div>
@@ -764,6 +856,7 @@ export default function Autoventa() {
               type="button"
               onClick={guardarVenta}
               disabled={
+                estadoOperacion.bloqueado ||
                 !cliente ||
                 itemsVenta.length === 0 ||
                 !camion

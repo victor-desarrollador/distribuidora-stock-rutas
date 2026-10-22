@@ -10,10 +10,18 @@ import {
 
 import { useClientes } from "../hooks/useClientes";
 import { useVentas } from "../hooks/useVentas";
-import { useJornadas } from "../hooks/useJornadas";
-import { useCobros, calcularSaldoCliente } from "../hooks/useCobros";
+import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
+import { useCobros } from "../hooks/useCobros";
 
 import type { Cobro, MedioCobro } from "../data/mockCobros";
+import {
+  NO_DISPONIBLE,
+  disponibilidadCuentas,
+  saldoSiDisponible,
+} from "./avisosStorage";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
+import { revalidar_jornada_para_cobro } from "../domain/jornadas";
 
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
@@ -25,10 +33,18 @@ const moneda = (valor: number) =>
 const redondear = (n: number) => Math.round(n * 100) / 100;
 
 export default function CuentasCorrientes() {
-  const { clientes } = useClientes();
-  const { ventas } = useVentas();
-  const { jornadas } = useJornadas();
-  const { cobros, registrarCobro } = useCobros();
+  const { clientes, estadoLectura: estadoClientes } = useClientes();
+  const { ventas, estadoLectura: estadoVentas } = useVentas();
+  const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
+  const { cobros, registrarCobro, estadoLectura: estadoCobros } =
+    useCobros();
+
+  // Ledger corrupto ≠ ledger vacío: sin ambos ledgers legibles no hay saldo.
+  const disponibilidad = disponibilidadCuentas(estadoVentas, estadoCobros);
+  const estadoOperacion = estadoStorageOperativo({
+    clientes: estadoClientes,
+    jornadas: estadoJornadas,
+  });
 
   const [busqueda, setBusqueda] = useState("");
   const [clienteId, setClienteId] = useState("");
@@ -41,8 +57,14 @@ export default function CuentasCorrientes() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  const clientesCuenta = clientes.filter(
-    (c) => c.condicionPago === "cuenta_corriente"
+  // Referencia estable: `clientes` solo cambia por reemplazo
+  // inmutable del estado, así que el filtro produce el mismo resultado.
+  const clientesCuenta = useMemo(
+    () =>
+      clientes.filter(
+        (c) => c.condicionPago === "cuenta_corriente"
+      ),
+    [clientes]
   );
 
   const resumenClientes = useMemo(
@@ -60,20 +82,28 @@ export default function CuentasCorrientes() {
 
         return {
           cliente,
-          vendido: redondear(
-            ventasFiadas.reduce((s, v) => s + v.total, 0)
-          ),
-          cobrado: redondear(
-            pagos.reduce((s, c) => s + c.importe, 0)
-          ),
-          saldo: calcularSaldoCliente(
+          vendido: disponibilidad.ventasDisponibles
+            ? redondear(ventasFiadas.reduce((s, v) => s + v.total, 0))
+            : null,
+          cobrado: disponibilidad.cobrosDisponibles
+            ? redondear(pagos.reduce((s, c) => s + c.importe, 0))
+            : null,
+          saldo: saldoSiDisponible(
+            disponibilidad.saldoDisponible,
             cliente.id,
             ventas,
             cobros
           ),
         };
       }),
-    [clientesCuenta, ventas, cobros]
+    [
+      clientesCuenta,
+      ventas,
+      cobros,
+      disponibilidad.ventasDisponibles,
+      disponibilidad.cobrosDisponibles,
+      disponibilidad.saldoDisponible,
+    ]
   );
 
   const clientesFiltrados = resumenClientes.filter(
@@ -83,16 +113,27 @@ export default function CuentasCorrientes() {
         .includes(busqueda.trim().toLocaleLowerCase("es-AR"))
   );
 
-  const totalDeuda = redondear(
-    resumenClientes.reduce((s, c) => s + c.saldo, 0)
+  const totalDeuda = disponibilidad.saldoDisponible
+    ? redondear(
+        resumenClientes.reduce((s, c) => s + (c.saldo ?? 0), 0)
+      )
+    : null;
+
+  // Referencia estable para la dependencia de los useMemo
+  // que consumen `cliente` (mismo `.find()`, sin cambiar semantics).
+  const cliente = useMemo(
+    () => clientesCuenta.find((c) => c.id === Number(clienteId)),
+    [clientesCuenta, clienteId]
   );
 
-  const cliente = clientesCuenta.find(
-    (c) => c.id === Number(clienteId)
-  );
-
+  // null: saldo no disponible (ledger corrupto). Nunca 0 como respaldo.
   const saldoCliente = cliente
-    ? calcularSaldoCliente(cliente.id, ventas, cobros)
+    ? saldoSiDisponible(
+        disponibilidad.saldoDisponible,
+        cliente.id,
+        ventas,
+        cobros
+      )
     : 0;
 
   const jornadasAbiertas = jornadas.filter(
@@ -100,7 +141,7 @@ export default function CuentasCorrientes() {
   );
 
   const movimientosCliente = useMemo(() => {
-    if (!cliente) return [];
+    if (!cliente || !disponibilidad.saldoDisponible) return [];
 
     const movimientosVentas = ventas
       .filter(
@@ -131,7 +172,7 @@ export default function CuentasCorrientes() {
 
     return [...movimientosVentas, ...movimientosCobros]
       .sort((a, b) => b.fecha.localeCompare(a.fecha));
-  }, [cliente, ventas, cobros]);
+  }, [cliente, ventas, cobros, disponibilidad.saldoDisponible]);
 
   function seleccionarCliente(id: string) {
     setClienteId(id);
@@ -147,6 +188,12 @@ export default function CuentasCorrientes() {
   function guardarCobro() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
+
+    if (!disponibilidad.saldoDisponible || saldoCliente === null) {
+      setError(disponibilidad.aviso ?? "No se puede calcular el saldo.");
+      return;
+    }
 
     if (!cliente || !cliente.activo) {
       setError("Seleccioná un cliente activo.");
@@ -197,6 +244,24 @@ export default function CuentasCorrientes() {
 
     if (!confirmado) return;
 
+    // M-2 (bloque E): revalidar la Jornada asociada justo antes de persistir.
+    // El confirm abre una ventana en la que el storage de Jornadas puede
+    // haberse corrompido o la jornada puede haber desaparecido o cerrado.
+    // Cobros sin jornada asociada no crea dependencia: la revalidación solo
+    // aplica con jornadaId. Si un cobro puede asociarse a una jornada
+    // cerrada es una decisión pendiente del Blueprint (no se inventa).
+    if (jornadaId) {
+      const revalidacionCobro = revalidar_jornada_para_cobro(
+        leerJornadasDiscriminado(),
+        jornadaId
+      );
+
+      if (!revalidacionCobro.ok) {
+        setError(`No se puede registrar el cobro: ${revalidacionCobro.error}`);
+        return;
+      }
+    }
+
     const cobro: Cobro = {
       id: crypto.randomUUID(),
       clienteId: cliente.id,
@@ -243,6 +308,8 @@ export default function CuentasCorrientes() {
         </p>
       </header>
 
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
+
       <div className="grid gap-4 sm:grid-cols-3">
         {[
           {
@@ -251,13 +318,14 @@ export default function CuentasCorrientes() {
           },
           {
             nombre: "Deuda total",
-            valor: moneda(totalDeuda),
+            valor:
+              totalDeuda === null ? NO_DISPONIBLE : moneda(totalDeuda),
           },
           {
             nombre: "Cobros registrados",
-            valor: moneda(
-              cobros.reduce((s, c) => s + c.importe, 0)
-            ),
+            valor: disponibilidad.cobrosDisponibles
+              ? moneda(cobros.reduce((s, c) => s + c.importe, 0))
+              : NO_DISPONIBLE,
           },
         ].map((dato) => (
           <div
@@ -273,6 +341,19 @@ export default function CuentasCorrientes() {
           </div>
         ))}
       </div>
+
+      {disponibilidad.aviso && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-xl bg-red-50 p-4 font-medium text-red-800"
+        >
+          <AlertTriangle size={22} className="shrink-0" />
+          <span>
+            <strong>Datos dañados: </strong>
+            {disponibilidad.aviso}
+          </span>
+        </div>
+      )}
 
       {mensaje && (
         <div
@@ -341,14 +422,20 @@ export default function CuentasCorrientes() {
                     Saldo pendiente
                   </p>
                   <p className="text-xl font-bold text-slate-900">
-                    {moneda(saldo)}
+                    {saldo === null ? NO_DISPONIBLE : moneda(saldo)}
                   </p>
                 </div>
               </div>
 
               <div className="mt-3 flex flex-wrap gap-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-                <span>Ventas fiadas: {moneda(vendido)}</span>
-                <span>Cobrado: {moneda(cobrado)}</span>
+                <span>
+                  Ventas fiadas:{" "}
+                  {vendido === null ? NO_DISPONIBLE : moneda(vendido)}
+                </span>
+                <span>
+                  Cobrado:{" "}
+                  {cobrado === null ? NO_DISPONIBLE : moneda(cobrado)}
+                </span>
               </div>
             </button>
           ))}
@@ -374,7 +461,12 @@ export default function CuentasCorrientes() {
             <p className="mb-5 text-sm text-slate-600">
               Cliente: <strong>{cliente.nombreComercio}</strong>
               <span className="ml-2">
-                · Deuda: <strong>{moneda(saldoCliente)}</strong>
+                · Deuda:{" "}
+                <strong>
+                  {saldoCliente === null
+                    ? NO_DISPONIBLE
+                    : moneda(saldoCliente)}
+                </strong>
               </span>
             </p>
 
@@ -476,7 +568,9 @@ export default function CuentasCorrientes() {
               type="button"
               onClick={guardarCobro}
               disabled={
+                estadoOperacion.bloqueado ||
                 !cliente.activo ||
+                saldoCliente === null ||
                 saldoCliente <= 0 ||
                 !importe.trim()
               }
@@ -495,7 +589,12 @@ export default function CuentasCorrientes() {
               </h2>
             </div>
 
-            {movimientosCliente.length === 0 ? (
+            {!disponibilidad.saldoDisponible ? (
+              <p className="text-sm text-slate-500">
+                Estado de cuenta {NO_DISPONIBLE.toLowerCase()}: los
+                datos guardados están dañados.
+              </p>
+            ) : movimientosCliente.length === 0 ? (
               <p className="text-sm text-slate-500">
                 Este cliente todavía no tiene movimientos.
               </p>

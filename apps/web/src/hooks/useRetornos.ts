@@ -1,130 +1,144 @@
-
 import { useState } from "react";
-import type {
-  RetornoDeposito,
-  ItemRetorno,
-} from "../data/mockRetornos";
+import { CLAVES_STORAGE } from "../data/clavesStorage";
+import type { RetornoDeposito } from "../data/mockRetornos";
+import { retorno_valido } from "../domain/retornos";
 
-const STORAGE_KEY = "distribuidora_retornos_demo_v1";
+const STORAGE_KEY = CLAVES_STORAGE.retornos;
 
-function esCantidadValida(
-  cantidad: number,
-  unidad: ItemRetorno["unidadMedida"]
-) {
-  return (
-    Number.isFinite(cantidad) &&
-    cantidad >= 0 &&
-    (
-      unidad === "kg"
-        ? Math.abs(
-            cantidad * 1000 - Math.round(cantidad * 1000)
-          ) < 0.000001
-        : Number.isInteger(cantidad)
-    )
-  );
-}
+/** Resultado discriminado de la lectura del ledger de retornos. */
+export type ResultadoLecturaRetornos =
+  | { ok: true; retornos: RetornoDeposito[]; estado: "inicial" | "valido" }
+  | { ok: false; error: string; estado: "corrupto" };
 
-export function leerRetornos(): RetornoDeposito[] {
+/**
+ * Lectura interna que distingue: clave ausente (ledger inicial válido []),
+ * clave válida y clave corrupta (error). Es la que usa la frontera de
+ * escritura; nunca reinterpreta un storage corrupto como vacío.
+ */
+export function leerRetornosDiscriminado(): ResultadoLecturaRetornos {
   try {
     const guardado = localStorage.getItem(STORAGE_KEY);
 
-    if (!guardado) return [];
+    if (guardado === null) {
+      return { ok: true, retornos: [], estado: "inicial" };
+    }
 
-    const datos: unknown = JSON.parse(guardado);
+    let datos: unknown;
+    try {
+      datos = JSON.parse(guardado);
+    } catch {
+      return {
+        ok: false,
+        error: "JSON inválido en almacenamiento de retornos.",
+        estado: "corrupto",
+      };
+    }
 
-    if (!Array.isArray(datos)) return [];
+    if (!Array.isArray(datos)) {
+      return {
+        ok: false,
+        error: "Estructura inválida: se esperaba un array de retornos.",
+        estado: "corrupto",
+      };
+    }
 
-    const valido = datos.every((r) => {
-      if (!r || typeof r !== "object") return false;
+    if (!datos.every((r) => retorno_valido(r))) {
+      return {
+        ok: false,
+        error: "Uno o más retornos no pasan la validación.",
+        estado: "corrupto",
+      };
+    }
 
-      return (
-        typeof r.id === "string" &&
-        typeof r.jornadaId === "string" &&
-        Number.isSafeInteger(r.camionId) &&
-        typeof r.fecha === "string" &&
-        typeof r.responsable === "string" &&
-        typeof r.observaciones === "string" &&
-        Array.isArray(r.items) &&
-        r.items.every((item: ItemRetorno) =>
-          item !== null &&
-          Number.isSafeInteger(item.productoId) &&
-          typeof item.nombreProducto === "string" &&
-          ["unidad", "pieza", "kg"].includes(item.unidadMedida) &&
-          esCantidadValida(
-            item.cantidadContada,
-            item.unidadMedida
-          ) &&
-          esCantidadValida(
-            item.cantidadAprobada,
-            item.unidadMedida
-          ) &&
-          item.cantidadAprobada <=
-            item.cantidadContada + 0.000001
-        )
-      );
-    });
+    return { ok: true, retornos: datos as RetornoDeposito[], estado: "valido" };
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Error inesperado al leer retornos: ${String(e)}`,
+      estado: "corrupto",
+    };
+  }
+}
 
-    return valido ? (datos as RetornoDeposito[]) : [];
+/**
+ * Lectura para UI: fail-closed visual (devuelve [] tanto para ausente como
+ * para corrupto). NO usar en la frontera de escritura.
+ */
+export function leerRetornos(): RetornoDeposito[] {
+  const lectura = leerRetornosDiscriminado();
+  return lectura.ok ? lectura.retornos : [];
+}
+
+/**
+ * Operación pura de registro de retorno. Orden: 1) validar el retorno nuevo,
+ * 2) leer el storage anterior, 3) abortar si está corrupto, 4) jornada
+ * duplicada, 5) validación externa, 6) persistir.
+ */
+export function registrarRetornoOperacion(
+  retorno: RetornoDeposito,
+  validar: (actuales: RetornoDeposito[]) => string | null,
+  cargarActuales: () => ResultadoLecturaRetornos,
+  guardarActualizados: (retornos: RetornoDeposito[]) => void
+): string | null {
+  if (!retorno_valido(retorno, { exigir_responsable: true })) {
+    return "El retorno no es válido: las cantidades deben ser enteros seguros, con aprobado menor o igual que contado.";
+  }
+
+  const lectura = cargarActuales();
+
+  if (!lectura.ok) {
+    return `No se puede registrar: ${lectura.error}`;
+  }
+
+  const actuales = lectura.retornos;
+
+  // Una sola recepción por jornada, contra el storage leído ahora.
+  if (actuales.some((r) => r.jornadaId === retorno.jornadaId)) {
+    return "Esta jornada ya tiene un retorno registrado.";
+  }
+
+  const error = validar(actuales);
+
+  if (error) return error;
+
+  guardarActualizados([...actuales, retorno]);
+
+  return null;
+}
+
+/**
+ * Frontera REAL de escritura sin React: es lo que ejecuta el hook. Si el
+ * almacenamiento está corrupto no escribe nada.
+ */
+export function registrarRetornoPersistido(
+  retorno: RetornoDeposito,
+  alGuardar?: (nuevos: RetornoDeposito[]) => void,
+  validar: (actuales: RetornoDeposito[]) => string | null = () => null
+): string | null {
+  try {
+    return registrarRetornoOperacion(
+      retorno,
+      validar,
+      leerRetornosDiscriminado,
+      (nuevos) => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos));
+        alGuardar?.(nuevos);
+      }
+    );
   } catch {
-    return [];
+    return "No se pudo guardar el retorno.";
   }
 }
 
 export function useRetornos() {
-  const [retornos, setRetornos] = useState<
-    RetornoDeposito[]
-  >(leerRetornos);
+  const [lectura] = useState(leerRetornosDiscriminado);
+  const [retornos, setRetornos] = useState<RetornoDeposito[]>(
+    lectura.ok ? lectura.retornos : []
+  );
 
-  function registrarRetorno(
-    retorno: RetornoDeposito
-  ): string | null {
-    try {
-      const actuales = leerRetornos();
-
-      // No permitir registrar dos recepciones
-      // para la misma jornada en esta versión.
-      if (
-        actuales.some(
-          (r) => r.jornadaId === retorno.jornadaId
-        )
-      ) {
-        return "Esta jornada ya tiene un retorno registrado.";
-      }
-
-      const ids = retorno.items.map((i) => i.productoId);
-
-      if (
-        new Set(ids).size !== ids.length ||
-        retorno.items.some(
-          (item) =>
-            !esCantidadValida(
-              item.cantidadContada,
-              item.unidadMedida
-            ) ||
-            !esCantidadValida(
-              item.cantidadAprobada,
-              item.unidadMedida
-            ) ||
-            item.cantidadAprobada >
-              item.cantidadContada + 0.000001
-        )
-      ) {
-        return "Las cantidades del retorno no son válidas.";
-      }
-
-      const actualizados = [...actuales, retorno];
-
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(actualizados)
-      );
-
-      setRetornos(actualizados);
-      return null;
-    } catch {
-      return "No se pudo guardar el retorno.";
-    }
+  function registrarRetorno(retorno: RetornoDeposito): string | null {
+    return registrarRetornoPersistido(retorno, setRetornos);
   }
 
-  return { retornos, registrarRetorno };
+  return { retornos, registrarRetorno, estadoLectura: lectura.estado };
 }

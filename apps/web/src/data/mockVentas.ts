@@ -1,4 +1,3 @@
-
 export type MedioPago =
   | "efectivo"
   | "transferencia"
@@ -7,9 +6,14 @@ export type MedioPago =
 export interface DetalleVenta {
   productoId: number;
   nombreProducto: string;
-  unidadMedida: "unidad" | "pieza" | "kg";
+  unidadMedida: "unidad" | "pieza";
   cantidad: number;
+  // Precios aplicados al vender (historial, ADR-003).
+  // unidad: precio unitario. pieza: precio de pieza completa.
   precioUnitario: number;
+  // Solo pieza: precio de media pieza APLICADO (snapshot histórico derivado al momento de la venta).
+  // NO es precio configurable del producto; es el precio de media derivado vigente al momento de la venta.
+  precioMediaPieza?: number;
   subtotal: number;
 }
 
