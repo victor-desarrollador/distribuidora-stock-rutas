@@ -12,7 +12,7 @@ import {
   type Producto,
   type UnidadMedida,
 } from "../data/mockProductos";
-import { leerJornadas } from "./useJornadas";
+import { cerrarJornadaPersistida, leerJornadas } from "./useJornadas";
 import { cargarVentas } from "./useVentas";
 import {
   leerMovimientos,
@@ -1171,5 +1171,96 @@ describe("retornos: frontera REAL de escritura", () => {
     const valido = [retorno("j1", [item("pieza", 5, 3)])];
     mockLS._store.set(CLAVE, JSON.stringify(valido));
     expect(leerRetornos()).toEqual(valido);
+  });
+});
+
+describe("jornadas: conteos del cierre son enteros seguros", () => {
+  const CLAVE = CLAVES_STORAGE.jornadas;
+  const MAX = Number.MAX_SAFE_INTEGER;
+
+  const jornada = (estado: string, cierre?: unknown) => ({
+    id: "j1",
+    camionId: 1,
+    chofer: "Luis",
+    zona: "Norte",
+    fechaCreacion: "2026-10-21T08:00:00.000Z",
+    fechaSalida: "2026-10-21T09:00:00.000Z",
+    estado,
+    items: [
+      { productoId: 1, nombreProducto: "Yogur", unidadMedida: "unidad", cantidad: 10, precioReferencia: 100 },
+      { productoId: 2, nombreProducto: "Jamón", unidadMedida: "pieza", cantidad: 5, precioReferencia: 1000 },
+    ],
+    ...(cierre === undefined ? {} : { cierre }),
+  });
+
+  const cierre = (conteos: Record<string, unknown>) => ({
+    fecha: "2026-10-21T18:00:00.000Z",
+    conteos,
+    efectivoEntregado: 0,
+    efectivoEsperado: 0,
+    transferenciasInformadas: 0,
+    ventasCuentaCorriente: 0,
+    observaciones: "",
+  });
+
+  const abierta = () => {
+    const crudo = JSON.stringify([jornada("abierta")]);
+    mockLS._store.set(CLAVE, crudo);
+    return crudo;
+  };
+
+  it("válidos (unidad y pieza en medias piezas): cierra y persiste", () => {
+    abierta();
+    const r = cerrarJornadaPersistida("j1", cierre({ "1": 3, "2": 5 }) as never);
+    expect(r).not.toBeNull();
+    expect(leerJornadas()[0].estado).toBe("cerrada");
+    expect(leerJornadas()[0].cierre?.conteos).toEqual({ "1": 3, "2": 5 });
+  });
+
+  it("MAX_SAFE_INTEGER es un conteo válido", () => {
+    abierta();
+    expect(cerrarJornadaPersistida("j1", cierre({ "1": MAX, "2": 0 }) as never)).not.toBeNull();
+  });
+
+  it.each([1.5, NaN, Infinity, -1, MAX + 1, "3"])(
+    "conteo %j: rechaza sin escribir (string crudo idéntico)",
+    (invalido) => {
+      const crudo = abierta();
+      mockLS.setItem.mockClear();
+      expect(cerrarJornadaPersistida("j1", cierre({ "1": invalido, "2": 1 }) as never)).toBeNull();
+      expect(cerrarJornadaPersistida("j1", cierre({ "1": 1, "2": invalido }) as never)).toBeNull();
+      expect(mockLS.getItem(CLAVE)).toBe(crudo);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    }
+  );
+
+  it("exige un conteo por cada producto cargado", () => {
+    const crudo = abierta();
+    expect(cerrarJornadaPersistida("j1", cierre({ "1": 3 }) as never)).toBeNull();
+    expect(mockLS.getItem(CLAVE)).toBe(crudo);
+  });
+
+  it("lectura: una jornada cerrada con conteo inválido invalida el payload", () => {
+    for (const invalido of [1.5, MAX + 1, -1]) {
+      mockLS._store.set(CLAVE, JSON.stringify([jornada("cerrada", cierre({ "1": invalido, "2": 1 }))]));
+      expect(leerJornadas()).toEqual([]);
+    }
+    mockLS._store.set(CLAVE, JSON.stringify([jornada("cerrada", cierre({ "1": 3, "2": 5 }))]));
+    expect(leerJornadas()).toHaveLength(1);
+  });
+
+  it("lectura: cantidad de ítem de carga fuera del rango seguro invalida el payload", () => {
+    const j = jornada("abierta");
+    j.items[0].cantidad = MAX + 1;
+    mockLS._store.set(CLAVE, JSON.stringify([j]));
+    expect(leerJornadas()).toEqual([]);
+  });
+
+  it("storage corrupto: cerrar no escribe ni sobrescribe", () => {
+    mockLS._store.set(CLAVE, "{roto");
+    mockLS.setItem.mockClear();
+    expect(cerrarJornadaPersistida("j1", cierre({ "1": 1, "2": 1 }) as never)).toBeNull();
+    expect(mockLS.getItem(CLAVE)).toBe("{roto");
+    expect(mockLS.setItem).not.toHaveBeenCalled();
   });
 });

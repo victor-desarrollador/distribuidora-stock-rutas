@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 import { precio_valido } from "../domain/precios";
+import { es_cantidad_valida } from "../domain/cantidades";
 
 import {
   type Jornada,
@@ -39,9 +40,7 @@ function cierreValido(cierre: unknown): cierre is CierreJornada {
   return (
     importes.every((n) => n >= 0) &&
     Object.values(c.conteos).every(
-      (n) => typeof n === "number" &&
-        Number.isFinite(n) &&
-        n >= 0
+      (n) => typeof n === "number" && es_cantidad_valida(n)
     )
   );
 }
@@ -78,9 +77,9 @@ export function leerJornadas(): Jornada[] {
           Number.isSafeInteger(item.productoId) &&
           typeof item.nombreProducto === "string" &&
           ["unidad", "pieza"].includes(item.unidadMedida) &&
-          // Validación canónica: cantidad entera, finita, >= 0
-          Number.isFinite(item.cantidad) &&
-          Number.isInteger(item.cantidad) &&
+          // Validación canónica: entero seguro > 0 (dominio compartido)
+          typeof item.cantidad === "number" &&
+          es_cantidad_valida(item.cantidad) &&
           item.cantidad > 0 &&
           // Precios: solo precioReferencia (precioMediaPieza se deriva)
           precio_valido(item.precioReferencia)
@@ -112,6 +111,54 @@ function guardarJornadas(jornadas: Jornada[]): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Cierre de jornada sin React: valida, persiste y devuelve las jornadas
+ * actualizadas, o null si se rechaza (sin escribir). Es lo que ejecuta el hook.
+ */
+export function cerrarJornadaPersistida(
+  id: string,
+  cierre: CierreJornada
+): Jornada[] | null {
+  const actuales = leerJornadas();
+  const jornada = actuales.find((j) => j.id === id);
+
+  // No permitir cerrar dos veces la misma jornada.
+  if (!jornada || jornada.estado !== "abierta") {
+    return null;
+  }
+
+  if (!cierreValido(cierre)) return null;
+
+  const productosContados = Object.keys(cierre.conteos);
+
+  // Exigir un conteo por cada producto cargado.
+  if (
+    productosContados.length !== jornada.items.length ||
+    !jornada.items.every((item) => {
+      const cantidad = cierre.conteos[String(item.productoId)];
+
+      return (
+        typeof cantidad === "number" &&
+        es_cantidad_valida(cantidad)
+      );
+    })
+  ) {
+    return null;
+  }
+
+  const actualizadas: Jornada[] = actuales.map((j) =>
+    j.id === id
+      ? {
+          ...j,
+          estado: "cerrada",
+          cierre,
+        }
+      : j
+  );
+
+  return guardarJornadas(actualizadas) ? actualizadas : null;
 }
 
 export function useJornadas() {
@@ -169,46 +216,9 @@ export function useJornadas() {
     id: string,
     cierre: CierreJornada
   ): boolean {
-    const actuales = leerJornadas();
-    const jornada = actuales.find((j) => j.id === id);
+    const actualizadas = cerrarJornadaPersistida(id, cierre);
 
-    // No permitir cerrar dos veces la misma jornada.
-    if (!jornada || jornada.estado !== "abierta") {
-      return false;
-    }
-
-    if (!cierreValido(cierre)) return false;
-
-    const productosContados = Object.keys(cierre.conteos);
-
-    // Exigir un conteo por cada producto cargado.
-    if (
-      productosContados.length !== jornada.items.length ||
-      !jornada.items.every((item) => {
-        const cantidad = cierre.conteos[String(item.productoId)];
-
-        return (
-          typeof cantidad === "number" &&
-          Number.isFinite(cantidad) &&
-          Number.isInteger(cantidad) &&
-          cantidad >= 0
-        );
-      })
-    ) {
-      return false;
-    }
-
-    const actualizadas: Jornada[] = actuales.map((j) =>
-      j.id === id
-        ? {
-            ...j,
-            estado: "cerrada",
-            cierre,
-          }
-        : j
-    );
-
-    if (!guardarJornadas(actualizadas)) return false;
+    if (!actualizadas) return false;
 
     setJornadas(actualizadas);
     return true;

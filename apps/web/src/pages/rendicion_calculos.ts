@@ -11,43 +11,54 @@
 // kilogramo) y §7.4 (salidas del camión).
 //
 // Reglas:
-//   - `unidad`: se concilia con el dominio canónico (`calcular_esperado`,
-//     `calcular_diferencia`); cantidades enteras >= 0.
-//   - `pieza`: el prototipo legacy guarda PIEZAS ENTERAS, no medias piezas. El
-//     dominio exige medias piezas como unidad mínima, así que esa
-//     representación NO es conciliable: la fila se marca `pieza_legacy`, no se
-//     llama al dominio y NO se convierte nada. Requiere migración a medias
-//     piezas antes de poder cerrar (fuera de esta tarea).
+//   - `unidad` y `pieza` se concilian con el mismo algoritmo y el mismo dominio
+//     canónico (`calcular_esperado`, `calcular_diferencia`): todas las
+//     cantidades son enteros seguros >= 0 en la unidad mínima (unidad entera o
+//     medias piezas). Solo cambia cómo se muestran.
 //   - cualquier otra unidad (kilogramo): no soportada por el negocio; no tiene
-//     camino funcional en la pantalla.
+//     camino funcional en la pantalla (estado defensivo `no_soportada`).
+//   - No se convierte ningún dato legacy ni se usan tolerancias.
 
 import type { ItemCarga } from "../data/mockJornadas";
-import { es_cantidad_valida } from "../domain/cantidades";
+import type {
+  MovimientoReparto,
+} from "../data/mockMovimientos";
+import { salidasPorMovimiento } from "../data/mockMovimientos";
+import {
+  es_cantidad_valida,
+  recomponer_medias,
+  sumar_cantidades_seguras,
+} from "../domain/cantidades";
 import {
   calcular_diferencia,
   calcular_esperado,
 } from "../domain/rendicion";
 
-/** Aviso visible cuando la jornada tiene productos por pieza legacy. */
-export const MENSAJE_PIEZA_LEGACY =
-  "Los productos por pieza todavía usan la representación legacy. Deben migrarse a medias piezas antes de poder cerrar la rendición.";
-
 export type EstadoFilaMercaderia =
   /** Conciliable con el dominio canónico. */
   | "ok"
-  /** `unidad` inconsistente: componentes inválidos o salidas > cargado. */
+  /** Componentes inválidos, acumulación insegura o salidas > cargado. */
   | "inconsistente"
-  /** `pieza` en representación legacy; requiere migración a medias piezas. */
-  | "pieza_legacy"
   /** Unidad fuera del dominio (por ejemplo kilogramo). */
   | "no_soportada";
+
+/** Entrada de UI de un conteo: texto del input entero + media opcional. */
+export interface EntradaConteo {
+  /** "unidad": cantidad entera. "pieza": piezas completas. */
+  texto: string;
+  /** Solo "pieza". En "unidad" debe ser false. */
+  media: boolean;
+}
 
 export interface EntradaFilaMercaderia {
   item: ItemCarga;
   vendido: number;
   merma: number;
   reemplazos: number;
-  contadoTexto: string | undefined;
+  /** Conteo físico ya convertido a cantidad canónica; null si no hay. */
+  contado: number | null;
+  /** La acumulación de salidas no pudo calcularse exactamente. */
+  acumulacionInvalida?: boolean;
 }
 
 export interface FilaMercaderia {
@@ -58,6 +69,8 @@ export interface FilaMercaderia {
   vendido: number;
   merma: number;
   reemplazos: number;
+  /** merma + reemplazos, exacto; null si no puede calcularse. */
+  mermaYCambios: number | null;
   esperado: number | null;
   contado: number | null;
   diferencia: number | null;
@@ -80,8 +93,9 @@ export function leerCantidad(
 }
 
 /**
- * Conteo almacenable: entero >= 0 (BLUEPRINT §7.4). Devuelve `null` si el texto
- * está vacío, no es numérico, es negativo o tiene decimales.
+ * Conteo almacenable: entero seguro >= 0 (BLUEPRINT §7.4). Devuelve `null` si
+ * el texto está vacío, no es numérico, es negativo, tiene decimales o excede el
+ * rango seguro.
  */
 export function conteoValido(
   texto: string | undefined
@@ -94,17 +108,61 @@ export function conteoValido(
 }
 
 /**
+ * Convierte la entrada de UI de un conteo en cantidad canónica, o null si está
+ * vacía o es inválida. `pieza`: piezas enteras + media opcional →
+ * medias piezas. No lanza.
+ */
+export function conteoDesdeEntrada(
+  unidad: ItemCarga["unidadMedida"],
+  entrada: EntradaConteo | undefined
+): number | null {
+  if (!entrada) return null;
+
+  const textoVacio = entrada.texto.trim() === "";
+
+  if (textoVacio && !entrada.media) return null;
+
+  const base = textoVacio ? 0 : conteoValido(entrada.texto);
+
+  if (base === null) return null;
+
+  if (unidad === "unidad") {
+    return entrada.media ? null : base;
+  }
+
+  if (unidad === "pieza") {
+    try {
+      return recomponer_medias({ piezas: base, media: entrada.media });
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Calcula la fila de mercadería de una jornada.
  *
- * No lanza hacia React: si las salidas superan lo cargado o hay componentes
- * inválidos, devuelve la fila marcada como `inconsistente`.
+ * No lanza hacia React: si las salidas superan lo cargado, hay componentes
+ * inválidos o una acumulación insegura, devuelve la fila `inconsistente`.
  */
 export function calcularFilaMercaderia(
   entrada: EntradaFilaMercaderia
 ): FilaMercaderia {
-  const { item, vendido, merma, reemplazos, contadoTexto } =
-    entrada;
-  const contado = conteoValido(contadoTexto);
+  const { item, vendido, merma, reemplazos } = entrada;
+  const contado =
+    entrada.contado !== null && es_cantidad_valida(entrada.contado)
+      ? entrada.contado
+      : null;
+
+  let mermaYCambios: number | null;
+
+  try {
+    mermaYCambios = sumar_cantidades_seguras(merma, reemplazos);
+  } catch {
+    mermaYCambios = null;
+  }
 
   const base = {
     productoId: item.productoId,
@@ -114,21 +172,11 @@ export function calcularFilaMercaderia(
     vendido,
     merma,
     reemplazos,
+    mermaYCambios,
     contado,
   };
 
-  if (item.unidadMedida === "pieza") {
-    // Representación legacy (piezas enteras): NO es conciliable con el dominio
-    // canónico y NO se convierte a medias piezas. No se llama al dominio.
-    return {
-      ...base,
-      esperado: null,
-      diferencia: null,
-      estado: "pieza_legacy",
-    };
-  }
-
-  if (item.unidadMedida !== "unidad") {
+  if (item.unidadMedida !== "unidad" && item.unidadMedida !== "pieza") {
     // Kilogramo u otra unidad fuera del Blueprint: sin camino funcional.
     return {
       ...base,
@@ -138,56 +186,172 @@ export function calcularFilaMercaderia(
     };
   }
 
-  // `unidad`: dominio canónico.
-  const componentesValidos =
-    es_cantidad_valida(item.cantidad) &&
-    es_cantidad_valida(vendido) &&
-    es_cantidad_valida(merma) &&
-    es_cantidad_valida(reemplazos);
+  const inconsistente = (): FilaMercaderia => ({
+    ...base,
+    esperado: null,
+    diferencia: null,
+    estado: "inconsistente",
+  });
 
-  if (!componentesValidos) {
-    return {
-      ...base,
-      esperado: null,
-      diferencia: null,
-      estado: "inconsistente",
-    };
+  // Mismo algoritmo para unidad y pieza: enteros seguros en la unidad mínima.
+  if (
+    entrada.acumulacionInvalida ||
+    !es_cantidad_valida(item.cantidad) ||
+    !es_cantidad_valida(vendido) ||
+    !es_cantidad_valida(merma) ||
+    !es_cantidad_valida(reemplazos)
+  ) {
+    return inconsistente();
   }
 
-  let esperado: number;
-
   try {
-    esperado = calcular_esperado({
+    const esperado = calcular_esperado({
       cargado: item.cantidad,
       vendido,
       merma,
       otras_salidas: reemplazos,
     });
-  } catch {
-    // Salidas > cargado: inconsistencia sin romper el render.
+
     return {
       ...base,
-      esperado: null,
-      diferencia: null,
-      estado: "inconsistente",
+      esperado,
+      diferencia:
+        contado === null ? null : calcular_diferencia(contado, esperado),
+      estado: "ok",
     };
+  } catch {
+    // Salidas > cargado u overflow: inconsistencia sin romper el render.
+    return inconsistente();
+  }
+}
+
+export interface SalidasProducto {
+  vendido: number;
+  merma: number;
+  reemplazos: number;
+  /** false si alguna acumulación fue inválida o superó el rango seguro. */
+  valido: boolean;
+}
+
+interface VentaConItems {
+  jornadaId: string;
+  items: ReadonlyArray<{ productoId: number; cantidad: number }>;
+}
+
+/**
+ * Acumula vendido / merma / reemplazos de un producto en una jornada con suma
+ * exacta. Ante una cantidad inválida o un desbordamiento devuelve valido:false
+ * (la fila terminará inconsistente); nunca un valor aproximado.
+ */
+export function acumularSalidasProducto(
+  productoId: number,
+  jornadaId: string,
+  ventas: ReadonlyArray<VentaConItems>,
+  movimientos: ReadonlyArray<MovimientoReparto>
+): SalidasProducto {
+  let vendido = 0;
+  let merma = 0;
+  let reemplazos = 0;
+
+  try {
+    for (const venta of ventas) {
+      if (venta.jornadaId !== jornadaId) continue;
+
+      for (const detalle of venta.items) {
+        if (detalle.productoId === productoId) {
+          vendido = sumar_cantidades_seguras(vendido, detalle.cantidad);
+        }
+      }
+    }
+
+    for (const movimiento of movimientos) {
+      if (movimiento.jornadaId !== jornadaId) continue;
+
+      if (
+        movimiento.tipo === "merma" &&
+        movimiento.producto.productoId === productoId
+      ) {
+        merma = sumar_cantidades_seguras(
+          merma,
+          movimiento.producto.cantidad
+        );
+      }
+
+      if (movimiento.tipo === "cambio") {
+        for (const salida of salidasPorMovimiento(movimiento)) {
+          if (salida.productoId === productoId) {
+            reemplazos = sumar_cantidades_seguras(
+              reemplazos,
+              salida.cantidad
+            );
+          }
+        }
+      }
+    }
+  } catch {
+    return { vendido: 0, merma: 0, reemplazos: 0, valido: false };
   }
 
-  return {
-    ...base,
-    esperado,
-    diferencia:
-      contado === null
-        ? null
-        : calcular_diferencia(contado, esperado),
-    estado: "ok",
-  };
+  return { vendido, merma, reemplazos, valido: true };
+}
+
+export interface ProductoCuarentena {
+  productoId: number;
+  nombre: string;
+  unidadMedida: ItemCarga["unidadMedida"];
+  /** null: el acumulado no puede calcularse exactamente. */
+  cantidad: number | null;
+}
+
+/**
+ * Productos devueltos/cambiados de la jornada, solo informativo (no aumenta el
+ * stock vendible). La cantidad se acumula con suma exacta; si no puede
+ * calcularse queda en null y la pantalla no muestra un saldo aproximado.
+ */
+export function acumularCuarentena(
+  jornadaId: string,
+  movimientos: ReadonlyArray<MovimientoReparto>
+): ProductoCuarentena[] {
+  const acumulado = new Map<number, ProductoCuarentena>();
+
+  for (const movimiento of movimientos) {
+    if (movimiento.jornadaId !== jornadaId || movimiento.tipo === "merma") {
+      continue;
+    }
+
+    const producto =
+      movimiento.tipo === "cambio"
+        ? movimiento.productoDevuelto
+        : movimiento.producto;
+
+    const anterior = acumulado.get(producto.productoId);
+
+    let cantidad: number | null;
+
+    try {
+      cantidad = sumar_cantidades_seguras(
+        anterior ? anterior.cantidad ?? Number.NaN : 0,
+        producto.cantidad
+      );
+    } catch {
+      cantidad = null;
+    }
+
+    acumulado.set(producto.productoId, {
+      productoId: producto.productoId,
+      nombre: producto.nombreProducto,
+      unidadMedida: producto.unidadMedida,
+      cantidad,
+    });
+  }
+
+  return [...acumulado.values()];
 }
 
 /**
  * Una jornada solo se puede rendir si todas sus filas quedaron conciliables.
  * Bloquea «Completar con esperados» y «Confirmar cierre» cuando hay filas
- * inconsistentes, por pieza legacy o con unidad no soportada.
+ * inconsistentes o con unidad no soportada.
  */
 export function bloqueaRendicion(
   filas: FilaMercaderia[]

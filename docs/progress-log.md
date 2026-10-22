@@ -1,4 +1,28 @@
 ---
+## 21/10/2026 — Bloque 7: Rendición compatible con medias piezas
+
+**Rama:** `feat/rendicion-medias-piezas` · **Base:** `5fae38f28c5021b2d1047caebe99e650efa0cdfd` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; storage sigue v4; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Qué se hizo
+
+- Se eliminó `pieza_legacy` y `MENSAJE_PIEZA_LEGACY`: `unidad` y `pieza` se concilian con el mismo algoritmo en cantidades canónicas (enteros seguros; medias piezas para pieza). Estados: `ok | inconsistente | no_soportada` (este último, defensivo ante unidades runtime inválidas; sin camino kg).
+- `domain/rendicion.ts`: `calcular_esperado` suma las salidas con `sumar_cantidades_seguras` (falla cerrado ante desbordamiento); `calcular_diferencia` verifica el rango seguro del resultado.
+- `rendicion_calculos.ts`: `calcularFilaMercaderia` recibe el conteo ya canónico; nuevos helpers puros `conteoDesdeEntrada`, `acumularSalidasProducto` (vendido/merma/reemplazos con suma exacta) y `acumularCuarentena` (informativa; sin saldo aproximado ante overflow).
+- `Rendicion.tsx`: conteo de pieza = piezas enteras + media con preview; "Completar con esperados" y la reconstrucción de cierres existentes usan `entrada_desde_cantidad`; diferencia de mercadería `!== 0` (sin epsilon); se quitaron `hayPiezaLegacy` y sus alertas. La lógica monetaria (`Math.round`, tolerancia de centavos) NO se tocó.
+- `useJornadas.ts`: conteos del cierre y cantidades de ítems de carga usan `es_cantidad_valida` (enteros seguros); el cierre se extrajo a `cerrarJornadaPersistida` (testeable sin React).
+- Fuera de alcance, sin cambios: apto/cuarentena/no_apto, regularizaciones, saldo final, dinero, SQL/RPC, Retornos, Movimientos, Autoventa, Jornadas UI, Productos, precios, venta, claves de storage.
+
+### Verificación
+
+Tests (ejecutados desde `apps/web/`): **13 archivos / 402 tests** (367 antes: +35). Resultado de typecheck, lint, build y Playwright: ver entrega del bloque.
+
+### Riesgos pendientes
+
+- **Integridad de jornadas:** `crearJornada` lee con `leerJornadas()`, que devuelve `[]` ante storage corrupto, y luego guarda `[nueva]`: sobrescribiría un storage de jornadas corrupto (análogo a H-1). `cerrarJornada` y `confirmarSalida` no lo hacen (no encuentran la jornada). Pendiente para un bloque propio.
+- Siguen `Number.isInteger` preexistentes en `Autoventa.tsx`, `domain/venta.ts` y `domain/validacion.ts`.
+- Sin test de componente de `Rendicion.tsx`.
+
+---
 ## 21/10/2026 — Bloque 6: Retornos compatibles con medias piezas
 
 **Rama:** `feat/retornos-medias-piezas` · **Base:** `6b24d6efbd087553e5423272fbb60544a8ec0832` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; storage sigue v4; **ADR-001 continúa PROPUESTA — NO APROBADA**.

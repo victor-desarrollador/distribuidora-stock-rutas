@@ -12,35 +12,30 @@ import { useCamiones } from "../hooks/useCamiones";
 import { useVentas } from "../hooks/useVentas";
 import { useMovimientos } from "../hooks/useMovimientos";
 import { useCobros } from "../hooks/useCobros";
-import { salidasPorMovimiento } from "../data/mockMovimientos";
-import type { ItemCarga } from "../data/mockJornadas";
 import {
-  MENSAJE_PIEZA_LEGACY,
+  acumularCuarentena,
+  acumularSalidasProducto,
   bloqueaRendicion,
   calcularFilaMercaderia,
-  conteoValido,
+  conteoDesdeEntrada,
   leerCantidad,
+  type EntradaConteo,
 } from "./rendicion_calculos";
+import { entrada_desde_cantidad, cantidad_a_texto } from "../domain/retornos";
+
+const conteoInicial: EntradaConteo = { texto: "", media: false };
+
+// Presentación de una cantidad canónica; "—" si no pudo calcularse.
+const textoCantidad = (
+  unidad: "unidad" | "pieza",
+  cantidad: number | null
+) => (cantidad === null ? "—" : cantidad_a_texto(unidad, cantidad));
 
 const moneda = (cantidad: number) =>
   new Intl.NumberFormat("es-AR", {
     style: "currency",
     currency: "ARS",
   }).format(cantidad);
-
-// Etiquetas de las unidades admitidas por la rendición. El kilogramo no existe
-// en el dominio aprobado (BLUEPRINT.md §2 y §7.1: unidad / pieza / media pieza,
-// nunca kilogramo), así que esta pantalla no le da ningún camino funcional.
-const ETIQUETA_UNIDAD = {
-  unidad: "un.",
-  pieza: "pzas.",
-} as const;
-
-function etiquetaUnidad(unidad: ItemCarga["unidadMedida"]): string {
-  if (unidad === "unidad") return ETIQUETA_UNIDAD.unidad;
-  if (unidad === "pieza") return ETIQUETA_UNIDAD.pieza;
-  return "—";
-}
 
 // Aviso cuando la mercadería no se puede conciliar por alguno de los dos
 // motivos reales del estado `inconsistente`: las salidas superan lo cargado o
@@ -57,8 +52,9 @@ export default function Rendicion() {
   const { cobros } = useCobros();
 
   const [jornadaId, setJornadaId] = useState("");
+  // Entrada de UI por producto; solo se persiste la cantidad canónica.
   const [conteos, setConteos] = useState<
-    Record<string, string>
+    Record<string, EntradaConteo>
   >({});
   const [efectivoEntregado, setEfectivoEntregado] =
     useState("");
@@ -151,93 +147,31 @@ export default function Rendicion() {
     if (!jornada) return [];
 
     return jornada.items.map((item) => {
-      let vendido = 0;
-      let merma = 0;
-      let reemplazos = 0;
-
-      for (const venta of ventas) {
-        if (venta.jornadaId !== jornada.id) continue;
-
-        for (const detalle of venta.items) {
-          if (detalle.productoId === item.productoId) {
-            vendido += detalle.cantidad;
-          }
-        }
-      }
-
-      for (const movimiento of movimientos) {
-        if (movimiento.jornadaId !== jornada.id) {
-          continue;
-        }
-
-        if (
-          movimiento.tipo === "merma" &&
-          movimiento.producto.productoId ===
-            item.productoId
-        ) {
-          merma += movimiento.producto.cantidad;
-        }
-
-        if (movimiento.tipo === "cambio") {
-          for (const salida of salidasPorMovimiento(
-            movimiento
-          )) {
-            if (salida.productoId === item.productoId) {
-              reemplazos += salida.cantidad;
-            }
-          }
-        }
-      }
+      const salidas = acumularSalidasProducto(
+        item.productoId,
+        jornada.id,
+        ventas,
+        movimientos
+      );
 
       return calcularFilaMercaderia({
         item,
-        vendido,
-        merma,
-        reemplazos,
-        contadoTexto: conteos[String(item.productoId)],
+        vendido: salidas.vendido,
+        merma: salidas.merma,
+        reemplazos: salidas.reemplazos,
+        acumulacionInvalida: !salidas.valido,
+        contado: conteoDesdeEntrada(
+          item.unidadMedida,
+          conteos[String(item.productoId)]
+        ),
       });
     });
   }, [jornada, ventas, movimientos, conteos]);
 
-  const productosCuarentena = useMemo(() => {
-    const acumulado = new Map<
-      number,
-      {
-        productoId: number;
-        nombre: string;
-        cantidad: number;
-        unidad: string;
-      }
-    >();
-
-    for (const movimiento of movimientos) {
-      if (
-        movimiento.jornadaId !== jornadaId ||
-        movimiento.tipo === "merma"
-      ) {
-        continue;
-      }
-
-      const producto =
-        movimiento.tipo === "cambio"
-          ? movimiento.productoDevuelto
-          : movimiento.producto;
-
-      const anterior = acumulado.get(
-        producto.productoId
-      );
-
-      acumulado.set(producto.productoId, {
-        productoId: producto.productoId,
-        nombre: producto.nombreProducto,
-        cantidad:
-          (anterior?.cantidad ?? 0) + producto.cantidad,
-        unidad: etiquetaUnidad(producto.unidadMedida),
-      });
-    }
-
-    return [...acumulado.values()];
-  }, [movimientos, jornadaId]);
+  const productosCuarentena = useMemo(
+    () => acumularCuarentena(jornadaId, movimientos),
+    [movimientos, jornadaId]
+  );
 
   const efectivoContado = leerCantidad(
     efectivoEntregado
@@ -255,10 +189,6 @@ export default function Rendicion() {
     (fila) => fila.estado === "inconsistente"
   );
 
-  const hayPiezaLegacy = filasMercaderia.some(
-    (fila) => fila.estado === "pieza_legacy"
-  );
-
   const hayUnidadNoSoportada = filasMercaderia.some(
     (fila) => fila.estado === "no_soportada"
   );
@@ -269,8 +199,7 @@ export default function Rendicion() {
   const tieneDiferencias =
     filasMercaderia.some(
       (fila) =>
-        fila.diferencia !== null &&
-        Math.abs(fila.diferencia) > 0.000001
+        fila.diferencia !== null && fila.diferencia !== 0
     ) ||
     (diferenciaEfectivo !== null &&
       Math.abs(diferenciaEfectivo) > 0.009);
@@ -288,14 +217,18 @@ export default function Rendicion() {
     );
 
     if (elegida?.cierre) {
+      // Los conteos guardados ya son canónicos: se reconstruye piezas + media.
       setConteos(
         Object.fromEntries(
-          Object.entries(
-            elegida.cierre.conteos
-          ).map(([clave, cantidad]) => [
-            clave,
-            String(cantidad),
-          ])
+          elegida.items.flatMap((item) => {
+            const entrada = entrada_desde_cantidad(
+              item.unidadMedida,
+              elegida.cierre!.conteos[String(item.productoId)]
+            );
+            return entrada
+              ? [[String(item.productoId), entrada] as const]
+              : [];
+          })
         )
       );
 
@@ -320,12 +253,15 @@ export default function Rendicion() {
 
     setConteos(
       Object.fromEntries(
-        filasMercaderia
-          .filter((fila) => fila.esperado !== null)
-          .map((fila) => [
-            String(fila.productoId),
-            String(fila.esperado),
-          ])
+        filasMercaderia.flatMap((fila) => {
+          const entrada =
+            fila.esperado === null
+              ? null
+              : entrada_desde_cantidad(fila.unidadMedida, fila.esperado);
+          return entrada
+            ? [[String(fila.productoId), entrada] as const]
+            : [];
+        })
       )
     );
 
@@ -355,11 +291,6 @@ export default function Rendicion() {
       return;
     }
 
-    if (hayPiezaLegacy) {
-      setError(MENSAJE_PIEZA_LEGACY);
-      return;
-    }
-
     if (hayUnidadNoSoportada) {
       setError(
         "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar."
@@ -373,7 +304,8 @@ export default function Rendicion() {
     > = {};
 
     for (const fila of filasMercaderia) {
-      const valor = conteoValido(
+      const valor = conteoDesdeEntrada(
+        fila.unidadMedida,
         conteos[String(fila.productoId)]
       );
 
@@ -592,15 +524,6 @@ export default function Rendicion() {
               es una ayuda: no sustituye el recuento físico.
             </p>
 
-            {hayPiezaLegacy && (
-              <p
-                role="alert"
-                className="mb-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900"
-              >
-                {MENSAJE_PIEZA_LEGACY}
-              </p>
-            )}
-
             {stockInconsistente && (
               <p
                 role="alert"
@@ -636,12 +559,7 @@ export default function Rendicion() {
                     </h3>
 
                     {fila.estado ===
-                    "pieza_legacy" ? (
-                      <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                        {MENSAJE_PIEZA_LEGACY}
-                      </p>
-                    ) : fila.estado ===
-                      "no_soportada" ? (
+                    "no_soportada" ? (
                       <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-800">
                         Unidad no soportada por el
                         sistema. Esta fila no se
@@ -655,9 +573,9 @@ export default function Rendicion() {
                               Cargado
                             </p>
                             <strong>
-                              {fila.cargado}{" "}
-                              {etiquetaUnidad(
-                                fila.unidadMedida
+                              {textoCantidad(
+                                fila.unidadMedida,
+                                fila.cargado
                               )}
                             </strong>
                           </div>
@@ -667,9 +585,11 @@ export default function Rendicion() {
                               Vendido
                             </p>
                             <strong>
-                              {fila.vendido}{" "}
-                              {etiquetaUnidad(
-                                fila.unidadMedida
+                              {textoCantidad(
+                                fila.unidadMedida,
+                                fila.estado === "ok"
+                                  ? fila.vendido
+                                  : null
                               )}
                             </strong>
                           </div>
@@ -679,10 +599,9 @@ export default function Rendicion() {
                               Mermas / cambios
                             </p>
                             <strong>
-                              {fila.merma +
-                                fila.reemplazos}{" "}
-                              {etiquetaUnidad(
-                                fila.unidadMedida
+                              {textoCantidad(
+                                fila.unidadMedida,
+                                fila.mermaYCambios
                               )}
                             </strong>
                           </div>
@@ -692,12 +611,9 @@ export default function Rendicion() {
                               Esperado
                             </p>
                             <strong>
-                              {fila.esperado ===
-                              null
-                                ? "—"
-                                : fila.esperado}{" "}
-                              {etiquetaUnidad(
-                                fila.unidadMedida
+                              {textoCantidad(
+                                fila.unidadMedida,
+                                fila.esperado
                               )}
                             </strong>
                           </div>
@@ -714,11 +630,11 @@ export default function Rendicion() {
                               min="0"
                               step="1"
                               value={
-                                conteos[
-                                  String(
-                                    fila.productoId
-                                  )
-                                ] ?? ""
+                                (
+                                  conteos[
+                                    String(fila.productoId)
+                                  ] ?? conteoInicial
+                                ).texto
                               }
                               disabled={
                                 jornada.estado ===
@@ -730,14 +646,84 @@ export default function Rendicion() {
                                     ...actual,
                                     [String(
                                       fila.productoId
-                                    )]:
-                                      e.target.value,
+                                    )]: {
+                                      texto:
+                                        e.target.value,
+                                      media: (
+                                        actual[
+                                          String(
+                                            fila.productoId
+                                          )
+                                        ] ?? conteoInicial
+                                      ).media,
+                                    },
                                   })
                                 )
                               }
                               className="block min-h-12 w-36 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
-                              placeholder="Ej: 45"
+                              placeholder={
+                                fila.unidadMedida === "pieza"
+                                  ? "Piezas enteras"
+                                  : "Ej: 45"
+                              }
+                              aria-label={`Stock físico contado de ${fila.nombreProducto}`}
                             />
+
+                            {fila.unidadMedida ===
+                              "pieza" && (
+                              <span className="mt-2 flex items-center gap-2 text-sm font-normal">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    (
+                                      conteos[
+                                        String(
+                                          fila.productoId
+                                        )
+                                      ] ?? conteoInicial
+                                    ).media
+                                  }
+                                  disabled={
+                                    jornada.estado ===
+                                    "cerrada"
+                                  }
+                                  onChange={(e) =>
+                                    setConteos(
+                                      (actual) => ({
+                                        ...actual,
+                                        [String(
+                                          fila.productoId
+                                        )]: {
+                                          texto: (
+                                            actual[
+                                              String(
+                                                fila.productoId
+                                              )
+                                            ] ??
+                                            conteoInicial
+                                          ).texto,
+                                          media:
+                                            e.target
+                                              .checked,
+                                        },
+                                      })
+                                    )
+                                  }
+                                  className="h-4 w-4 rounded border-slate-300"
+                                  aria-label={`Media pieza contada de ${fila.nombreProducto}`}
+                                />
+                                <span>Media pieza</span>
+                                {fila.contado !== null && (
+                                  <span className="text-slate-600">
+                                    ={" "}
+                                    {textoCantidad(
+                                      "pieza",
+                                      fila.contado
+                                    )}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                           </label>
 
                           <div
@@ -768,10 +754,12 @@ export default function Rendicion() {
                                 {fila.diferencia >
                                 0
                                   ? "+"
-                                  : ""}
-                                {fila.diferencia}{" "}
-                                {etiquetaUnidad(
-                                  fila.unidadMedida
+                                  : fila.diferencia < 0
+                                    ? "−"
+                                    : ""}
+                                {textoCantidad(
+                                  fila.unidadMedida,
+                                  Math.abs(fila.diferencia)
                                 )}{" "}
                                 ·{" "}
                                 {fila.diferencia ===
@@ -792,15 +780,21 @@ export default function Rendicion() {
                             null && (
                           <p className="mt-3 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
                             Cálculo:{" "}
-                            {fila.contado}{" "}
+                            {textoCantidad(
+                              fila.unidadMedida,
+                              fila.contado
+                            )}{" "}
                             contados −{" "}
-                            {fila.esperado}{" "}
+                            {textoCantidad(
+                              fila.unidadMedida,
+                              fila.esperado
+                            )}{" "}
                             esperados ={" "}
                             <strong>
                               {fila.diferencia}{" "}
-                              {etiquetaUnidad(
-                                fila.unidadMedida
-                              )}
+                              {fila.unidadMedida === "pieza"
+                                ? "medias piezas"
+                                : "un."}
                             </strong>
                           </p>
                         )}
@@ -835,8 +829,12 @@ export default function Rendicion() {
                           {producto.nombre}
                         </span>
                         <strong>
-                          {producto.cantidad}{" "}
-                          {producto.unidad}
+                          {producto.cantidad === null
+                            ? "No calculable"
+                            : cantidad_a_texto(
+                                producto.unidadMedida,
+                                producto.cantidad
+                              )}
                         </strong>
                       </div>
                     )

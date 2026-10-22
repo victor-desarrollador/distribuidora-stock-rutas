@@ -144,3 +144,53 @@ describe("esperado y diferencia sobre medias piezas (§12)", () => {
     expect(calcular_diferencia(4, esperado)).toBe(0);
   });
 });
+
+describe("overflow y rango seguro", () => {
+  const MAX = Number.MAX_SAFE_INTEGER;
+
+  it("salidas exactas al límite seguro son válidas", () => {
+    expect(
+      calcular_esperado({ cargado: MAX, vendido: MAX - 2, merma: 1, otras_salidas: 1 })
+    ).toBe(0);
+    expect(
+      calcular_esperado({ cargado: MAX, vendido: 0, merma: 0, otras_salidas: 0 })
+    ).toBe(MAX);
+  });
+
+  it("vendido + merma que desbordan fallan cerrado", () => {
+    expect(() =>
+      calcular_esperado({ cargado: MAX, vendido: MAX, merma: 1, otras_salidas: 0 })
+    ).toThrow(/Desbordamiento/);
+  });
+
+  it("las salidas combinadas que desbordan fallan cerrado (no solo por > cargado)", () => {
+    expect(() =>
+      calcular_esperado({ cargado: MAX, vendido: MAX - 1, merma: 1, otras_salidas: 1 })
+    ).toThrow(/Desbordamiento/);
+  });
+
+  it("un componente fuera del rango seguro se rechaza", () => {
+    expect(() =>
+      calcular_esperado({ cargado: MAX + 1, vendido: 0, merma: 0, otras_salidas: 0 })
+    ).toThrow(Error);
+  });
+
+  it("salidas > cargado sigue rechazándose", () => {
+    expect(() =>
+      calcular_esperado({ cargado: 5, vendido: 3, merma: 2, otras_salidas: 1 })
+    ).toThrow(/superan lo cargado/);
+  });
+
+  it("diferencia positiva, negativa y cero dentro del rango seguro", () => {
+    expect(calcular_diferencia(MAX, 0)).toBe(MAX);
+    expect(calcular_diferencia(0, MAX)).toBe(-MAX);
+    expect(calcular_diferencia(MAX, MAX)).toBe(0);
+    expect(calcular_diferencia(5, 3)).toBe(2);
+    expect(calcular_diferencia(3, 5)).toBe(-2);
+  });
+
+  it("entradas fuera del rango seguro se rechazan (no hay diferencia aproximada)", () => {
+    expect(() => calcular_diferencia(MAX + 1, 0)).toThrow(Error);
+    expect(() => calcular_diferencia(0, MAX + 1)).toThrow(Error);
+  });
+});

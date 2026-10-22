@@ -13,7 +13,7 @@
 // Nota: los identificadores van en snake_case por instrucción explícita de la
 // tarea; el resto del frontend usa camelCase.
 
-import { validar_cantidad } from "./cantidades";
+import { sumar_cantidades_seguras, validar_cantidad } from "./cantidades";
 
 /** Cantidades de una jornada expresadas en la unidad mínima del producto. */
 export type EntradaEsperado = {
@@ -35,7 +35,11 @@ export function calcular_esperado(input: EntradaEsperado): number {
   validar_cantidad(input.merma);
   validar_cantidad(input.otras_salidas);
 
-  const salidas = input.vendido + input.merma + input.otras_salidas;
+  // Suma exacta o error: ni satura ni aproxima si excede MAX_SAFE_INTEGER.
+  const salidas = sumar_cantidades_seguras(
+    sumar_cantidades_seguras(input.vendido, input.merma),
+    input.otras_salidas
+  );
 
   if (salidas > input.cargado) {
     throw new Error(
@@ -48,12 +52,22 @@ export function calcular_esperado(input: EntradaEsperado): number {
 
 /**
  * Diferencia entre lo contado y lo esperado. Ambas entradas deben ser
- * cantidades no negativas enteras; el resultado sí puede ser negativo, porque
- * una diferencia negativa representa un faltante.
+ * cantidades canónicas (enteros seguros >= 0); el resultado sí puede ser
+ * negativo, porque una diferencia negativa representa un faltante. Con dos
+ * enteros seguros no negativos la resta cae siempre dentro del rango seguro;
+ * se verifica igualmente para no devolver nunca una diferencia aproximada.
  */
 export function calcular_diferencia(contado: number, esperado: number): number {
   validar_cantidad(contado);
   validar_cantidad(esperado);
 
-  return contado - esperado;
+  const diferencia = contado - esperado;
+
+  if (!Number.isSafeInteger(diferencia)) {
+    throw new Error(
+      `Diferencia fuera del rango seguro: ${contado} - ${esperado}.`
+    );
+  }
+
+  return diferencia;
 }
