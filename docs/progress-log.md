@@ -1,4 +1,32 @@
 ---
+## 21/10/2026 — Avisos de storage corrupto en Rendición y Cuentas Corrientes
+
+**Rama:** `feat/avisos-storage-corrupto` · **Base:** `2daad2a2e687148bcf0dfb83591b53c6b18b4a38` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; claves `distribuidora_ventas_demo_v4` y `distribuidora_cobros_demo_v4` sin cambios; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Deuda cerrada
+
+Las escrituras de Ventas y Cobros ya eran fail-closed, pero las pantallas consumidoras leían con las lecturas públicas (`[]` ante corrupción) y mostraban un ledger dañado como "cero ventas / cobros / saldo $0".
+
+### Qué se hizo (solo UX/UI; sin escrituras ni recuperación)
+
+- `useVentas` y `useCobros` leen una vez con `leerVentas()` / `leerCobrosDiscriminado()` (las mismas lecturas de las fronteras de escritura) y exponen `estadoLectura: "inicial" | "valido" | "corrupto"`. Contrato previo intacto (campos agregados, nada eliminado).
+- Nuevo `pages/avisosStorage.ts` (funciones puras): `disponibilidadRendicion`, `disponibilidadCuentas`, `saldoSiDisponible` y los textos de aviso. Ausente (`getItem === null`) NO dispara aviso.
+- **Rendición:** ventas corruptas → aviso, el vendido/esperado de mercadería se marca inconsistente (bloquea el cierre) y la caja no se calcula; cobros corruptos → aviso y la caja (efectivo, transferencias, totales, diferencia de efectivo) no se calcula. Los valores se muestran como "No disponible"; `confirmarCierre` se rechaza con el aviso. Las partes independientes siguen visibles.
+- **Cuentas Corrientes:** el saldo exige ambos ledgers legibles; con ventas, cobros o ambos corruptos se muestra el aviso correspondiente, saldos/deuda total/estado de cuenta como "No disponible" (nunca $0), y el cobro queda deshabilitado. "Ventas fiadas" y "Cobrado" por cliente solo se muestran si su propio ledger es legible.
+- Accesibilidad: `role="alert"`, ícono más texto "Datos dañados:" (no depende solo del color). Sin modal, sin librerías, sin botones de reparar/borrar, sin `setItem`/`removeItem` desde los avisos.
+- Sin cambios en cálculos monetarios, tolerancias, escrituras, claves ni otras pantallas.
+
+### Verificación
+
+Tests (ejecutados desde `apps/web/`): **14 archivos / 535 tests** (493 antes: +42, todos en `pages/avisosStorage.test.ts`): estado de lectura real (ausente/válido/5 variantes corruptas por ledger), matrices de Rendición y Cuentas, textos exactos y ausencia de escrituras. Mutaciones temporales (saldo con un solo ledger / caja siempre disponible) hicieron fallar 6 / 10 tests y se revirtieron. Revisión manual en navegador (Playwright con storage aislado; ver entrega).
+
+### Riesgos pendientes
+
+- `Rendición` también depende de Movimientos (mermas/cambios), cuyo storage corrupto sigue leyéndose como `[]` sin aviso.
+- Falta una acción de recuperación aprobada; el aviso es solo informativo.
+- Sin tests de componente; la decisión de qué mostrar está en funciones puras y la integración en JSX se verificó manualmente.
+
+---
 ## 21/10/2026 — Hardening de Ventas y Cobros: storage corrupto fail-closed
 
 **Rama:** `fix/ventas-cobros-storage-fail-closed` · **Base:** `fbe2c96ad54bec759ca3296ec0e25d8e6986b141` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; claves `distribuidora_ventas_demo_v4` y `distribuidora_cobros_demo_v4` sin cambios; **ADR-001 continúa PROPUESTA — NO APROBADA**.

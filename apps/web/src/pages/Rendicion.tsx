@@ -22,6 +22,10 @@ import {
   type EntradaConteo,
 } from "./rendicion_calculos";
 import { entrada_desde_cantidad, cantidad_a_texto } from "../domain/retornos";
+import {
+  NO_DISPONIBLE,
+  disponibilidadRendicion,
+} from "./avisosStorage";
 
 const conteoInicial: EntradaConteo = { texto: "", media: false };
 
@@ -47,9 +51,16 @@ const MENSAJE_INCONSISTENCIA_MERCADERIA =
 export default function Rendicion() {
   const { jornadas, cerrarJornada } = useJornadas();
   const { camiones } = useCamiones();
-  const { ventas } = useVentas();
+  const { ventas, estadoLectura: estadoVentas } = useVentas();
   const { movimientos } = useMovimientos();
-  const { cobros } = useCobros();
+  const { cobros, estadoLectura: estadoCobros } = useCobros();
+
+  // Ventas/cobros corruptos NO equivalen a "cero ventas/cobros": lo derivado
+  // de un ledger dañado se marca no disponible y la rendición no se cierra.
+  const disponibilidad = disponibilidadRendicion(
+    estadoVentas,
+    estadoCobros
+  );
 
   const [jornadaId, setJornadaId] = useState("");
   // Entrada de UI por producto; solo se persiste la cantidad canónica.
@@ -159,14 +170,21 @@ export default function Rendicion() {
         vendido: salidas.vendido,
         merma: salidas.merma,
         reemplazos: salidas.reemplazos,
-        acumulacionInvalida: !salidas.valido,
+        acumulacionInvalida:
+          !salidas.valido || !disponibilidad.mercaderiaDisponible,
         contado: conteoDesdeEntrada(
           item.unidadMedida,
           conteos[String(item.productoId)]
         ),
       });
     });
-  }, [jornada, ventas, movimientos, conteos]);
+  }, [
+    jornada,
+    ventas,
+    movimientos,
+    conteos,
+    disponibilidad.mercaderiaDisponible,
+  ]);
 
   const productosCuarentena = useMemo(
     () => acumularCuarentena(jornadaId, movimientos),
@@ -178,7 +196,7 @@ export default function Rendicion() {
   );
 
   const diferenciaEfectivo =
-    efectivoContado === null
+    efectivoContado === null || !disponibilidad.cajaDisponible
       ? null
       : Math.round(
           (efectivoContado - resumenCaja.efectivo) *
@@ -283,6 +301,11 @@ export default function Rendicion() {
       setError(
         "Seleccioná una jornada abierta."
       );
+      return;
+    }
+
+    if (disponibilidad.avisos.length > 0) {
+      setError(disponibilidad.avisos.join(" "));
       return;
     }
 
@@ -496,6 +519,20 @@ export default function Rendicion() {
 
       {jornada && (
         <>
+          {disponibilidad.avisos.map((aviso) => (
+            <div
+              key={aviso}
+              role="alert"
+              className="flex items-start gap-2 rounded-xl bg-red-50 p-4 text-sm font-medium text-red-800"
+            >
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+              <span>
+                <strong>Datos dañados: </strong>
+                {aviso}
+              </span>
+            </div>
+          ))}
+
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -524,7 +561,7 @@ export default function Rendicion() {
               es una ayuda: no sustituye el recuento físico.
             </p>
 
-            {stockInconsistente && (
+            {stockInconsistente && !disponibilidad.avisos.length && (
               <p
                 role="alert"
                 className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800"
@@ -857,13 +894,17 @@ export default function Rendicion() {
             <p className="mb-4 text-sm text-slate-500">
               Ventas registradas:{" "}
               <strong>
-                {resumenCaja.cantidadVentas}
+                {estadoVentas === "corrupto"
+                  ? NO_DISPONIBLE
+                  : resumenCaja.cantidadVentas}
               </strong>
               {" · "}
               Cobros de deuda registrados
               en la jornada:{" "}
               <strong>
-                {resumenCaja.cantidadCobros}
+                {estadoCobros === "corrupto"
+                  ? NO_DISPONIBLE
+                  : resumenCaja.cantidadCobros}
               </strong>
               .
             </p>
@@ -927,7 +968,9 @@ export default function Rendicion() {
                     {dato.titulo}
                   </p>
                   <p className="mt-1 text-xl font-bold">
-                    {moneda(dato.valor)}
+                    {disponibilidad.cajaDisponible
+                      ? moneda(dato.valor)
+                      : NO_DISPONIBLE}
                   </p>
                 </div>
               ))}

@@ -136,7 +136,12 @@ export function registrarVentaPersistida(
 }
 
 export function useVentas() {
-  const [ventas, setVentas] = useState<Venta[]>(cargarVentas);
+  // Una sola lectura discriminada al montar: de ahí salen el estado y, solo si
+  // no está corrupto, los datos. La UI usa `estadoLectura` para avisar.
+  const [lectura] = useState(leerVentas);
+  const [ventas, setVentas] = useState<Venta[]>(
+    lectura.ok ? lectura.ventas : []
+  );
 
   function registrarVenta(
     venta: Venta,
@@ -148,5 +153,6 @@ export function useVentas() {
   return {
     ventas,
     registrarVenta,
+    estadoLectura: lectura.estado,
   };
 }

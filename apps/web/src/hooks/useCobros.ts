@@ -208,7 +208,11 @@ export function registrarCobroPersistido(
 }
 
 export function useCobros() {
-  const [cobros, setCobros] = useState<Cobro[]>(leerCobros);
+  // Una sola lectura discriminada al montar (ver useVentas).
+  const [lectura] = useState(leerCobrosDiscriminado);
+  const [cobros, setCobros] = useState<Cobro[]>(
+    lectura.ok ? lectura.cobros : []
+  );
 
   function registrarCobro(cobro: Cobro): string | null {
     return registrarCobroPersistido(cobro, setCobros);
@@ -217,5 +221,6 @@ export function useCobros() {
   return {
     cobros,
     registrarCobro,
+    estadoLectura: lectura.estado,
   };
 }
