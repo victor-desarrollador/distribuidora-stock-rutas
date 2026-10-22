@@ -8,19 +8,20 @@ import { movimiento_valido } from "../domain/movimientos";
 
 const STORAGE_KEY = CLAVES_STORAGE.movimientos;
 
-/** Resultado discriminado de la lectura del ledger de movimientos (interno). */
+/** Resultado discriminado de la lectura del ledger de movimientos. */
 export type ResultadoLecturaMovimientos =
   | { ok: true; movimientos: MovimientoReparto[]; estado: "valido" | "inicial" }
   | { ok: false; error: string; estado: "corrupto" };
 
 /**
- * Lectura interna que distingue explícitamente:
+ * Lectura que distingue explícitamente:
  * - clave ausente: ledger inicial válido ([])
  * - clave presente y válida: movimientos cargados
  * - clave presente pero corrupta: error explícito
- * NO se exporta para UI; usada solo por la frontera de escritura.
+ * Es la única autoridad tanto para la frontera de escritura como para el
+ * estado que la UI usa para advertir corrupción.
  */
-function leerMovimientosInterno(): ResultadoLecturaMovimientos {
+export function leerMovimientosDiscriminado(): ResultadoLecturaMovimientos {
   try {
     const guardado = localStorage.getItem(STORAGE_KEY);
 
@@ -73,7 +74,7 @@ function leerMovimientosInterno(): ResultadoLecturaMovimientos {
  * NO usar en la frontera de escritura.
  */
 export function leerMovimientos(): MovimientoReparto[] {
-  const lectura = leerMovimientosInterno();
+  const lectura = leerMovimientosDiscriminado();
   return lectura.ok ? lectura.movimientos : [];
 }
 
@@ -82,7 +83,7 @@ export function leerMovimientos(): MovimientoReparto[] {
  * resultado. Separada del hook para ser testeable sin React.
  *
  * @param cargarActuales - Función que devuelve el estado actual con discriminación de corrupción.
- *   En producción usa `leerMovimientosInterno()`. En tests puede inyectarse un mock.
+ *   En producción usa `leerMovimientosDiscriminado()`. En tests puede inyectarse un mock.
  */
 export function registrarMovimientoOperacion(
   movimiento: MovimientoReparto,
@@ -136,7 +137,7 @@ export function registrarMovimientoPersistido(
     return registrarMovimientoOperacion(
       movimiento,
       validar,
-      leerMovimientosInterno,
+      leerMovimientosDiscriminado,
       (nuevos) => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos));
         alGuardar?.(nuevos);
@@ -148,10 +149,10 @@ export function registrarMovimientoPersistido(
 }
 
 export function useMovimientos() {
-  const [movimientos, setMovimientos] = useState<MovimientoReparto[]>(() => {
-    const lectura = leerMovimientosInterno();
-    return lectura.ok ? lectura.movimientos : [];
-  });
+  const [lectura] = useState(leerMovimientosDiscriminado);
+  const [movimientos, setMovimientos] = useState<MovimientoReparto[]>(
+    lectura.ok ? lectura.movimientos : []
+  );
 
   function registrarMovimiento(
     movimiento: MovimientoReparto,
@@ -163,5 +164,6 @@ export function useMovimientos() {
   return {
     movimientos,
     registrarMovimiento,
+    estadoLectura: lectura.estado,
   };
 }

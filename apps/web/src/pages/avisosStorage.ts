@@ -20,6 +20,9 @@ export const AVISO_VENTAS_RENDICION =
 export const AVISO_COBROS_RENDICION =
   "Los datos de cobros guardados están dañados. No se puede calcular el efectivo esperado con seguridad.";
 
+export const AVISO_MOVIMIENTOS_RENDICION =
+  "Los datos de movimientos guardados están dañados. No se puede calcular la rendición con seguridad.";
+
 export const AVISO_VENTAS_CUENTAS =
   "Los datos de ventas guardados están dañados. No se puede calcular el saldo de cuentas corrientes.";
 
@@ -36,24 +39,41 @@ export interface DisponibilidadRendicion {
   avisos: string[];
   /** Ventas legibles: vendido por producto y esperado de mercadería. */
   mercaderiaDisponible: boolean;
+  /** El ledger de movimientos permite calcular mermas, cambios y cuarentena. */
+  movimientosDisponibles: boolean;
+  /** El ledger de ventas permite calcular cantidades vendidas. */
+  ventasDisponibles: boolean;
   /** Ventas y cobros legibles: efectivo, transferencias y totales de caja. */
   cajaDisponible: boolean;
+  /** Todos los ledgers requeridos para cerrar son legibles. */
+  cierreDisponible: boolean;
 }
 
 /** Rendición: qué se puede calcular según el estado de ventas y cobros. */
 export function disponibilidadRendicion(
   ventas: EstadoLectura,
-  cobros: EstadoLectura
+  cobros: EstadoLectura,
+  movimientos: EstadoLectura = "inicial"
 ): DisponibilidadRendicion {
   const avisos: string[] = [];
 
   if (ventas === "corrupto") avisos.push(AVISO_VENTAS_RENDICION);
   if (cobros === "corrupto") avisos.push(AVISO_COBROS_RENDICION);
+  if (movimientos === "corrupto") {
+    avisos.push(AVISO_MOVIMIENTOS_RENDICION);
+  }
+
+  const ventasDisponibles = ventas !== "corrupto";
+  const movimientosDisponibles = movimientos !== "corrupto";
+  const cajaDisponible = ventasDisponibles && cobros !== "corrupto";
 
   return {
     avisos,
-    mercaderiaDisponible: ventas !== "corrupto",
-    cajaDisponible: ventas !== "corrupto" && cobros !== "corrupto",
+    ventasDisponibles,
+    movimientosDisponibles,
+    mercaderiaDisponible: ventasDisponibles && movimientosDisponibles,
+    cajaDisponible,
+    cierreDisponible: cajaDisponible && movimientosDisponibles,
   };
 }
 

@@ -52,14 +52,15 @@ export default function Rendicion() {
   const { jornadas, cerrarJornada } = useJornadas();
   const { camiones } = useCamiones();
   const { ventas, estadoLectura: estadoVentas } = useVentas();
-  const { movimientos } = useMovimientos();
+  const { movimientos, estadoLectura: estadoMovimientos } = useMovimientos();
   const { cobros, estadoLectura: estadoCobros } = useCobros();
 
-  // Ventas/cobros corruptos NO equivalen a "cero ventas/cobros": lo derivado
-  // de un ledger dañado se marca no disponible y la rendición no se cierra.
+  // Un ledger corrupto NO equivale a ausencia: cada cálculo dependiente se
+  // marca no disponible y la rendición no se cierra.
   const disponibilidad = disponibilidadRendicion(
     estadoVentas,
-    estadoCobros
+    estadoCobros,
+    estadoMovimientos
   );
 
   const [jornadaId, setJornadaId] = useState("");
@@ -158,25 +159,39 @@ export default function Rendicion() {
     if (!jornada) return [];
 
     return jornada.items.map((item) => {
-      const salidas = acumularSalidasProducto(
+      const salidasVentas = acumularSalidasProducto(
         item.productoId,
         jornada.id,
         ventas,
+        []
+      );
+      const salidasMovimientos = acumularSalidasProducto(
+        item.productoId,
+        jornada.id,
+        [],
         movimientos
       );
 
-      return calcularFilaMercaderia({
-        item,
-        vendido: salidas.vendido,
-        merma: salidas.merma,
-        reemplazos: salidas.reemplazos,
-        acumulacionInvalida:
-          !salidas.valido || !disponibilidad.mercaderiaDisponible,
-        contado: conteoDesdeEntrada(
-          item.unidadMedida,
-          conteos[String(item.productoId)]
-        ),
-      });
+      return {
+        ...calcularFilaMercaderia({
+          item,
+          vendido: salidasVentas.vendido,
+          merma: salidasMovimientos.merma,
+          reemplazos: salidasMovimientos.reemplazos,
+          acumulacionInvalida:
+            !salidasVentas.valido ||
+            !salidasMovimientos.valido ||
+            !disponibilidad.mercaderiaDisponible,
+          contado: conteoDesdeEntrada(
+            item.unidadMedida,
+            conteos[String(item.productoId)]
+          ),
+        }),
+        vendidoDisponible:
+          disponibilidad.ventasDisponibles && salidasVentas.valido,
+        movimientosDisponibles:
+          disponibilidad.movimientosDisponibles && salidasMovimientos.valido,
+      };
     });
   }, [
     jornada,
@@ -184,6 +199,8 @@ export default function Rendicion() {
     movimientos,
     conteos,
     disponibilidad.mercaderiaDisponible,
+    disponibilidad.movimientosDisponibles,
+    disponibilidad.ventasDisponibles,
   ]);
 
   const productosCuarentena = useMemo(
@@ -304,7 +321,7 @@ export default function Rendicion() {
       return;
     }
 
-    if (disponibilidad.avisos.length > 0) {
+    if (!disponibilidad.cierreDisponible) {
       setError(disponibilidad.avisos.join(" "));
       return;
     }
@@ -546,7 +563,10 @@ export default function Rendicion() {
                 <button
                   type="button"
                   onClick={completarConEsperados}
-                  disabled={rendicionBloqueada}
+                  disabled={
+                    rendicionBloqueada ||
+                    !disponibilidad.mercaderiaDisponible
+                  }
                   className="min-h-11 rounded-lg border border-blue-300 px-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40"
                 >
                   Completar con esperados
@@ -624,7 +644,7 @@ export default function Rendicion() {
                             <strong>
                               {textoCantidad(
                                 fila.unidadMedida,
-                                fila.estado === "ok"
+                                fila.vendidoDisponible
                                   ? fila.vendido
                                   : null
                               )}
@@ -636,10 +656,12 @@ export default function Rendicion() {
                               Mermas / cambios
                             </p>
                             <strong>
-                              {textoCantidad(
-                                fila.unidadMedida,
-                                fila.mermaYCambios
-                              )}
+                              {fila.movimientosDisponibles
+                                ? textoCantidad(
+                                    fila.unidadMedida,
+                                    fila.mermaYCambios
+                                  )
+                                : NO_DISPONIBLE}
                             </strong>
                           </div>
 
@@ -648,10 +670,12 @@ export default function Rendicion() {
                               Esperado
                             </p>
                             <strong>
-                              {textoCantidad(
-                                fila.unidadMedida,
-                                fila.esperado
-                              )}
+                              {disponibilidad.mercaderiaDisponible
+                                ? textoCantidad(
+                                    fila.unidadMedida,
+                                    fila.esperado
+                                  )
+                                : NO_DISPONIBLE}
                             </strong>
                           </div>
                         </div>
@@ -771,8 +795,11 @@ export default function Rendicion() {
                               Diferencia
                             </p>
 
-                            {fila.diferencia ===
-                            null ? (
+                            {!disponibilidad.mercaderiaDisponible ? (
+                              <span className="text-slate-500">
+                                {NO_DISPONIBLE}
+                              </span>
+                            ) : fila.diferencia === null ? (
                               <span className="text-slate-500">
                                 Sin contar
                               </span>
@@ -811,7 +838,8 @@ export default function Rendicion() {
                           </div>
                         </div>
 
-                        {fila.contado !==
+                        {disponibilidad.mercaderiaDisponible &&
+                          fila.contado !==
                           null &&
                           fila.diferencia !==
                             null && (
@@ -847,7 +875,11 @@ export default function Rendicion() {
                 Productos devueltos en cuarentena
               </h3>
 
-              {productosCuarentena.length ===
+              {!disponibilidad.movimientosDisponibles ? (
+                <p className="mt-2 text-sm font-semibold text-amber-900">
+                  {NO_DISPONIBLE}
+                </p>
+              ) : productosCuarentena.length ===
               0 ? (
                 <p className="mt-2 text-sm text-amber-800">
                   No hay devoluciones registradas.
@@ -1088,7 +1120,7 @@ export default function Rendicion() {
                   confirmarCierre
                 }
                 disabled={
-                  rendicionBloqueada
+                  rendicionBloqueada || !disponibilidad.cierreDisponible
                 }
                 className="mt-5 min-h-14 w-full rounded-xl bg-green-600 px-5 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40"
               >

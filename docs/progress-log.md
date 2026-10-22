@@ -1,4 +1,30 @@
 ---
+## 22/10/2026 — Plan maestro pre-backend · Bloque A: Rendición fail-closed ante Movimientos corruptos
+
+**Rama:** `feat/cierre-frontend-pre-backend` · **Base:** `42620e6ca5c061640aa1b58a5c42dd2939a3f02c` · **Estado:** Bloque A implementado y verificado, pendiente del commit atómico autorizado; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Qué se hizo
+
+- `useMovimientos` expone la misma lectura discriminada que ya protegía las escrituras: clave ausente → `inicial` con `[]`; array válido → `valido`; `""`, `"null"`, JSON inválido, no-array o movimiento inválido → `corrupto`. La lectura pública visual conserva su contrato previo y la escritura sigue fail-closed.
+- Rendición consume `estadoLectura` de Movimientos. Si está corrupto, muestra un aviso explícito, deja mermas/cambios, esperado, diferencia y cuarentena como `No disponible`, conserva visibles los cálculos independientes confiables y bloquea completar esperados y confirmar el cierre.
+- Ventas, Cobros y Movimientos mantienen avisos separados, sin duplicación accidental. La disponibilidad de caja no se pierde por corrupción exclusiva de Movimientos, pero el cierre sí queda bloqueado por consistencia de mercadería.
+- No se agregó recuperación: no se borra, repara, migra ni reescribe el raw corrupto. Sin cambios de claves, reglas monetarias, backend, Supabase, SQL, RPC, RLS ni Auth.
+
+### Verificación
+
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → **14 archivos / 546 tests passed** (535 previos; +11).
+- `npm run lint` → exit 0.
+- `npx playwright test` → **2 tests passed**; el nuevo E2E verifica aviso, valores `No disponible`, cierre bloqueado, raw intacto y cero `setItem`/`removeItem` sobre Movimientos.
+- `npm run build` y verificaciones Git: se registran al cerrar el bloque antes del commit.
+
+### Riesgos pendientes
+
+- Sigue siendo un prototipo localStorage sin las garantías de backend del Blueprint; este bloque solo evita presentar corrupción como ausencia válida.
+- Los estados discriminados de Jornadas y catálogos todavía no son visibles en sus consumidores operativos; se abordan en el Bloque B.
+- Por tocar rendición/cierre, corresponde revisión de seguridad y auditoría independiente posterior sobre el hash concreto.
+
+---
 ## 21/10/2026 — Avisos de storage corrupto en Rendición y Cuentas Corrientes
 
 **Rama:** `feat/avisos-storage-corrupto` · **Base:** `2daad2a2e687148bcf0dfb83591b53c6b18b4a38` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; claves `distribuidora_ventas_demo_v4` y `distribuidora_cobros_demo_v4` sin cambios; **ADR-001 continúa PROPUESTA — NO APROBADA**.

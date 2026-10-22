@@ -8,13 +8,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Cobro } from "../data/mockCobros";
 import type { Venta } from "../data/mockVentas";
+import type { MovimientoReparto } from "../data/mockMovimientos";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 import { leerCobrosDiscriminado } from "../hooks/useCobros";
 import { leerVentas } from "../hooks/useVentas";
+import { leerMovimientosDiscriminado } from "../hooks/useMovimientos";
 import {
   AVISO_AMBOS_CUENTAS,
   AVISO_COBROS_CUENTAS,
   AVISO_COBROS_RENDICION,
+  AVISO_MOVIMIENTOS_RENDICION,
   AVISO_VENTAS_CUENTAS,
   AVISO_VENTAS_RENDICION,
   disponibilidadCuentas,
@@ -24,6 +27,7 @@ import {
 
 const CV = CLAVES_STORAGE.ventas;
 const CC = CLAVES_STORAGE.cobros;
+const CM = CLAVES_STORAGE.movimientos;
 
 let store: Map<string, string>;
 let setItem: ReturnType<typeof vi.fn>;
@@ -77,6 +81,23 @@ const cobro = (id: string, importe = 50): Cobro => ({
   observaciones: "",
 });
 
+const movimiento = (id: string): MovimientoReparto => ({
+  id,
+  jornadaId: "j1",
+  camionId: 1,
+  fecha: "2026-10-21T11:00:00.000Z",
+  motivo: "Rotura",
+  tipo: "merma",
+  producto: {
+    productoId: 1,
+    nombreProducto: "Yogur",
+    unidadMedida: "unidad",
+    cantidad: 1,
+  },
+  clienteId: null,
+  nombreCliente: null,
+});
+
 const CORRUPTOS_VENTAS: Array<[string, string]> = [
   ["JSON inválido", "{no es json"],
   ["string vacío", ""],
@@ -93,25 +114,37 @@ const CORRUPTOS_COBROS: Array<[string, string]> = [
   ["cobro inválido", JSON.stringify([cobro("x", -5)])],
 ];
 
+const CORRUPTOS_MOVIMIENTOS: Array<[string, string]> = [
+  ["JSON inválido", "{no es json"],
+  ["string vacío", ""],
+  ["null", "null"],
+  ["no array", JSON.stringify({ movimientos: [] })],
+  ["movimiento inválido", JSON.stringify([{ ...movimiento("x"), motivo: 3 }])],
+];
+
 // Misma cadena que usan los hooks: lectura discriminada → estado → aviso.
 const estados = () => ({
   ventas: leerVentas(),
   cobros: leerCobrosDiscriminado(),
+  movimientos: leerMovimientosDiscriminado(),
 });
 
 describe("estado de lectura que alimenta la UI", () => {
   it("ausente → inicial (sin aviso)", () => {
-    const { ventas, cobros } = estados();
+    const { ventas, cobros, movimientos } = estados();
     expect(ventas.estado).toBe("inicial");
     expect(cobros.estado).toBe("inicial");
+    expect(movimientos.estado).toBe("inicial");
   });
 
   it("válido → valido", () => {
     store.set(CV, JSON.stringify([venta("v1")]));
     store.set(CC, JSON.stringify([cobro("c1")]));
-    const { ventas, cobros } = estados();
+    store.set(CM, JSON.stringify([movimiento("m1")]));
+    const { ventas, cobros, movimientos } = estados();
     expect(ventas.estado).toBe("valido");
     expect(cobros.estado).toBe("valido");
+    expect(movimientos.estado).toBe("valido");
   });
 
   it.each(CORRUPTOS_VENTAS)("ventas %s → corrupto", (_n, crudo) => {
@@ -123,6 +156,11 @@ describe("estado de lectura que alimenta la UI", () => {
     store.set(CC, crudo);
     expect(estados().cobros.estado).toBe("corrupto");
   });
+
+  it.each(CORRUPTOS_MOVIMIENTOS)("movimientos %s → corrupto", (_n, crudo) => {
+    store.set(CM, crudo);
+    expect(estados().movimientos.estado).toBe("corrupto");
+  });
 });
 
 describe("Rendición", () => {
@@ -131,6 +169,7 @@ describe("Rendición", () => {
     expect(d.avisos).toEqual([]);
     expect(d.mercaderiaDisponible).toBe(true);
     expect(d.cajaDisponible).toBe(true);
+    expect(d.cierreDisponible).toBe(true);
   });
 
   it("B. ventas y cobros válidos: sin alerta", () => {
@@ -165,9 +204,41 @@ describe("Rendición", () => {
     expect(d.avisos).toEqual([AVISO_VENTAS_RENDICION, AVISO_COBROS_RENDICION]);
   });
 
+  it.each(CORRUPTOS_MOVIMIENTOS)(
+    "movimientos corruptos (%s): aviso, mermas/cambios no disponibles y cierre bloqueado",
+    (_n, crudo) => {
+      store.set(CM, crudo);
+      const e = estados();
+      const d = disponibilidadRendicion(
+        e.ventas.estado,
+        e.cobros.estado,
+        e.movimientos.estado
+      );
+      expect(d.avisos).toEqual([AVISO_MOVIMIENTOS_RENDICION]);
+      expect(d.ventasDisponibles).toBe(true);
+      expect(d.movimientosDisponibles).toBe(false);
+      expect(d.mercaderiaDisponible).toBe(false);
+      expect(d.cajaDisponible).toBe(true);
+      expect(d.cierreDisponible).toBe(false);
+    }
+  );
+
+  it("ventas, cobros y movimientos corruptos: tres avisos únicos y ordenados", () => {
+    const d = disponibilidadRendicion("corrupto", "corrupto", "corrupto");
+    expect(d.avisos).toEqual([
+      AVISO_VENTAS_RENDICION,
+      AVISO_COBROS_RENDICION,
+      AVISO_MOVIMIENTOS_RENDICION,
+    ]);
+    expect(new Set(d.avisos).size).toBe(3);
+  });
+
   it("el texto del aviso de ventas es el pedido", () => {
     expect(AVISO_VENTAS_RENDICION).toBe(
       "Los datos de ventas guardados están dañados. No se puede calcular la rendición con seguridad."
+    );
+    expect(AVISO_MOVIMIENTOS_RENDICION).toBe(
+      "Los datos de movimientos guardados están dañados. No se puede calcular la rendición con seguridad."
     );
   });
 });
@@ -251,12 +322,17 @@ describe("el aviso no escribe ni repara el storage", () => {
   it("leer y decidir avisos con storage corrupto no llama a setItem ni removeItem", () => {
     store.set(CV, "{roto");
     store.set(CC, "null");
-    const antes = [store.get(CV), store.get(CC)];
+    store.set(CM, "");
+    const antes = [store.get(CV), store.get(CC), store.get(CM)];
     const e = estados();
-    disponibilidadRendicion(e.ventas.estado, e.cobros.estado);
+    disponibilidadRendicion(
+      e.ventas.estado,
+      e.cobros.estado,
+      e.movimientos.estado
+    );
     disponibilidadCuentas(e.ventas.estado, e.cobros.estado);
     expect(setItem).not.toHaveBeenCalled();
     expect(removeItem).not.toHaveBeenCalled();
-    expect([store.get(CV), store.get(CC)]).toEqual(antes);
+    expect([store.get(CV), store.get(CC), store.get(CM)]).toEqual(antes);
   });
 });
