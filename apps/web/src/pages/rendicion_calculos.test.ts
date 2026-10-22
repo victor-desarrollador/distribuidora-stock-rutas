@@ -335,6 +335,43 @@ describe("acumularSalidasProducto", () => {
   });
 });
 
+
+describe("M-1: mermaYCambios no muestra 0 falso cuando acumulación falló", () => {
+  it("merma = 1, reemplazos = 2 → mermaYCambios === 3 (control positivo)", () => {
+    const f = fila({ cantidad: 10 }, { merma: 1, reemplazos: 2 });
+    expect(f.mermaYCambios).toBe(3);
+    expect(f.estado).toBe("ok");
+  });
+
+  it("acumulacionInvalida → mermaYCambios === null, estado inconsistente", () => {
+    const f = fila(
+      { cantidad: 10 },
+      { merma: 1, reemplazos: 2, acumulacionInvalida: true }
+    );
+    expect(f.mermaYCambios).toBeNull();
+    expect(f.estado).toBe("inconsistente");
+    expect(f.esperado).toBeNull();
+    expect(f.diferencia).toBeNull();
+  });
+
+  it("overflow en merma + reemplazos → mermaYCambios null, estado inconsistente", () => {
+    const f = fila({ cantidad: MAX }, { merma: MAX, reemplazos: 1 });
+    expect(f.mermaYCambios).toBeNull();
+    expect(f.estado).toBe("inconsistente");
+  });
+
+  it("acumulacionInvalida + merma + reemplazos = 0 → mermaYCambios === null (no 0)", () => {
+    const f = fila(
+      { cantidad: 10 },
+      { merma: 0, reemplazos: 0, acumulacionInvalida: true }
+    );
+    // Cuando la acumulación falló, mermaYCambios debe ser null, no 0
+    expect(f.mermaYCambios).toBeNull();
+    expect(f.estado).toBe("inconsistente");
+  });
+});
+
+
 describe("acumularCuarentena (informativo)", () => {
   const dev = (cantidad: number, productoId = 1): MovimientoReparto => ({
     id: `d${cantidad}`,

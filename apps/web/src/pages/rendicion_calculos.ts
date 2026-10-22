@@ -156,13 +156,16 @@ export function calcularFilaMercaderia(
       ? entrada.contado
       : null;
 
-  let mermaYCambios: number | null;
-
-  try {
-    mermaYCambios = sumar_cantidades_seguras(merma, reemplazos);
-  } catch {
-    mermaYCambios = null;
-  }
+  // Si la acumulación de salidas fue inválida, mermaYCambios no es calculable.
+  const mermaYCambios = entrada.acumulacionInvalida
+    ? null
+    : (() => {
+        try {
+          return sumar_cantidades_seguras(merma, reemplazos);
+        } catch {
+          return null;
+        }
+      })();
 
   const base = {
     productoId: item.productoId,
