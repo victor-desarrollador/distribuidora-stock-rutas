@@ -50,7 +50,7 @@ function valorItem(item: ItemCarga): number {
 export default function Jornadas() {
   const { camiones, estadoLectura: estadoCamiones } = useCamiones();
   const { productos, estadoLectura: estadoProductos } = useProductos();
-  const { retornos } = useRetornos();
+  const { retornos, estadoLectura: estadoRetornos } = useRetornos();
   const {
     jornadas,
     crearJornada,
@@ -61,6 +61,7 @@ export default function Jornadas() {
     jornadas: estadoJornadas,
     productos: estadoProductos,
     camiones: estadoCamiones,
+    retornos: estadoRetornos,
   });
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [camionId, setCamionId] = useState("");

@@ -36,12 +36,16 @@ const entradaInicial: EntradaRetorno = { texto: "", media: false };
 export default function Retornos() {
   const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
   const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const {
+    retornos,
+    registrarRetorno,
+    estadoLectura: estadoRetornos,
+  } = useRetornos();
   const estadoOperacion = estadoStorageOperativo({
     jornadas: estadoJornadas,
     camiones: estadoCamiones,
+    retornos: estadoRetornos,
   });
-
-  const { retornos, registrarRetorno } = useRetornos();
 
   const [jornadaId, setJornadaId] = useState("");
   const [responsable, setResponsable] = useState("");

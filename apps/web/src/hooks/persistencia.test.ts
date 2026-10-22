@@ -39,6 +39,7 @@ import type {
 } from "../data/mockMovimientos";
 import {
   leerRetornos,
+  leerRetornosDiscriminado,
   registrarRetornoOperacion,
   registrarRetornoPersistido,
 } from "./useRetornos";
@@ -1090,6 +1091,30 @@ describe("retornos: frontera REAL de escritura", () => {
     expect(mockLS.getItem(CLAVE)).toBe(antes);
     expect(mockLS.setItem).not.toHaveBeenCalled();
   };
+
+  it("lectura discriminada: distingue ausencia, válido y corrupto sin escribir", () => {
+    expect(leerRetornosDiscriminado()).toEqual({
+      ok: true,
+      retornos: [],
+      estado: "inicial",
+    });
+
+    const valido = [retorno("j1")];
+    mockLS._store.set(CLAVE, JSON.stringify(valido));
+    expect(leerRetornosDiscriminado()).toEqual({
+      ok: true,
+      retornos: valido,
+      estado: "valido",
+    });
+
+    mockLS._store.set(CLAVE, "null");
+    const lecturaCorrupta = leerRetornosDiscriminado();
+    expect(lecturaCorrupta.ok).toBe(false);
+    expect(lecturaCorrupta.estado).toBe("corrupto");
+    expect(mockLS.getItem(CLAVE)).toBe("null");
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS.removeItem).not.toHaveBeenCalled();
+  });
 
   it("A. storage ausente: se registra y se persiste", () => {
     expect(mockLS.getItem(CLAVE)).toBeNull();

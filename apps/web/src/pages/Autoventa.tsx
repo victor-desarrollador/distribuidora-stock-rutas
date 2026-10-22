@@ -16,7 +16,7 @@ import { useVentas } from "../hooks/useVentas";
 
 import {
   useMovimientos,
-  leerMovimientos,
+  leerMovimientosDiscriminado,
 } from "../hooks/useMovimientos";
 
 import {
@@ -71,14 +71,16 @@ export default function Autoventa() {
   const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
   const { clientes, estadoLectura: estadoClientes } = useClientes();
   const { camiones, estadoLectura: estadoCamiones } = useCamiones();
-  const { ventas, registrarVenta } = useVentas();
+  const { ventas, registrarVenta, estadoLectura: estadoVentas } = useVentas();
 
   // Movimientos: mermas, devoluciones y cambios.
-  const { movimientos } = useMovimientos();
+  const { movimientos, estadoLectura: estadoMovimientos } = useMovimientos();
   const estadoOperacion = estadoStorageOperativo({
     jornadas: estadoJornadas,
     clientes: estadoClientes,
     camiones: estadoCamiones,
+    ventas: estadoVentas,
+    movimientos: estadoMovimientos,
   });
 
   // Formulario de venta.
@@ -304,7 +306,11 @@ export default function Autoventa() {
       venta,
       (ventasActuales) => {
         // Leemos los movimientos más recientes de la demo.
-        const movimientosActuales = leerMovimientos();
+        const lecturaMovimientos = leerMovimientosDiscriminado();
+        if (!lecturaMovimientos.ok) {
+          return `No se puede registrar: ${lecturaMovimientos.error}`;
+        }
+        const movimientosActuales = lecturaMovimientos.movimientos;
 
         for (const item of itemsVenta) {
           // Cantidad que salió cargada en el camión.

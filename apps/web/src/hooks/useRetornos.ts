@@ -5,7 +5,7 @@ import { retorno_valido } from "../domain/retornos";
 
 const STORAGE_KEY = CLAVES_STORAGE.retornos;
 
-/** Resultado discriminado de la lectura del ledger de retornos (interno). */
+/** Resultado discriminado de la lectura del ledger de retornos. */
 export type ResultadoLecturaRetornos =
   | { ok: true; retornos: RetornoDeposito[]; estado: "inicial" | "valido" }
   | { ok: false; error: string; estado: "corrupto" };
@@ -15,7 +15,7 @@ export type ResultadoLecturaRetornos =
  * clave válida y clave corrupta (error). Es la que usa la frontera de
  * escritura; nunca reinterpreta un storage corrupto como vacío.
  */
-function leerRetornosInterno(): ResultadoLecturaRetornos {
+export function leerRetornosDiscriminado(): ResultadoLecturaRetornos {
   try {
     const guardado = localStorage.getItem(STORAGE_KEY);
 
@@ -65,7 +65,7 @@ function leerRetornosInterno(): ResultadoLecturaRetornos {
  * para corrupto). NO usar en la frontera de escritura.
  */
 export function leerRetornos(): RetornoDeposito[] {
-  const lectura = leerRetornosInterno();
+  const lectura = leerRetornosDiscriminado();
   return lectura.ok ? lectura.retornos : [];
 }
 
@@ -119,7 +119,7 @@ export function registrarRetornoPersistido(
     return registrarRetornoOperacion(
       retorno,
       validar,
-      leerRetornosInterno,
+      leerRetornosDiscriminado,
       (nuevos) => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos));
         alGuardar?.(nuevos);
@@ -131,11 +131,14 @@ export function registrarRetornoPersistido(
 }
 
 export function useRetornos() {
-  const [retornos, setRetornos] = useState<RetornoDeposito[]>(leerRetornos);
+  const [lectura] = useState(leerRetornosDiscriminado);
+  const [retornos, setRetornos] = useState<RetornoDeposito[]>(
+    lectura.ok ? lectura.retornos : []
+  );
 
   function registrarRetorno(retorno: RetornoDeposito): string | null {
     return registrarRetornoPersistido(retorno, setRetornos);
   }
 
-  return { retornos, registrarRetorno };
+  return { retornos, registrarRetorno, estadoLectura: lectura.estado };
 }

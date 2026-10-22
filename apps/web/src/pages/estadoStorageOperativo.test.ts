@@ -22,6 +22,9 @@ describe("estadoStorageOperativo", () => {
     ["productos", "Los datos de productos guardados están dañados."],
     ["camiones", "Los datos de camiones guardados están dañados."],
     ["clientes", "Los datos de clientes guardados están dañados."],
+    ["ventas", "Los datos de ventas guardados están dañados."],
+    ["movimientos", "Los datos de movimientos guardados están dañados."],
+    ["retornos", "Los datos de retornos guardados están dañados."],
   ] as const)("%s corrupto avisa y bloquea", (fuente, texto) => {
     const resultado = estadoStorageOperativo({ [fuente]: "corrupto" });
     expect(resultado.bloqueado).toBe(true);

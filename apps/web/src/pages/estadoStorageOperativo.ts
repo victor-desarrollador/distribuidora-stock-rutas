@@ -4,7 +4,10 @@ export type FuenteOperativa =
   | "jornadas"
   | "productos"
   | "camiones"
-  | "clientes";
+  | "clientes"
+  | "ventas"
+  | "movimientos"
+  | "retornos";
 
 const avisos: Record<FuenteOperativa, string> = {
   jornadas:
@@ -15,6 +18,12 @@ const avisos: Record<FuenteOperativa, string> = {
     "Los datos de camiones guardados están dañados. El catálogo no está disponible para operar.",
   clientes:
     "Los datos de clientes guardados están dañados. El catálogo no está disponible para operar.",
+  ventas:
+    "Los datos de ventas guardados están dañados. No se puede calcular el stock operativo con seguridad.",
+  movimientos:
+    "Los datos de movimientos guardados están dañados. No se puede calcular el stock operativo con seguridad.",
+  retornos:
+    "Los datos de retornos guardados están dañados. No se puede calcular el stock operativo con seguridad.",
 };
 
 export interface EstadoStorageOperativo {

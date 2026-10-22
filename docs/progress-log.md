@@ -1,4 +1,53 @@
 ---
+## 22/10/2026 — CIERRE FRONTEND PRE-BACKEND · Bloque C
+
+**Rama:** `feat/cierre-frontend-pre-backend` · **Base original:** `42620e6ca5c061640aa1b58a5c42dd2939a3f02c` · **COMMIT_A:** `9f9d4c5d021f2f0969b6374474b533258f3a6661` · **COMMIT_B:** `1818ed27d43a9829c316be60edadf6063623fec0` · **Alcance de COMMIT_C:** integración, regresión, inventario y cierre documental; pendiente de crear el commit atómico autorizado. **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Alcance y correcciones de integración
+
+- Se agregaron pruebas E2E sobre Rendición (Ventas corruptas, Cobros corruptos, Movimientos corruptos y estado inicial legítimo) y Cuentas Corrientes (Ventas o Cobros corruptos), verificando avisos, valores no disponibles, bloqueo de acciones y raw intacto.
+- La integración detectó y corrigió tres dependencias que todavía podían consumir un `[]` visual como autoridad: Jornadas y Retornos ahora bloquean ante Retornos corruptos; Movimientos bloquea y relee Ventas discriminadamente antes de escribir; Autoventa bloquea ante Ventas o Movimientos corruptos y relee Movimientos discriminadamente dentro de la validación de stock.
+- Rendición ahora muestra explícitamente `No disponible` también en “Vendido” cuando Ventas está corrupto; ya no presenta un guion ambiguo para ese cálculo.
+- `useRetornos` expone su lectura discriminada y `estadoLectura` sin cambiar la escritura existente. No se agregó parser paralelo, recuperación, borrado, migración ni reescritura del raw.
+
+### Inventario final de storage operativo
+
+| Superficie | Key | Lector / ausencia / corrupción | Escritura | Fail-closed | UI avisa / bloquea | Deuda restante |
+|---|---|---|---|---|---|---|
+| Productos | `distribuidora_productos_demo_v4` | `leerProductos` vía `leerCatalogo`; ausente = semillas demo iniciales; corrupto discriminado, hook `[]` | `persistirCatalogo` | Sí | Sí / sí en operaciones consumidoras | Datos demo locales; sin recuperación |
+| Camiones | `distribuidora_camiones_demo_v4` | `leerCamiones` vía `leerCatalogo`; ausente = semillas demo iniciales; corrupto discriminado, hook `[]` | `persistirCatalogo` | Sí | Sí / sí | Datos demo locales; sin recuperación |
+| Clientes | `distribuidora_clientes_demo_v2` | `leerClientes` vía `leerCatalogo`; ausente = semillas demo iniciales; corrupto discriminado, hook `[]` | `persistirCatalogo` | Sí | Sí / sí | Key histórica fuera de `CLAVES_STORAGE`; sin recuperación |
+| Jornadas | `distribuidora_jornadas_demo_v4` | lector discriminado interno; ausente = `inicial []`; corrupto = error y hook `[]` | `escribirJornadas` | Sí | Sí / sí | Persistencia local, sin concurrencia real |
+| Ventas | `distribuidora_ventas_demo_v4` | `leerVentas`; ausente = `inicial []`; corrupto = error | `registrarVentaPersistida` | Sí | Sí / sí en Rendición, Cuentas, Autoventa y Movimientos | Dinero en floats; backend pendiente |
+| Cobros | `distribuidora_cobros_demo_v4` | `leerCobrosDiscriminado`; ausente = `inicial []`; corrupto = error | `registrarCobroPersistido` | Sí | Sí / sí en Rendición y Cuentas | Dinero en floats; backend pendiente |
+| Movimientos | `distribuidora_movimientos_demo_v4` | `leerMovimientosDiscriminado`; ausente = `inicial []`; corrupto = error | `registrarMovimientoPersistido` | Sí | Sí / sí en Rendición, Autoventa y Movimientos | Sin transacción ni concurrencia backend |
+| Retornos | `distribuidora_retornos_demo_v4` | `leerRetornosDiscriminado`; ausente = `inicial []`; corrupto = error | `registrarRetornoPersistido` | Sí | Sí / sí en Jornadas y Retornos | Sin recuperación aprobada |
+| Sesión demo | `distribuidora_sesion_demo_v1` | `AuthContext`; ausente o id desconocido = sin sesión | `AuthContext` login/logout | Sí para acceso demo | Login / rutas privadas bloqueadas | No es Auth real; backend no iniciado |
+
+### Auditoría global
+
+- No quedan `if (!guardado)` ni `if (!texto)` ejecutables sobre claves operativas; la única coincidencia es un comentario explicativo.
+- No hay `JSON.parse(...)` directo en páginas o componentes.
+- Las escrituras operativas están concentradas en los hooks/fronteras autorizados. `ConfiguracionDemo` conserva su reset explícito con rollback y `AuthContext` administra solamente la sesión demo; no se agregó ninguna escritura.
+- Clasificación: los tres cruces de ledger corregidos eran bugs reales de Etapa 0. La persistencia local, floats monetarios, Auth/Supabase/RLS/RPC, idempotencia y concurrencia reales son deuda aceptada o fuera de alcance de este cierre.
+
+### Verificación final
+
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → **15 archivos / 558 tests passed**.
+- `npm run lint` → exit 0.
+- `npm run build` → exit 0.
+- `npx playwright test` → **11 tests passed**.
+- `git diff --check` → sin errores.
+
+### Estado y riesgos pendientes
+
+- Productos, Camiones, Clientes, Jornadas, Ventas, Cobros, Movimientos y Retornos quedan fail-closed en escritura; sus consumidores operativos críticos muestran corrupción y bloquean la acción dependiente.
+- No se implementó recuperación automática, import/export, offline, ARCA, app nativa ni cambios monetarios estructurales. El raw corrupto permanece intacto.
+- **ADR-001 sigue PROPUESTA — NO APROBADA. Backend todavía no iniciado. Sin push, merge ni deploy.**
+- Por tocar ventas, cobros, movimientos y cierres, corresponde revisión de seguridad y auditoría independiente posterior sobre cada hash concreto.
+
+---
 ## 22/10/2026 — Plan maestro pre-backend · Bloque B: corrupción operativa visible en Jornadas y catálogos
 
 **Rama:** `feat/cierre-frontend-pre-backend` · **Base del bloque:** `9f9d4c5d021f2f0969b6374474b533258f3a6661` (COMMIT_A) · **Estado:** Bloque B implementado y verificado, pendiente del commit atómico autorizado; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.

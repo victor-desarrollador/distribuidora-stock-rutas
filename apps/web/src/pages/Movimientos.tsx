@@ -12,7 +12,7 @@ import { useJornadas } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
 import { useClientes } from "../hooks/useClientes";
 import { useProductos } from "../hooks/useProductos";
-import { useVentas } from "../hooks/useVentas";
+import { leerVentas, useVentas } from "../hooks/useVentas";
 import { useMovimientos} from "../hooks/useMovimientos";
 import {
   type TipoMovimiento,
@@ -168,15 +168,20 @@ export default function Movimientos() {
   const { camiones, estadoLectura: estadoCamiones } = useCamiones();
   const { clientes, estadoLectura: estadoClientes } = useClientes();
   const { productos, estadoLectura: estadoProductos } = useProductos();
-  const { ventas } = useVentas();
+  const { ventas, estadoLectura: estadoVentas } = useVentas();
 
-  const { movimientos, registrarMovimiento } =
-    useMovimientos();
+  const {
+    movimientos,
+    registrarMovimiento,
+    estadoLectura: estadoMovimientos,
+  } = useMovimientos();
   const estadoOperacion = estadoStorageOperativo({
     jornadas: estadoJornadas,
     camiones: estadoCamiones,
     clientes: estadoClientes,
     productos: estadoProductos,
+    ventas: estadoVentas,
+    movimientos: estadoMovimientos,
   });
 
   const [formulario, setFormulario] =
@@ -358,9 +363,18 @@ export default function Movimientos() {
     }
 
     // Volvemos a calcular el stock al registrar.
-    const resultado = registrarMovimiento(movimiento, (actuales) =>
-      validar_stock_movimiento(movimiento, jornada.items, ventas, actuales)
-    );
+    const resultado = registrarMovimiento(movimiento, (actuales) => {
+      const lecturaVentas = leerVentas();
+      if (!lecturaVentas.ok) {
+        return `No se puede registrar: ${lecturaVentas.error}`;
+      }
+      return validar_stock_movimiento(
+        movimiento,
+        jornada.items,
+        lecturaVentas.ventas,
+        actuales
+      );
+    });
 
     if (resultado) {
       setError(resultado);

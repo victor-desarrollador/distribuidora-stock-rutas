@@ -655,12 +655,12 @@ export default function Rendicion() {
                               Vendido
                             </p>
                             <strong>
-                              {textoCantidad(
-                                fila.unidadMedida,
-                                fila.vendidoDisponible
-                                  ? fila.vendido
-                                  : null
-                              )}
+                              {fila.vendidoDisponible
+                                ? textoCantidad(
+                                    fila.unidadMedida,
+                                    fila.vendido
+                                  )
+                                : NO_DISPONIBLE}
                             </strong>
                           </div>
 
