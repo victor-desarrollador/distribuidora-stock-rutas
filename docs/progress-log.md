@@ -1,4 +1,41 @@
 ---
+## 22/10/2026 — Cierre de hallazgos post-auditoría · Bloque D
+
+**Rama:** `feat/cierre-frontend-pre-backend` · **Base obligatoria / COMMIT_C:** `a32c68abb542e5ca8c84c6f5f85baa1e7ac2b6fc` · **Estado:** corrección implementada y verificada; pendiente de auditoría independiente del nuevo hash. El Bloque B permanece históricamente `BLOCKED`; aprobar D no lo aprueba retroactivamente. **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Hallazgos cerrados
+
+- **C-1:** se agregaron seis E2E TOCTOU sobre acciones productivas reales. Autoventa relee Movimientos después del montaje; Movimientos relee Ventas; Jornadas relee Retornos; y Rendición relee, por separado, Ventas, Cobros y Movimientos. En todos los casos se corrompe el storage después de montar, la acción aborta, el ledger destino queda intacto y el raw corrupto no se modifica.
+- **C-2:** `guardarPreparacion` relee Retornos mediante `leerRetornosDiscriminado()`, aborta ante corrupción y recalcula el stock reservado con la lectura actual antes de validar disponibilidad y crear la jornada.
+- **C-3:** `confirmarCierre` relee Ventas, Cobros y Movimientos con sus lectores discriminados. Con las lecturas actuales reconstruye las filas de mercadería, el resumen de caja, las diferencias y los valores persistidos en el cierre; recién después permite confirmar y delegar en `cerrarJornada`.
+- **A-1:** queda cubierto incidentalmente por tres E2E que ejercitan directamente la guarda de `confirmarCierre` ante corrupción posterior al montaje.
+- **A-2:** `completarConEsperados` incorpora una guarda productiva explícita de `disponibilidad.mercaderiaDisponible`, además del `disabled` ya existente.
+
+### Pruebas y sensibilidad
+
+- Nuevo `tests/toctou-storage-operativo.spec.ts`: 6 escenarios, sin sleeps, con storage aislado y acciones reales. Verifica ausencia de persistencia y conservación exacta del raw.
+- Mutación temporal de Jornadas para volver al snapshot de Retornos: falló el E2E correspondiente (1/1), como se esperaba.
+- Mutación temporal de Rendición para volver a snapshots de Ventas/Cobros/Movimientos: fallaron los tres E2E (3/3), como se esperaba.
+- Mutación temporal de Autoventa y Movimientos para volver a sus snapshots: fallaron ambos E2E (2/2), como se esperaba.
+- Todas las mutaciones fueron revertidas antes de la verificación final.
+
+### Verificación final
+
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → **15 archivos / 558 tests passed**.
+- `npm run lint` → exit 0, sin warnings.
+- `npm run build` → exit 0.
+- `npx playwright test` → **17 tests passed**.
+- `git diff --check` → sin errores.
+
+### Alcance y estado
+
+- No se cambiaron precios, ADR-003, cantidades, piezas/medias piezas, reglas de stock, dinero, tolerancias, medios de pago ni claves.
+- Sin recuperación, migraciones, Supabase, SQL, RPC, RLS ni Auth. Backend no iniciado.
+- El Bloque C corrigió H-1/H-2/H-3, pero su auditoría encontró las brechas TOCTOU C-2/C-3 y la falta de pruebas C-1; este Bloque D las corrige. La confirmación definitiva queda sujeta a la auditoría independiente del hash de D.
+- Sin push, merge ni deploy.
+
+---
 ## 22/10/2026 — CIERRE FRONTEND PRE-BACKEND · Bloque C
 
 **Rama:** `feat/cierre-frontend-pre-backend` · **Base original:** `42620e6ca5c061640aa1b58a5c42dd2939a3f02c` · **COMMIT_A:** `9f9d4c5d021f2f0969b6374474b533258f3a6661` · **COMMIT_B:** `1818ed27d43a9829c316be60edadf6063623fec0` · **Alcance de COMMIT_C:** integración, regresión, inventario y cierre documental; pendiente de crear el commit atómico autorizado. **ADR-001 continúa PROPUESTA — NO APROBADA**.

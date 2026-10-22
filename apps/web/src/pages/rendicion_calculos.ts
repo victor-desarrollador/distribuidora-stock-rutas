@@ -19,7 +19,9 @@
 //     camino funcional en la pantalla (estado defensivo `no_soportada`).
 //   - No se convierte ningún dato legacy ni se usan tolerancias.
 
-import type { ItemCarga } from "../data/mockJornadas";
+import type { Jornada, ItemCarga } from "../data/mockJornadas";
+import type { Cobro } from "../data/mockCobros";
+import type { Venta } from "../data/mockVentas";
 import type {
   MovimientoReparto,
 } from "../data/mockMovimientos";
@@ -75,6 +77,120 @@ export interface FilaMercaderia {
   contado: number | null;
   diferencia: number | null;
   estado: EstadoFilaMercaderia;
+}
+
+export interface FilaMercaderiaOperativa extends FilaMercaderia {
+  vendidoDisponible: boolean;
+  movimientosDisponibles: boolean;
+}
+
+export interface ResumenCaja {
+  ventasEfectivo: number;
+  ventasTransferencia: number;
+  cuentaCorriente: number;
+  cobrosEfectivo: number;
+  cobrosTransferencia: number;
+  efectivo: number;
+  transferencias: number;
+  totalVendido: number;
+  cantidadVentas: number;
+  cantidadCobros: number;
+}
+
+export function calcularResumenCaja(
+  jornadaId: string,
+  ventas: ReadonlyArray<Venta>,
+  cobros: ReadonlyArray<Cobro>
+): ResumenCaja {
+  let ventasEfectivo = 0;
+  let ventasTransferencia = 0;
+  let ventasCuentaCorriente = 0;
+  let cobrosEfectivo = 0;
+  let cobrosTransferencia = 0;
+  let cantidadVentas = 0;
+  let cantidadCobros = 0;
+
+  for (const venta of ventas) {
+    if (venta.jornadaId !== jornadaId) continue;
+    cantidadVentas += 1;
+    if (venta.medioPago === "efectivo") ventasEfectivo += venta.total;
+    else if (venta.medioPago === "transferencia") ventasTransferencia += venta.total;
+    else ventasCuentaCorriente += venta.total;
+  }
+
+  for (const cobro of cobros) {
+    if (cobro.jornadaId !== jornadaId) continue;
+    cantidadCobros += 1;
+    if (cobro.medio === "efectivo") cobrosEfectivo += cobro.importe;
+    else cobrosTransferencia += cobro.importe;
+  }
+
+  const dinero = (valor: number) => Math.round(valor * 100) / 100;
+
+  return {
+    ventasEfectivo: dinero(ventasEfectivo),
+    ventasTransferencia: dinero(ventasTransferencia),
+    cuentaCorriente: dinero(ventasCuentaCorriente),
+    cobrosEfectivo: dinero(cobrosEfectivo),
+    cobrosTransferencia: dinero(cobrosTransferencia),
+    efectivo: dinero(ventasEfectivo + cobrosEfectivo),
+    transferencias: dinero(ventasTransferencia + cobrosTransferencia),
+    totalVendido: dinero(
+      ventasEfectivo + ventasTransferencia + ventasCuentaCorriente
+    ),
+    cantidadVentas,
+    cantidadCobros,
+  };
+}
+
+export function calcularFilasMercaderia(
+  jornada: Jornada | undefined,
+  ventas: ReadonlyArray<Venta>,
+  movimientos: ReadonlyArray<MovimientoReparto>,
+  conteos: Record<string, EntradaConteo>,
+  disponibilidad: {
+    mercaderiaDisponible: boolean;
+    ventasDisponibles: boolean;
+    movimientosDisponibles: boolean;
+  }
+): FilaMercaderiaOperativa[] {
+  if (!jornada) return [];
+
+  return jornada.items.map((item) => {
+    const salidasVentas = acumularSalidasProducto(
+      item.productoId,
+      jornada.id,
+      ventas,
+      []
+    );
+    const salidasMovimientos = acumularSalidasProducto(
+      item.productoId,
+      jornada.id,
+      [],
+      movimientos
+    );
+
+    return {
+      ...calcularFilaMercaderia({
+        item,
+        vendido: salidasVentas.vendido,
+        merma: salidasMovimientos.merma,
+        reemplazos: salidasMovimientos.reemplazos,
+        acumulacionInvalida:
+          !salidasVentas.valido ||
+          !salidasMovimientos.valido ||
+          !disponibilidad.mercaderiaDisponible,
+        contado: conteoDesdeEntrada(
+          item.unidadMedida,
+          conteos[String(item.productoId)]
+        ),
+      }),
+      vendidoDisponible:
+        disponibilidad.ventasDisponibles && salidasVentas.valido,
+      movimientosDisponibles:
+        disponibilidad.movimientosDisponibles && salidasMovimientos.valido,
+    };
+  });
 }
 
 /** Lee un número finito >= 0 de un texto; `null` si está vacío o es inválido. */

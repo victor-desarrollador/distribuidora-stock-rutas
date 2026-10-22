@@ -10,7 +10,10 @@ import {
 import { useCamiones } from "../hooks/useCamiones";
 import { useProductos } from "../hooks/useProductos";
 import { useJornadas } from "../hooks/useJornadas";
-import { useRetornos } from "../hooks/useRetornos";
+import {
+  leerRetornosDiscriminado,
+  useRetornos,
+} from "../hooks/useRetornos";
 import {
   cantidad_unidad_desde_texto,
   es_cantidad_valida,
@@ -24,6 +27,7 @@ import {
   type Jornada,
   type ItemCarga,
 } from "../data/mockJornadas";
+import type { RetornoDeposito } from "../data/mockRetornos";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 const moneda = (valor: number) =>
@@ -45,6 +49,51 @@ function valorItem(item: ItemCarga): number {
     cantidad: item.cantidad,
     precio: item.precioReferencia,
   });
+}
+
+function calcularStockReservado(
+  jornadas: Jornada[],
+  retornos: RetornoDeposito[]
+): Record<number, number> {
+  const reservado: Record<number, number> = {};
+
+  for (const jornada of jornadas) {
+    for (const item of jornada.items) {
+      reservado[item.productoId] =
+        (reservado[item.productoId] ?? 0) + item.cantidad;
+    }
+  }
+
+  for (const retorno of retornos) {
+    const jornadaOrigen = jornadas.find(
+      (j) => j.id === retorno.jornadaId
+    );
+    if (
+      !jornadaOrigen ||
+      jornadaOrigen.estado !== "cerrada" ||
+      jornadaOrigen.camionId !== retorno.camionId
+    ) {
+      continue;
+    }
+    for (const item of retorno.items) {
+      const cargado = jornadaOrigen.items.find(
+        (p) => p.productoId === item.productoId
+      );
+      if (
+        !cargado ||
+        cargado.unidadMedida !== item.unidadMedida ||
+        !Number.isFinite(item.cantidadAprobada) ||
+        item.cantidadAprobada < 0 ||
+        item.cantidadAprobada > item.cantidadContada
+      ) {
+        continue;
+      }
+      reservado[item.productoId] =
+        (reservado[item.productoId] ?? 0) - item.cantidadAprobada;
+    }
+  }
+
+  return reservado;
 }
 
 export default function Jornadas() {
@@ -76,47 +125,10 @@ export default function Jornadas() {
   const [error, setError] = useState("");
   // Stock comprometido en las cargas, menos los retornos aprobados.
   // Las jornadas cerradas siguen reservando lo que no regresó.
-  const stockReservado = useMemo(() => {
-    const reservado: Record<number, number> = {};
-    // Toda mercadería cargada salió del depósito central.
-    for (const jornada of jornadas) {
-      for (const item of jornada.items) {
-        reservado[item.productoId] =
-          (reservado[item.productoId] ?? 0) + item.cantidad;
-      }
-    }
-    // Solo reincorporamos los retornos aprobados de jornadas cerradas.
-    for (const retorno of retornos) {
-      const jornadaOrigen = jornadas.find(
-        (j) => j.id === retorno.jornadaId
-      );
-      if (
-        !jornadaOrigen ||
-        jornadaOrigen.estado !== "cerrada" ||
-        jornadaOrigen.camionId !== retorno.camionId
-      ) {
-        continue;
-      }
-      for (const item of retorno.items) {
-        // Evitar contar un producto ajeno a la carga original.
-        const cargado = jornadaOrigen.items.find(
-          (p) => p.productoId === item.productoId
-        );
-        if (
-          !cargado ||
-          cargado.unidadMedida !== item.unidadMedida ||
-          !Number.isFinite(item.cantidadAprobada) ||
-          item.cantidadAprobada < 0 ||
-          item.cantidadAprobada > item.cantidadContada
-        ) {
-          continue;
-        }
-        reservado[item.productoId] =
-          (reservado[item.productoId] ?? 0) - item.cantidadAprobada;
-      }
-    }
-    return reservado;
-  }, [jornadas, retornos]);
+  const stockReservado = useMemo(
+    () => calcularStockReservado(jornadas, retornos),
+    [jornadas, retornos]
+  );
   // Camiones sin otra jornada activa y fuera de mantenimiento.
   const camionesDisponibles = camiones.filter((camion) => {
     if (camion.estado !== "disponible") return false;
@@ -237,6 +249,18 @@ export default function Jornadas() {
       setError("Agregá al menos un producto a la carga.");
       return;
     }
+
+    const lecturaRetornos = leerRetornosDiscriminado();
+    if (!lecturaRetornos.ok) {
+      setError(`No se puede guardar la preparación: ${lecturaRetornos.error}`);
+      return;
+    }
+
+    const stockReservadoActual = calcularStockReservado(
+      jornadas,
+      lecturaRetornos.retornos
+    );
+
     // Comprobamos todas las cantidades antes de guardar.
     for (const producto of productos) {
       if (hayCantidadUnidadInvalida(producto.id)) {
@@ -250,7 +274,11 @@ export default function Jornadas() {
         setError(`Cantidad inválida: ${producto.nombre}`);
         return;
       }
-      if (canonica > disponibilidad(producto.id)) {
+      const disponibleActual = Math.max(
+        0,
+        producto.stock - (stockReservadoActual[producto.id] ?? 0)
+      );
+      if (canonica > disponibleActual) {
         setError(
           `No hay stock suficiente de ${producto.nombre}.`
         );

@@ -9,14 +9,20 @@ import {
 
 import { useJornadas } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
-import { useVentas } from "../hooks/useVentas";
-import { useMovimientos } from "../hooks/useMovimientos";
-import { useCobros } from "../hooks/useCobros";
+import { leerVentas, useVentas } from "../hooks/useVentas";
+import {
+  leerMovimientosDiscriminado,
+  useMovimientos,
+} from "../hooks/useMovimientos";
+import {
+  leerCobrosDiscriminado,
+  useCobros,
+} from "../hooks/useCobros";
 import {
   acumularCuarentena,
-  acumularSalidasProducto,
   bloqueaRendicion,
-  calcularFilaMercaderia,
+  calcularFilasMercaderia,
+  calcularResumenCaja,
   conteoDesdeEntrada,
   leerCantidad,
   type EntradaConteo,
@@ -101,108 +107,23 @@ export default function Rendicion() {
   // Una venta fiada genera deuda, NO efectivo.
   // Un cobro de deuda anterior suma a la caja
   // cuando se realizó durante esta jornada.
-  const resumenCaja = useMemo(() => {
-    let ventasEfectivo = 0;
-    let ventasTransferencia = 0;
-    let ventasCuentaCorriente = 0;
-    let cobrosEfectivo = 0;
-    let cobrosTransferencia = 0;
-    let cantidadVentas = 0;
-    let cantidadCobros = 0;
-
-    for (const venta of ventas) {
-      if (venta.jornadaId !== jornadaId) continue;
-
-      cantidadVentas += 1;
-
-      if (venta.medioPago === "efectivo") {
-        ventasEfectivo += venta.total;
-      } else if (venta.medioPago === "transferencia") {
-        ventasTransferencia += venta.total;
-      } else {
-        ventasCuentaCorriente += venta.total;
-      }
-    }
-
-    for (const cobro of cobros) {
-      if (cobro.jornadaId !== jornadaId) continue;
-
-      cantidadCobros += 1;
-
-      if (cobro.medio === "efectivo") {
-        cobrosEfectivo += cobro.importe;
-      } else {
-        cobrosTransferencia += cobro.importe;
-      }
-    }
-
-    const dinero = (valor: number) =>
-      Math.round(valor * 100) / 100;
-
-    return {
-      ventasEfectivo: dinero(ventasEfectivo),
-      ventasTransferencia: dinero(ventasTransferencia),
-      cuentaCorriente: dinero(ventasCuentaCorriente),
-      cobrosEfectivo: dinero(cobrosEfectivo),
-      cobrosTransferencia: dinero(cobrosTransferencia),
-
-      efectivo: dinero(
-        ventasEfectivo + cobrosEfectivo
-      ),
-
-      transferencias: dinero(
-        ventasTransferencia + cobrosTransferencia
-      ),
-
-      totalVendido: dinero(
-        ventasEfectivo +
-          ventasTransferencia +
-          ventasCuentaCorriente
-      ),
-
-      cantidadVentas,
-      cantidadCobros,
-    };
-  }, [ventas, cobros, jornadaId]);
+  const resumenCaja = useMemo(
+    () => calcularResumenCaja(jornadaId, ventas, cobros),
+    [ventas, cobros, jornadaId]
+  );
 
   const filasMercaderia = useMemo(() => {
-    if (!jornada) return [];
-
-    return jornada.items.map((item) => {
-      const salidasVentas = acumularSalidasProducto(
-        item.productoId,
-        jornada.id,
-        ventas,
-        []
-      );
-      const salidasMovimientos = acumularSalidasProducto(
-        item.productoId,
-        jornada.id,
-        [],
-        movimientos
-      );
-
-      return {
-        ...calcularFilaMercaderia({
-          item,
-          vendido: salidasVentas.vendido,
-          merma: salidasMovimientos.merma,
-          reemplazos: salidasMovimientos.reemplazos,
-          acumulacionInvalida:
-            !salidasVentas.valido ||
-            !salidasMovimientos.valido ||
-            !disponibilidad.mercaderiaDisponible,
-          contado: conteoDesdeEntrada(
-            item.unidadMedida,
-            conteos[String(item.productoId)]
-          ),
-        }),
-        vendidoDisponible:
-          disponibilidad.ventasDisponibles && salidasVentas.valido,
-        movimientosDisponibles:
-          disponibilidad.movimientosDisponibles && salidasMovimientos.valido,
-      };
-    });
+    return calcularFilasMercaderia(
+      jornada,
+      ventas,
+      movimientos,
+      conteos,
+      {
+        mercaderiaDisponible: disponibilidad.mercaderiaDisponible,
+        ventasDisponibles: disponibilidad.ventasDisponibles,
+        movimientosDisponibles: disponibilidad.movimientosDisponibles,
+      }
+    );
   }, [
     jornada,
     ventas,
@@ -291,7 +212,8 @@ export default function Rendicion() {
     if (
       !jornada ||
       jornada.estado !== "abierta" ||
-      rendicionBloqueada
+      rendicionBloqueada ||
+      !disponibilidad.mercaderiaDisponible
     ) {
       return;
     }
@@ -337,12 +259,55 @@ export default function Rendicion() {
       return;
     }
 
-    if (stockInconsistente) {
+    const lecturaVentas = leerVentas();
+    if (!lecturaVentas.ok) {
+      setError(`No se puede cerrar: ${lecturaVentas.error}`);
+      return;
+    }
+
+    const lecturaCobros = leerCobrosDiscriminado();
+    if (!lecturaCobros.ok) {
+      setError(`No se puede cerrar: ${lecturaCobros.error}`);
+      return;
+    }
+
+    const lecturaMovimientos = leerMovimientosDiscriminado();
+    if (!lecturaMovimientos.ok) {
+      setError(`No se puede cerrar: ${lecturaMovimientos.error}`);
+      return;
+    }
+
+    const disponibilidadActual = disponibilidadRendicion(
+      lecturaVentas.estado,
+      lecturaCobros.estado,
+      lecturaMovimientos.estado
+    );
+    const filasMercaderiaActuales = calcularFilasMercaderia(
+      jornada,
+      lecturaVentas.ventas,
+      lecturaMovimientos.movimientos,
+      conteos,
+      disponibilidadActual
+    );
+    const resumenCajaActual = calcularResumenCaja(
+      jornada.id,
+      lecturaVentas.ventas,
+      lecturaCobros.cobros
+    );
+
+    const stockInconsistenteActual = filasMercaderiaActuales.some(
+      (fila) => fila.estado === "inconsistente"
+    );
+    const hayUnidadNoSoportadaActual = filasMercaderiaActuales.some(
+      (fila) => fila.estado === "no_soportada"
+    );
+
+    if (stockInconsistenteActual) {
       setError(MENSAJE_INCONSISTENCIA_MERCADERIA);
       return;
     }
 
-    if (hayUnidadNoSoportada) {
+    if (hayUnidadNoSoportadaActual) {
       setError(
         "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar."
       );
@@ -354,7 +319,7 @@ export default function Rendicion() {
       number
     > = {};
 
-    for (const fila of filasMercaderia) {
+    for (const fila of filasMercaderiaActuales) {
       const valor = conteoDesdeEntrada(
         fila.unidadMedida,
         conteos[String(fila.productoId)]
@@ -387,10 +352,15 @@ export default function Rendicion() {
       return;
     }
 
-    if (
-      tieneDiferencias &&
-      !observaciones.trim()
-    ) {
+    const diferenciaEfectivoActual = Math.round(
+      (efectivoContado - resumenCajaActual.efectivo) * 100
+    ) / 100;
+    const tieneDiferenciasActuales =
+      filasMercaderiaActuales.some(
+        (fila) => fila.diferencia !== null && fila.diferencia !== 0
+      ) || Math.abs(diferenciaEfectivoActual) > 0.009;
+
+    if (tieneDiferenciasActuales && !observaciones.trim()) {
       setError(
         "Hay diferencias de stock o de caja. Es obligatorio explicar el motivo."
       );
@@ -408,11 +378,11 @@ export default function Rendicion() {
       fecha: new Date().toISOString(),
       conteos: conteosFinales,
       efectivoEntregado: efectivoContado,
-      efectivoEsperado: resumenCaja.efectivo,
+      efectivoEsperado: resumenCajaActual.efectivo,
       transferenciasInformadas:
-        resumenCaja.transferencias,
+        resumenCajaActual.transferencias,
       ventasCuentaCorriente:
-        resumenCaja.cuentaCorriente,
+        resumenCajaActual.cuentaCorriente,
       observaciones: observaciones.trim(),
     };
 
