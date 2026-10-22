@@ -1524,7 +1524,12 @@ describe("catálogos (productos, camiones, clientes): storage corrupto fail-clos
       const { lectura, estadoInicial } = montar();
 
       expect(lectura.ok).toBe(false);
+      // Efecto de montaje con los datos demo: no escribe.
       expect(persistirCatalogo(c.clave, estadoInicial, lectura)).toBe(false);
+      // Edición posterior del usuario en la sesión: tampoco escribe.
+      expect(
+        persistirCatalogo(c.clave, [...estadoInicial, c.valido], lectura)
+      ).toBe(false);
       expect(mockLS.getItem(c.clave)).toBe(crudo);
       expect(mockLS.setItem).not.toHaveBeenCalled();
     });
