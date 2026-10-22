@@ -1,4 +1,33 @@
 ---
+## 21/10/2026 — Bloque 7: corrección post-auditoría M-1
+
+**Rama:** `feat/rendicion-medias-piezas` · **Commit auditado:** `75d0f57f4a2432cbd819923a99c80c45a9d449b7` · **Corrección funcional:** `74f9145b16d50b225d3b2b0be8d601cd5d1e718c` · **Auditoría:** `BLOCKED` por M-1 · **Estado:** corrección funcional commiteada; sin push, merge ni deploy; storage sigue v4; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Hallazgo y corrección
+
+- **M-1 — saldo falso en presentación de rendición:** cuando `acumularSalidasProducto` fallaba por cantidad inválida u overflow devolvía sentinels numéricos `vendido: 0`, `merma: 0`, `reemplazos: 0` junto con `valido: false`. `calcularFilaMercaderia` podía sumar esos ceros y producir `mermaYCambios = 0`, mostrando una cantidad falsa aunque la fila quedara `inconsistente`.
+- **Corrección:** si `acumulacionInvalida === true`, `mermaYCambios` queda en `null`; también queda en `null` si la suma segura de merma y reemplazos falla.
+- **Presentación:** `null` se muestra como `—`; nunca se presenta `0` como valor calculado cuando la acumulación falló.
+- **Regresión:** se agregaron 4 tests específicos: suma válida, acumulación inválida, overflow directo y caso crítico `0 + 0` con acumulación inválida.
+
+### Verificación
+
+Ejecutado desde `apps/web/`:
+
+- `npm run typecheck` → exit 0
+- `npm test -- --run` → **13 archivos / 406 tests passed** (402 en el commit auditado; +4)
+- `npm run lint` → exit 0
+- `npm run build` → exit 0
+- `npx playwright test` → 1 passed
+- `git diff --check` → limpio
+
+### Riesgos pendientes
+
+- **Integridad de jornadas:** `crearJornada()` sigue leyendo con `leerJornadas()`, que colapsa storage corrupto a `[]`; una creación posterior podría sobrescribirlo. Es deuda preexistente fuera del alcance de esta corrección y requiere hardening específico.
+- Permanecen validaciones `Number.isInteger` preexistentes fuera de este fix.
+- La Rendición de este prototipo todavía no implementa conteos separados `apto` / `cuarentena` / `no_apto`, regularizaciones ni saldo final real del camión.
+
+---
 ## 21/10/2026 — Bloque 7: Rendición compatible con medias piezas
 
 **Rama:** `feat/rendicion-medias-piezas` · **Base:** `5fae38f28c5021b2d1047caebe99e650efa0cdfd` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; storage sigue v4; **ADR-001 continúa PROPUESTA — NO APROBADA**.
@@ -14,7 +43,7 @@
 
 ### Verificación
 
-Tests (ejecutados desde `apps/web/`): **13 archivos / 402 tests** (367 antes: +35). Resultado de typecheck, lint, build y Playwright: ver entrega del bloque.
+Tests (ejecutados desde `apps/web/`): **13 archivos / 402 tests** (367 antes: +35). Cifra del commit auditado `75d0f57`; tras la corrección M-1 el total vigente es 406 (ver entrada superior). Resultado de typecheck, lint, build y Playwright: ver entrega del bloque.
 
 ### Riesgos pendientes
 
