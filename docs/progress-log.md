@@ -1,4 +1,31 @@
 ---
+## 21/10/2026 — Hardening Jornadas: storage corrupto fail-closed
+
+**Rama:** `fix/jornadas-storage-fail-closed` · **Base:** `5cfe3bbbe5c3e27db954d98dd7c957ef66ec6207` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; storage sigue v4 (`distribuidora_jornadas_demo_v4`); **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Riesgo preexistente cerrado
+
+`crearJornada()` leía con `leerJornadas()`, que devolvía `[]` tanto ante storage ausente como corrupto, y guardaba `[nueva]`: un storage de jornadas corrupto se sobrescribía en silencio (deuda registrada en el Bloque 7). `confirmarSalida` y `cerrarJornada` no lo hacían solo porque `[]` no contenía la jornada buscada.
+
+### Qué se hizo (solo `apps/web/src/hooks/useJornadas.ts` y tests)
+
+- Lectura interna discriminada `ResultadoLecturaJornadas`: `getItem === null` → `ok:true, estado:"inicial"` (`[]`); válido → `ok:true, estado:"valido"`; presente pero corrupto → `ok:false, estado:"corrupto"` (JSON inválido, `""`, `"null"`, no array, jornada/ítem/cierre inválido). Ya no se usa `if (!guardado)`.
+- `jornadaValida` extraída de `leerJornadas` (misma validación, una sola fuente).
+- `leerJornadas()` pública se mantiene fail-closed para la UI (`[]` si la lectura falla); ninguna escritura la usa como autoridad.
+- Frontera única `escribirJornadas`: lee con discriminación, aborta sin escribir si está corrupto, aplica la transformación y persiste solo si esta la acepta.
+- Rutas protegidas y testeables sin React: `crearJornadaPersistida`, `confirmarSalidaPersistida`, `cerrarJornadaPersistida`; el hook solo delega y actualiza el estado si se guardó. Las reglas de negocio (estados, un camión con una jornada no cerrada, conteos, cierre) no cambiaron.
+- Sin cambios en otros hooks, Retornos, Rendición, Autoventa, precios, dinero ni claves de storage.
+
+### Verificación
+
+Tests (ejecutados desde `apps/web/`): **13 archivos / 442 tests** (406 antes: +36). Incluyen matriz de storage corrupto (7 variantes) × crear / confirmar / cerrar con comparación del string crudo antes/después y `setItem` no llamado, historial válido, duplicados y prioridad de la corrupción. Una mutación de prueba (tratar corrupto como `[]`) hizo fallar 8 tests y se revirtió. Resultado de typecheck, lint, build y Playwright: ver entrega.
+
+### Riesgos pendientes
+
+- Otros hooks (`useVentas`, `useProductos`, `useCobros`, `useCamiones`, `useClientes`) no se auditaron en esta tarea para el mismo patrón ausente/corrupto.
+- Sin test de componente de las pantallas que usan `useJornadas`.
+
+---
 ## 21/10/2026 — Bloque 7: corrección post-auditoría M-1
 
 **Rama:** `feat/rendicion-medias-piezas` · **Commit auditado:** `75d0f57f4a2432cbd819923a99c80c45a9d449b7` · **Corrección funcional:** `74f9145b16d50b225d3b2b0be8d601cd5d1e718c` · **Auditoría:** `BLOCKED` por M-1 · **Estado:** corrección funcional commiteada; sin push, merge ni deploy; storage sigue v4; **ADR-001 continúa PROPUESTA — NO APROBADA**.

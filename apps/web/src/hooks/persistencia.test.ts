@@ -12,7 +12,12 @@ import {
   type Producto,
   type UnidadMedida,
 } from "../data/mockProductos";
-import { cerrarJornadaPersistida, leerJornadas } from "./useJornadas";
+import {
+  cerrarJornadaPersistida,
+  confirmarSalidaPersistida,
+  crearJornadaPersistida,
+  leerJornadas,
+} from "./useJornadas";
 import { cargarVentas } from "./useVentas";
 import {
   leerMovimientos,
@@ -1262,5 +1267,149 @@ describe("jornadas: conteos del cierre son enteros seguros", () => {
     expect(cerrarJornadaPersistida("j1", cierre({ "1": 1, "2": 1 }) as never)).toBeNull();
     expect(mockLS.getItem(CLAVE)).toBe("{roto");
     expect(mockLS.setItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
+  const CLAVE = CLAVES_STORAGE.jornadas;
+
+  const jornada = (id: string, camionId: number, estado = "preparacion") => ({
+    id,
+    camionId,
+    chofer: "Luis",
+    zona: "Norte",
+    fechaCreacion: "2026-10-21T08:00:00.000Z",
+    fechaSalida: estado === "preparacion" ? null : "2026-10-21T09:00:00.000Z",
+    estado,
+    items: [
+      { productoId: 1, nombreProducto: "Yogur", unidadMedida: "unidad", cantidad: 10, precioReferencia: 100 },
+    ],
+  });
+
+  const cierre = {
+    fecha: "2026-10-21T18:00:00.000Z",
+    conteos: { "1": 3 },
+    efectivoEntregado: 0,
+    efectivoEsperado: 0,
+    transferenciasInformadas: 0,
+    ventasCuentaCorriente: 0,
+    observaciones: "",
+  };
+
+  const nueva = () => jornada("nueva", 9) as never;
+
+  const CORRUPTOS: Array<[string, string]> = [
+    ["JSON inválido", "{no es json"],
+    ["string vacío presente", ""],
+    ["null", "null"],
+    ["objeto no array", JSON.stringify({ jornadas: [] })],
+    ["array con jornada inválida", JSON.stringify([{ id: "x" }])],
+    [
+      "array con jornada de ítem inválido",
+      JSON.stringify([{ ...jornada("a", 1), items: [{ productoId: 1, cantidad: 1.5 }] }]),
+    ],
+    [
+      "array con cierre inválido",
+      JSON.stringify([{ ...jornada("a", 1, "cerrada"), cierre: { fecha: "x" } }]),
+    ],
+  ];
+
+  const sinEscribir = (crudo: string) => {
+    expect(mockLS.getItem(CLAVE)).toBe(crudo);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+  };
+
+  it("getItem null (ausente) es un ledger inicial válido; \"\" (presente) se prueba en la matriz de corruptos", () => {
+    expect(mockLS.getItem(CLAVE)).toBeNull();
+    expect(crearJornadaPersistida(nueva())).not.toBeNull();
+  });
+
+  describe.each(CORRUPTOS)("storage corrupto — %s", (_n, crudo) => {
+    beforeEach(() => {
+      mockLS._store.set(CLAVE, crudo);
+      mockLS.setItem.mockClear();
+    });
+
+    it("crearJornada: falla, sin setItem y con el string crudo intacto", () => {
+      const antes = mockLS.getItem(CLAVE);
+      expect(crearJornadaPersistida(nueva())).toBeNull();
+      expect(antes).toBe(crudo);
+      sinEscribir(crudo);
+    });
+
+    it("confirmarSalida: falla, sin setItem y con el string crudo intacto", () => {
+      expect(confirmarSalidaPersistida("a")).toBeNull();
+      sinEscribir(crudo);
+    });
+
+    it("cerrarJornada: falla, sin setItem y con el string crudo intacto", () => {
+      expect(cerrarJornadaPersistida("a", cierre as never)).toBeNull();
+      sinEscribir(crudo);
+    });
+
+    it("leerJornadas pública sigue siendo [] sin escribir", () => {
+      expect(leerJornadas()).toEqual([]);
+      sinEscribir(crudo);
+    });
+  });
+
+  it("A. storage ausente: crearJornada guarda una sola jornada", () => {
+    const j = nueva();
+    expect(crearJornadaPersistida(j)).toEqual([j]);
+    expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([j]);
+  });
+
+  it("B. confirmarSalida con storage válido conserva el comportamiento", () => {
+    mockLS._store.set(CLAVE, JSON.stringify([jornada("a", 1), jornada("b", 2)]));
+    const r = confirmarSalidaPersistida("a")!;
+    expect(r.find((j) => j.id === "a")?.estado).toBe("abierta");
+    expect(r.find((j) => j.id === "a")?.fechaSalida).not.toBeNull();
+    expect(r.find((j) => j.id === "b")?.estado).toBe("preparacion");
+    expect(leerJornadas()).toEqual(r);
+    // No se puede confirmar dos veces ni una inexistente.
+    expect(confirmarSalidaPersistida("a")).toBeNull();
+    expect(confirmarSalidaPersistida("zzz")).toBeNull();
+  });
+
+  it("C. cerrarJornada con storage válido conserva el comportamiento", () => {
+    mockLS._store.set(CLAVE, JSON.stringify([jornada("a", 1, "abierta")]));
+    const r = cerrarJornadaPersistida("a", cierre as never)!;
+    expect(r[0].estado).toBe("cerrada");
+    expect(leerJornadas()[0].cierre?.conteos).toEqual({ "1": 3 });
+    expect(cerrarJornadaPersistida("a", cierre as never)).toBeNull();
+  });
+
+  it("historial válido: crearJornada conserva las anteriores y agrega al final", () => {
+    const previas = [jornada("a", 1, "cerrada"), jornada("b", 2)];
+    previas[0] = { ...previas[0], cierre } as never;
+    mockLS._store.set(CLAVE, JSON.stringify(previas));
+    const j = nueva();
+    const r = crearJornadaPersistida(j)!;
+    expect(r).toEqual([...previas, j]);
+    expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([...previas, j]);
+  });
+
+  it("duplicados: mismo id y camión con jornada no cerrada se rechazan sin escribir", () => {
+    const crudo = JSON.stringify([jornada("a", 1), jornada("c", 3, "cerrada")].map((j) =>
+      j.estado === "cerrada" ? { ...j, cierre } : j
+    ));
+    mockLS._store.set(CLAVE, crudo);
+    mockLS.setItem.mockClear();
+    expect(crearJornadaPersistida(jornada("a", 7) as never)).toBeNull();
+    expect(crearJornadaPersistida(jornada("n", 1) as never)).toBeNull();
+    sinEscribir(crudo);
+    // Un camión con jornada cerrada sí puede crear otra.
+    expect(crearJornadaPersistida(jornada("n", 3) as never)).not.toBeNull();
+  });
+
+  it("corrupción tiene prioridad sobre las reglas de duplicado", () => {
+    mockLS._store.set(CLAVE, "{roto");
+    mockLS.setItem.mockClear();
+    expect(crearJornadaPersistida(jornada("a", 1) as never)).toBeNull();
+    sinEscribir("{roto");
+  });
+
+  it("la clave de jornadas sigue siendo v4", () => {
+    expect(CLAVE).toBe("distribuidora_jornadas_demo_v4");
   });
 });
