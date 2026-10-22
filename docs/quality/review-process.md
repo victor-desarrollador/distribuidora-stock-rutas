@@ -1,6 +1,6 @@
 # Proceso de revisión de calidad
 
-**Fecha:** 17/10/2026
+**Fecha:** 22/10/2026
 **Ámbito:** todo cambio en el repositorio (documentación, código de aplicación, SQL, migraciones, configuración, tooling).
 **Fuente:** `AGENTS.md` §2 y §11, `CLAUDE.md`, `BLUEPRINT.md` §13. Este documento **detalla** ese proceso; no lo reemplaza ni lo amplía en alcance.
 
@@ -29,7 +29,7 @@ Cada eslabón es una compuerta: no se avanza al siguiente sin cerrar el anterior
 
 ### 2.1 Definición / requisitos
 - Leer `BLUEPRINT.md` completo, `AGENTS.md`, `CLAUDE.md`, las ADR **aprobadas** y las últimas entradas de `docs/progress-log.md` (AGENTS.md §1).
-- **Versión documental actual de ADR-001:** ADR-001 — Puerta de entrada SQL para operaciones privilegiadas, **versión 1.2 (ronda 3)**, estado **`propuesta` — NO APROBADA**. Sus **P1–P20** son decisiones pendientes de aprobación humana y sus recomendaciones son **no vinculantes**; la propia ADR propone decidir **P19 y P20 primero**, y **P18** es una decisión futura separada que **no** es requisito previo (`docs/decisions/001-rpc-privilegiadas.md` §15 y §18; `docs/decisions/README.md`).
+- **Versión documental actual de ADR-001:** ADR-001 — Puerta de entrada SQL para operaciones privilegiadas, **versión 1.3**, estado **`APROBADA PARA VALIDACIÓN CONTROLADA`**. P1 (Topología D), P19 (gobernanza en dos etapas) y P20 (migraciones sólo local/staging) están resueltas. P2–P17 siguen pendientes y P18 es una decisión futura separada. El estado intermedio no autoriza producción (`docs/decisions/001-rpc-privilegiadas.md` §15 y §18; `docs/decisions/README.md`).
 - Identificar qué reglas del Blueprint siguen **pendientes de aprobación**.
 - Si la tarea depende de una regla `PROPUESTA NO APROBADA` / `PROPUESTA TÉCNICA NO APROBADA` o de una ADR en estado `propuesta`: **detener esa parte, informar el bloqueo y pedir aprobación expresa** (AGENTS.md §3; `CLAUDE.md`, Procedimiento 5). No elegir «la opción más razonable» por cuenta propia.
 

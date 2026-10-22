@@ -1,4 +1,60 @@
 ---
+## 22/10/2026 — Alineación de gobernanza y Topología D · Bloque G / ADR-001
+
+**Rama:** `chore/adr-001-gobernanza` · **Base:** `main` posterior al merge del PR #3 · **Estado:** cambio documental implementado; commit autorizado pendiente de auditoría independiente. **Sin backend, SQL, migraciones, Supabase, RPC, RLS, roles ni deploy.**
+
+### Decisiones humanas registradas
+
+- **P1 RESUELTO:** Topología D — Data API → fachada expuesta `SECURITY INVOKER` → implementación `SECURITY DEFINER` en esquema privado/no expuesto → validaciones completas → transacción de negocio. La implementación privada es la frontera real de seguridad.
+- **P19 RESUELTO:** gobernanza en dos etapas — aprobación para validación controlada local/staging y aceptación humana final antes de producción.
+- **P20 RESUELTO:** las migraciones dependientes de ADR-001 se permiten sólo para validación local/staging; producción permanece bloqueada.
+- **P2–P17 continúan pendientes.** P18 continúa como decisión futura separada y no es requisito previo.
+
+### Qué se hizo
+
+- ADR-001 pasó a **APROBADA PARA VALIDACIÓN CONTROLADA** (v1.3), sin aprobación productiva.
+- `BLUEPRINT.md` v2.0 reemplazó el wrapper público `SECURITY DEFINER` por Topología D, actualizó las pruebas de seguridad y registró el estado intermedio.
+- El índice de ADR incorporó la semántica formal de `APROBADA PARA VALIDACIÓN CONTROLADA`: habilita exclusivamente diseño, migraciones y pruebas local/staging; no autoriza producción ni decisiones pendientes; exige pruebas, auditoría independiente y aceptación humana final.
+- Se alinearon las instrucciones y documentos operativos que todavía trataban P1/P19/P20 como pendientes. Las referencias históricas previas se conservaron.
+- El cierre frontend pre-backend ya fue mergeado en la base indicada. Este bloque no implementa backend.
+
+### Archivos
+
+- `BLUEPRINT.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `INVENTARIO_ETAPA_0.md`
+- `docs/decisions/001-rpc-privilegiadas.md`
+- `docs/decisions/README.md`
+- `docs/PRD.md`
+- `docs/architecture/analisis-base-datos.md`
+- `docs/quality/review-process.md`
+- `docs/quality/security-review.md`
+- `docs/quality/browser-testing.md`
+- `docs/requirements/migracion-unidades-prototipo.md`
+- `docs/progress-log.md`
+
+### Verificación
+
+- Cambio exclusivamente documental. La suite completa se ejecutó por la compuerta general de `AGENTS.md`/proceso de calidad.
+- `npm run lint` → exit 0.
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → 18 archivos / 591 tests passed.
+- `npm run build` → exit 0.
+- `npx playwright test` → 35 tests passed. El primer intento dentro del sandbox no pudo iniciar el `webServer`; la repetición con permiso para abrir el puerto local terminó con exit 0.
+- `git diff --check` → sin errores.
+- Búsqueda de `SECURITY DEFINER`, `SECURITY INVOKER`, P1/P19/P20, `validación controlada` y la prohibición histórica de migraciones → referencias normativas alineadas; referencias históricas preservadas y la E-13 del inventario deja explícita su supersesión.
+- `git status --short` → sólo los archivos documentales enumerados en esta entrada, antes del commit.
+
+### Riesgos pendientes
+
+1. P2–P17 deben resolverse antes de implementar las partes que dependan de ellas y antes de una validación completa.
+2. P18 sigue como decisión futura separada.
+3. Producción continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final.
+4. Por tocar RPC, `SECURITY DEFINER`/`SECURITY INVOKER`, permisos y gobernanza Supabase, corresponde revisión de seguridad independiente previa a la auditoría final.
+5. El commit de este bloque requiere auditoría independiente sobre su hash; no hubo push, merge ni deploy.
+
+---
 ## 22/10/2026 — Limpieza final pre-push · Bloque F
 
 **Rama:** `feat/cierre-frontend-pre-backend` · **Base obligatoria / COMMIT_E:** `b8f7f067a6c48e27dd2ed04d838e1ca92f2a3f64` · **Estado:** limpieza y trazabilidad implementadas; pendiente de auditoría independiente sobre el hash de F. **ADR-001 continúa PROPUESTA — NO APROBADA**; backend no iniciado; sin push, merge ni deploy.

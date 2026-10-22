@@ -5,7 +5,7 @@
 **Estado:** **requisito documental**. Define qué hay que migrar y cómo se aceptará. **No autoriza** todavía la modificación de código: la implementación queda **pendiente de autorización humana**. La estrategia de versionado de `localStorage` (`v1 → v2`, §7-bis) es una **decisión humana aprobada** (18/10/2026).
 **Fuente de verdad:** `BLUEPRINT.md` v1.6 §2 y §7.1 (decisión humana de unidades), §7.4, §12; `AGENTS.md` §3 y §5; `docs/PRD.md` (RF-01, §9). Si algo de este documento contradice el Blueprint, manda el Blueprint.
 
-> **Aviso de alcance.** Este documento **no implementa** nada y **no aprueba** ninguna propuesta. ADR-001 sigue **PROPUESTA — NO APROBADA**. No habilita Supabase, SQL, migraciones, RLS, RPC ni cambios de seguridad (§10).
+> **Aviso de alcance.** Este documento **no implementa** nada ni amplía otras decisiones. ADR-001 está **APROBADA PARA VALIDACIÓN CONTROLADA**, pero este requisito de unidades no habilita Supabase, SQL, migraciones, RLS, RPC ni cambios de seguridad (§10).
 
 ---
 
@@ -194,7 +194,7 @@ Este requisito **no** toca, y la migración **no debe** incluir:
 - **SQL**, funciones y **RPC**.
 - **Migraciones** (de base de datos) ni `supabase/migrations/`.
 - **RLS**, políticas, roles y **grants**.
-- **ADR-001** (sigue **PROPUESTA — NO APROBADA**; no se implementa ni se cambia su estado).
+- **ADR-001** (este requisito no la implementa ni cambia su estado vigente de **APROBADA PARA VALIDACIÓN CONTROLADA**).
 - Reglas de negocio marcadas como propuestas no aprobadas (stock negativo, anulaciones, descuentos, retiro que excede el saldo, vencimientos por partida).
 - El modelo de datos propuesto del Blueprint §8.
 
@@ -207,6 +207,6 @@ Tampoco autoriza, por sí solo, **modificar código**: la implementación requie
 - **Implementación pendiente de autorización:** este documento es una definición; **no** autoriza escribir código todavía.
 - **Versionado de datos:** la estrategia §7-bis (`localStorage` v1 → v2, con inicialización limpia y **sin migración automática**) es una **decisión humana aprobada** (18/10/2026); su ejecución queda pendiente del plan autorizado.
 - **Producto demo:** la separación de `Queso cremoso` (§4-bis) es una **decisión humana aprobada**.
-- **ADR-001:** sin cambios; **PROPUESTA — NO APROBADA**; sus puntos **P1–P20** siguen pendientes.
+- **ADR-001:** sin cambios por este requisito; estado vigente **APROBADA PARA VALIDACIÓN CONTROLADA**. P1/P19/P20 están resueltas, P2–P17 siguen pendientes y P18 es una decisión futura separada.
 - **(Histórico, superado por la viñeta siguiente) Precios y `localStorage` v3 (ADR-002, aprobada 20/10/2026; hoy superada por ADR-003):** el modelo de precios independientes de pieza y media pieza lleva las claves operativas del prototipo (`productos`, `jornadas`, `ventas`, `cobros`, `movimientos`, `retornos`, `camiones`) de `_demo_v2` a `_demo_v3`, con inicialización limpia y sin leer, copiar, reinterpretar ni borrar `v2`. `clientes` queda en `_demo_v2` y la sesión en `_demo_v1`. Esto **no** modifica la estrategia §7-bis (v1 → v2), que se mantiene.
 - **Precio derivado de media pieza y `localStorage` v4 (ADR-003, aprobada 21/10/2026; supera a ADR-002 en la política de precio de media):** el precio de media pieza deja de ser configurable (mitad del precio de pieza, redondeada al peso entero, `.50` sube, calculada en centavos enteros). Las siete claves operativas pasan de `_demo_v3` a `_demo_v4` con inicialización limpia, sin leer, copiar, reinterpretar ni borrar `v3` ni `v2`: `distribuidora_productos_demo_v4`, `distribuidora_jornadas_demo_v4`, `distribuidora_ventas_demo_v4`, `distribuidora_cobros_demo_v4`, `distribuidora_movimientos_demo_v4`, `distribuidora_retornos_demo_v4`, `distribuidora_camiones_demo_v4`. Se mantienen `distribuidora_clientes_demo_v2` y `distribuidora_sesion_demo_v1`. La cantidad canónica en medias piezas no cambia.

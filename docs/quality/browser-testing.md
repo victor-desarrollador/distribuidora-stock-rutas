@@ -1,6 +1,6 @@
 # Pruebas en navegador
 
-**Fecha:** 17/10/2026
+**Fecha:** 22/10/2026
 **Herramienta:** Playwright CLI **0.1.22**
 **Carácter:** herramienta de **apoyo** a la verificación funcional. **No reemplaza** a Vitest ni a las pruebas E2E versionadas del repositorio.
 **Fuente:** `BLUEPRINT.md` §3.5 y §12, `AGENTS.md` §9, `.agents/skills/playwright-cli/`.
@@ -126,7 +126,7 @@ Son los que hay que verificar en cada cambio relevante (alineados con Blueprint 
 8. **Rendición y cierre**, incluido un caso con diferencia; jornada cerrada inmutable.
 9. **Responsive:** los recorridos 1–8 en móvil y en escritorio.
 
-> **Alcance actual.** El sistema con base de datos y RPC **todavía no existe** (`INVENTARIO_ETAPA_0.md` §1) y **ADR-001 (versión 1.2, ronda 3) sigue en estado `propuesta` — NO APROBADA**: no hay migraciones ni RPC privilegiadas autorizadas. Por eso hoy estos recorridos solo pueden explorarse contra el **prototipo** con datos de demostración; eso **no** verifica las reglas de stock y dinero del Blueprint.
+> **Alcance actual.** El sistema con base de datos y RPC **todavía no existe** (`INVENTARIO_ETAPA_0.md` §1). ADR-001 v1.3 está **APROBADA PARA VALIDACIÓN CONTROLADA**, pero P2–P17 siguen pendientes y este bloque no implementa backend. Por eso hoy estos recorridos sólo pueden explorarse contra el **prototipo** con datos de demostración; eso **no** verifica las reglas de stock y dinero del Blueprint.
 
 ---
 

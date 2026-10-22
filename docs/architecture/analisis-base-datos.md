@@ -1,9 +1,9 @@
 # Análisis de arquitectura de base de datos — Fase 1
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 20/10/2026
-**Versión:** 0.1
-**Estado:** documento de arquitectura. Deriva de `BLUEPRINT.md` v1.7 y `docs/PRD.md` v0.6. **No autoriza implementación** (ni SQL, ni migraciones, ni RLS, ni RPC).
+**Fecha:** 22/10/2026
+**Versión:** 0.2
+**Estado:** documento de arquitectura. Deriva de `BLUEPRINT.md` y `docs/PRD.md`. **No autoriza por sí solo implementación**; ADR-001 v1.3 habilita validación controlada local/staging únicamente después de resolver las decisiones técnicas necesarias.
 
 ---
 
@@ -11,7 +11,7 @@
 
 Este documento consolida el análisis de arquitectura de base de datos para la Fase 1, a partir de las decisiones **aprobadas conceptualmente** en el Blueprint §7.9, §8 y §9. Su objetivo es servir de insumo para el **diseño SQL/RPC** posterior (que requiere aprobación humana y pruebas de seguridad antes de generar migraciones).
 
-> **Regla obligatoria:** no se generan migraciones ni se adoptan patrones de RPC hasta aprobar ADR-001 y pasar pruebas de autorización (Blueprint §10; AGENTS.md §3).
+> **Regla obligatoria:** ADR-001 está aprobada para validación controlada con Topología D. Las migraciones dependientes de esa ADR se permiten sólo en local/staging y una vez resueltas las P2–P17 necesarias; producción sigue bloqueada hasta pruebas, auditoría independiente y aceptación humana final (Blueprint §10; AGENTS.md §3).
 
 ---
 
@@ -274,15 +274,15 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 ---
 
-## 7. Seguridad — reglas de diseño (pendientes de ADR-001)
+## 7. Seguridad — Topología D aprobada para validación controlada
 
-> **Recordatorio:** ADR-001 está en estado `propuesta` — **NO APROBADA**. Estas son las reglas que el diseño SQL/RPC debe satisfacer cuando se apruebe.
+> **Recordatorio:** ADR-001 está **APROBADA PARA VALIDACIÓN CONTROLADA**. P1/P19/P20 están resueltas; P2–P17 siguen pendientes y P18 es una decisión futura separada. No hay autorización productiva.
 
-1. **RPC pública `SECURITY DEFINER`** como única puerta de entrada para escrituras críticas (stock, dinero, jornada, retiros, cierre).
-2. `SET search_path = ''`; referencias a objetos completamente calificadas.
-3. `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC, anon`; `GRANT EXECUTE ... TO authenticated`.
-4. Lógica interna en esquema privado (no invocable directamente).
-5. La función pública valida **antes de escribir**:
+1. **Fachada expuesta `SECURITY INVOKER`** como entrada desde la Data API para escrituras críticas (stock, dinero, jornada, retiros, cierre).
+2. **Implementación `SECURITY DEFINER` en esquema privado/no expuesto**, frontera real de seguridad, con `SET search_path = ''` y referencias totalmente calificadas.
+3. Grants de privilegio mínimo; sin DML directo a ledgers y sin ejecución pública o anónima de la implementación privilegiada.
+4. La función privada no es invocable directamente desde la Data API.
+5. La implementación privada valida **antes de escribir**:
    - `auth.uid()` existe
    - Membresía vigente en empresa
    - `empresa_id` obtenida/verificada del servidor (no del cliente)
@@ -292,7 +292,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
    - Permisos sobre cada objeto afectado
 6. **No existen otras rutas** con privilegios equivalentes (ni Data API directa, ni funciones privadas expuestas).
 7. `SECURITY INVOKER` para lecturas y ediciones ordinarias con grants y RLS apropiados.
-8. **No generar migraciones** hasta aprobar ADR-001 y pasar pruebas de autorización reales desde `anon`, `authenticated` ajeno y roles válidos.
+8. Las migraciones necesarias para probar este patrón se permiten exclusivamente local/staging; producción requiere pruebas reales desde `anon`, `authenticated` ajeno y roles válidos, auditoría independiente y aceptación humana final.
 
 ---
 
@@ -313,7 +313,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 ## 9. Riesgos y observaciones
 
-1. **ADR-001 no aprobada**: todo el diseño de RPC y seguridad está bloqueado hasta su aprobación y pruebas.
+1. **ADR-001 no aprobada para producción**: la Topología D y la gobernanza están resueltas, pero P2–P17 bloquean las partes correspondientes de una validación completa; producción sigue bloqueada.
 2. **`movimientos_stock` sin `saldo_actual`**: requiere consultas de suma frecuentes; evaluar vistas/materializadas en fase de optimización (no requisito Fase 1).
 3. **Multiempresa con una sola empresa real**: RLS debe implementarse desde el día 1 aunque solo haya un `empresa_id`; probar aislamiento con datos de prueba multi-empresa.
 4. **`idempotency_key` en `operaciones`**: centraliza protección pero exige que **toda** escritura crítica pase por creación de operación. Verificar que no quede ruta directa (ej. `INSERT` directo en `movimientos_stock` desde RPC sin operación).
@@ -327,12 +327,12 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 1. **Diseño SQL detallado** de las entidades APROBADAS CONCEPTUALMENTE (columnas exactas, tipos, constraints, FKs, índices).
 2. **Definición de RPC** por operación crítica (firmas, validaciones, transacciones, manejo de errores).
-3. **Pruebas de autorización** reales (ADR-001) antes de cualquier migración.
-4. **Migraciones versionadas** en `supabase/migrations/` (una por cambio lógico).
+3. Resolver las P2–P17 necesarias para el alcance de validación autorizado.
+4. **Migraciones versionadas** en `supabase/migrations/` (una por cambio lógico), exclusivamente local/staging.
 5. **Tests pgTAP** sobre las RPC (stock, dinero, jornada, seguridad).
 6. **Revisión de seguridad** independiente (superficies §2.4 de AGENTS.md).
 7. **Auditoría independiente** del commit final (OpenCode auditor + Codex).
 
 ---
 
-*Fin de `docs/architecture/analisis-base-datos.md` v0.1*
+*Fin de `docs/architecture/analisis-base-datos.md` v0.2*

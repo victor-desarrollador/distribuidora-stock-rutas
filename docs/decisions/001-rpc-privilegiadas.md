@@ -1,10 +1,10 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 17/10/2026
-**Estado:** PROPUESTA — NO APROBADA
-**Versión:** 1.2 (ronda 3 de correcciones documentales)
+**Fecha:** 12/10/2026 · **Última revisión documental:** 22/10/2026
+**Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
+**Versión:** 1.3 (alineación de P1, P19 y P20)
 
-> **Aviso de alcance.** Esta ADR **no autoriza implementar nada**: ni SQL, ni migraciones, ni roles, ni schemas, ni grants, ni políticas RLS, ni pruebas que asuman el patrón como vigente (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10 y §13, regla 2). Todo lo que `BLUEPRINT.md` o una ADR aprobada no definen está marcado **PENDIENTE DE APROBACIÓN HUMANA**. Las preferencias técnicas se marcan **RECOMENDACIÓN NO VINCULANTE** y no son decisiones vigentes. Cambiar el estado a `aprobada` requiere aprobación humana explícita (`docs/decisions/README.md`).
+> **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20. Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P2–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P2–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
 ---
 
@@ -18,6 +18,7 @@
 | v1.2, ronda 2 | Claude Code | Aplica las 12 correcciones. |
 | Segunda revisión independiente | Codex | **CHANGES REQUIRED** (4 correcciones sobre la ronda 2). |
 | v1.2, ronda 3 | Claude Code | Esta versión: aplica las 4 correcciones (secciones 4, 5, 15, 17, 18, 19 y 21). Pendiente de nueva revisión independiente y de aprobación humana. |
+| v1.3 | Codex | Alinea la decisión humana: P1 = Topología D, P19 = gobernanza en dos etapas y P20 = migraciones de validación sólo local/staging. Estado intermedio, sin aprobación productiva; P2–P17 pendientes y P18 separada. |
 
 ---
 
@@ -25,7 +26,7 @@
 
 El sistema nuevo **está previsto** sobre Supabase (Auth, PostgreSQL, RLS, RPC) con frontend React (`BLUEPRINT.md` §6). Hoy el repositorio contiene un prototipo frontend sin backend que persiste en `localStorage` (`INVENTARIO_ETAPA_0.md` §1); **todavía no existe** integración con Supabase ni con su Data API.
 
-Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST). Los usuarios `authenticated` no deberán poder escribir directamente en los libros de movimientos de stock y dinero (`BLUEPRINT.md` §3, §6, §10:276). Un enfoque `SECURITY INVOKER` puro sobre esas tablas exigiría conceder escritura directa a `authenticated`, lo que abriría rutas capaces de saltar las reglas de negocio y la auditoría. Esta ADR propone **cómo** debe estar construida la puerta de entrada a las operaciones privilegiadas.
+Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST). Los usuarios `authenticated` no deberán poder escribir directamente en los libros de movimientos de stock y dinero (`BLUEPRINT.md` §3, §6, §10). Un enfoque `SECURITY INVOKER` puro sobre esas tablas exigiría conceder escritura directa a `authenticated`, lo que abriría rutas capaces de saltar las reglas de negocio y la auditoría. Esta ADR define la topología de la puerta de entrada para validación controlada; sus detalles P2–P17 siguen pendientes.
 
 ---
 
@@ -33,9 +34,9 @@ Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST).
 
 - `BLUEPRINT.md` es la **fuente de mayor autoridad** del proyecto (`BLUEPRINT.md` línea 8; `AGENTS.md` §1). Mientras una ADR **aprobada** no la modifique, su regla **más estricta** permanece vinculante.
 - `AGENTS.md` traslada esas reglas a instrucciones operativas para agentes; no las relaja. `INVENTARIO_ETAPA_0.md` está subordinado a ambos (su propia nota de precedencia).
-- Una ADR en estado `propuesta`, como esta, **no modifica** el Blueprint ni habilita excepciones.
+- Una ADR en estado `APROBADA PARA VALIDACIÓN CONTROLADA`, como esta, modifica el Blueprint únicamente dentro de las decisiones resueltas y habilita sólo validación local/staging; no habilita producción ni completa decisiones pendientes.
 
-**Ambigüedad de alcance (no es un conflicto entre dos reglas equivalentes).** `BLUEPRINT.md` §10:279 dice: "No generar migraciones hasta aprobar ADR-001 y pasar pruebas de autorización". El texto no aclara si alcanza a **toda** migración o solo a las que dependen del patrón de RPC privilegiadas. La errata E-1 de `INVENTARIO_ETAPA_0.md` usa una redacción más acotada, pero no tiene rango para limitar el Blueprint. **Lectura vinculante mientras el humano no aclare el alcance:** la más estricta, es decir, ninguna migración hasta que ADR-001 esté aprobada y las pruebas de autorización pasen. La sección 15 propone cómo destrabar esa secuencia.
+**Alcance resuelto (P20).** Antes de la aprobación para validación controlada no podían generarse migraciones dependientes de ADR-001. Con el estado actual se permiten las migraciones necesarias para probar la ADR exclusivamente en local/staging. Producción permanece bloqueada hasta completar las pruebas requeridas, la auditoría independiente y la aceptación humana final. Esta autorización no alcanza a decisiones P2–P17 todavía pendientes ni a otras migraciones fuera del alcance de validación.
 
 ---
 
@@ -76,21 +77,21 @@ Esta ADR usa esos nombres solo como referencia. Su forma final queda **PENDIENTE
 
 Se reconoce explícitamente:
 
-- **Blueprint.** `BLUEPRINT.md` §10:277 (marcado "PROPUESTA TÉCNICA PARA APROBAR Y PROBAR") propone "exponer una RPC pública `SECURITY DEFINER` exclusivamente como puerta de entrada". En §10:278 también advierte: "No poner la lógica privilegiada libremente ejecutable en un esquema expuesto".
+- **Blueprint histórico (v1.9).** §10 proponía "exponer una RPC pública `SECURITY DEFINER` exclusivamente como puerta de entrada" y también advertía no poner lógica privilegiada libremente ejecutable en un esquema expuesto. Blueprint v2.0 reemplaza esa formulación por Topología D.
 - **Supabase (documentación vigente consultada el 16/10/2026 y el 17/10/2026).**
   - *Row Level Security*, apartado "Use security definer functions" (advertencia): las funciones `security definer` **no deben crearse nunca** en un esquema expuesto: "Never create one in a schema listed under 'Exposed schemas'" de la configuración de la API. Sus ejemplos las ubican en un esquema `private`.
   - *Database Functions*: "Prefer `security invoker`, which is also the default". Agrega que una función `security definer` "can return rows the caller isn't allowed to read" y que las funciones creadas por migración son de `postgres`, "which bypasses Row Level Security".
   - *Database Advisors*, lints `0028` y `0029`: marcan como advertencia (WARN) toda función `SECURITY DEFINER` ejecutable por `anon` o `authenticated`. Entre las remediaciones figura mantenerla como decisión intencional; eso describe cómo tratar la advertencia, **no** constituye una recomendación del diseño.
   - *Securing your API* y *Hardening the Data API*: los objetos internos se mantienen "in schemas that aren't exposed".
 
-**Conclusión documental (conflicto no resuelto):**
+**Conclusión documental (conflicto resuelto por P1):**
 
-1. La topología C (sección 5) **coincide con el requisito literal** del Blueprint vigente: §10:277 pide una RPC pública `SECURITY DEFINER` como puerta de entrada.
+1. La topología C (sección 5) coincidía con el requisito literal histórico de Blueprint §10:277: una RPC pública `SECURITY DEFINER` como puerta de entrada.
 2. La guía de seguridad vigente de Supabase dice **explícitamente** que las funciones `SECURITY DEFINER` no deben crearse en un esquema expuesto.
 3. Por lo tanto, **la topología C no es un diseño recomendado por el proveedor**: contradice su guía.
-4. C se mantiene en la comparación **solo** porque el Blueprint vigente todavía apunta en esa dirección.
+4. C se mantiene en la comparación como alternativa histórica descartada; el Blueprint fue alineado con D.
 5. Que las advertencias 0028/0029 se registren como entendidas o aceptadas **no significa** que Supabase avale el diseño: solo deja constancia de que el proyecto asumió un riesgo contra la guía del proveedor.
-6. Resolver este conflicto requiere una **decisión humana explícita** (P1). Ningún agente puede resolverlo ni elegir por defecto.
+6. La decisión humana explícita P1 seleccionó la **Topología D** para validación controlada.
 
 ---
 
@@ -101,38 +102,41 @@ Para facilitar la trazabilidad con la ronda 1 se conservan las letras A, B y C, 
 ### A — `SECURITY INVOKER` con grants directos de escritura a `authenticated`
 - **Descripción:** funciones `SECURITY INVOKER` y `GRANT INSERT/UPDATE/DELETE` a `authenticated` sobre las tablas del libro, protegidas solo por RLS.
 - **Compatibilidad con requisitos aprobados:** **incompatible** con §6:99 y §10:276. Solo sería posible si una ADR aprobada modificara el Blueprint.
+- **Decisión:** descartada por incompatibilidad con los requisitos.
 
 ### B — Edge Function como puerta de entrada
 - **Descripción:** la operación entra por una Edge Function, que valida y luego llama a la base.
 - **Compatibilidad:** §10:279 la admite **solo** "si aparece lógica externa no conveniente en SQL".
 - **Límite transaccional:** ver sección 6. La atomicidad solo existe si la Edge Function llama a **una única** RPC transaccional; en ese caso la puerta de entrada real de stock y dinero sigue siendo esa RPC, con una de las topologías C o D.
+- **Decisión:** reservada para lógica externa; no es la puerta de entrada normal.
 
 ### C — Wrapper `SECURITY DEFINER` en esquema expuesto + lógica interna en esquema privado
-- **Descripción:** la propuesta literal de `BLUEPRINT.md` §10:277. El wrapper expuesto valida todo y llama a funciones internas de un esquema no expuesto, que solo puede ejecutar el propietario.
-- **A favor:** coincide con el texto del Blueprint; las funciones internas no necesitan `EXECUTE` para `authenticated`.
+- **Descripción:** la propuesta literal histórica de `BLUEPRINT.md` v1.9. El wrapper expuesto valida todo y llama a funciones internas de un esquema no expuesto, que sólo puede ejecutar el propietario.
+- **A favor histórico:** coincidía con el texto de Blueprint v1.9; las funciones internas no necesitaban `EXECUTE` para `authenticated`.
 - **En contra:** la función expuesta corre con los privilegios del propietario. Contradice la guía explícita de Supabase de no crear funciones `SECURITY DEFINER` en un esquema expuesto (sección 4): **no es un diseño recomendado por el proveedor**. Genera advertencias 0028/0029; aceptarlas no implica aval de Supabase.
-- **Por qué sigue en la comparación:** solo porque el texto vigente de §10:277 apunta en esa dirección. El conflicto se resuelve únicamente por decisión humana explícita (P1).
+- **Decisión:** no elegida porque contradice la guía explícita de Supabase sobre `SECURITY DEFINER` en esquemas expuestos.
 
 ### D — Fachada `SECURITY INVOKER` expuesta + implementación privilegiada en esquema no expuesto
 - **Descripción:** la función expuesta es `SECURITY INVOKER` y no tiene privilegios propios. Delega en una función `SECURITY DEFINER` ubicada en un esquema que la Data API no expone, y esa función hace **todas** las validaciones.
 - **A favor:** sigue la recomendación de Supabase de preferir `SECURITY INVOKER` en lo expuesto y de mantener lo interno fuera de los esquemas expuestos; también es coherente con §10:278.
-- **En contra:**
+- **Riesgos que deben validarse:**
   - para que la fachada pueda delegar, `authenticated` necesita `USAGE` sobre el esquema privado y `EXECUTE` sobre la implementación. Esa función no es accesible por la Data API, pero **sí** es ejecutable por `authenticated` desde cualquier contexto SQL que la alcance. El límite de seguridad real es la implementación privilegiada, no la fachada;
-  - difiere del texto literal de §10:277 y §12:342 ("Función wrapper `public`").
+  - la implementación privada es la frontera real de seguridad y debe concentrar todas las validaciones.
 - **A VERIFICAR:** si otras interfaces habilitadas (por ejemplo, `pg_graphql`) pueden alcanzar el esquema privado, y si el advisor de Supabase marca igual la implementación.
+- **Decisión:** **APROBADA PARA VALIDACIÓN CONTROLADA**. Contrato conceptual: Data API → fachada expuesta `SECURITY INVOKER` → implementación privada `SECURITY DEFINER` → validaciones completas → transacción de negocio.
 
 ### Comparación neutral
 
 | Criterio | A | B | C | D |
 |---|---|---|---|---|
 | Compatible con §6 y §10:276 (sin DML directo) | No | Sí, si llama a una RPC | Sí | Sí |
-| Coincide con el texto literal de §10:277 | No | No (excepción §10:279) | Sí | No; habría que alinear el texto |
+| Coincide con Blueprint §10 vigente | No | No (reservada para lógica externa) | No | Sí |
 | Sigue la guía de seguridad de Supabase | — | Depende de la RPC que llame | **No**: contradice la guía explícita (sin `SECURITY DEFINER` en esquema expuesto) | Sí |
 | Función ejecutable por `authenticated` que corre con privilegios | Ninguna | La RPC subyacente | El wrapper expuesto | La implementación privada (no expuesta) |
 | Componentes extra | — | Edge Function + salto de red | — | Fachada adicional por operación |
 | Atomicidad dentro de Postgres | Sí | Solo con una única RPC | Sí | Sí |
 
-**RECOMENDACIÓN NO VINCULANTE:** descartar A por incompatibilidad con requisitos aprobados; reservar B para lógica externa, como dice §10:279; evaluar **C y D con la misma batería de pruebas** en la prueba controlada de la sección 15 y elegir con esa evidencia. Si ambas pasan, el autor se inclina por D porque sigue la guía vigente de Supabase y §10:278, aunque eso exige alinear §10:277 y §12:342. **No es una decisión:** P1 sigue pendiente.
+**DECISIÓN VIGENTE (P1):** A queda descartada por incompatibilidad; B queda reservada para lógica externa; C no se elige por contradecir la guía de Supabase; D se aprueba para validación controlada. Esto no resuelve P2–P17 ni autoriza producción.
 
 ---
 
@@ -289,29 +293,28 @@ Requisitos de diseño propuestos (concretan §10:277-278; ninguno se ejecuta tod
 
 ---
 
-## 15. Propuesta de gobernanza: aprobación → prueba → aceptación
+## 15. Gobernanza aprobada: aprobación para validación → prueba → aceptación final
 
-**Problema.** Las reglas actuales forman un ciclo imposible de cumplir:
+**Problema histórico.** Las reglas anteriores formaban un ciclo imposible de cumplir:
 
-- el Blueprint pide aprobar el patrón y probar revocaciones y permisos "desde roles reales" (§15:433);
-- no permite generar migraciones "hasta aprobar ADR-001 **y** pasar pruebas de autorización" (§10:279);
+- el Blueprint pedía aprobar el patrón y probar revocaciones y permisos "desde roles reales";
+- no permitía generar migraciones hasta aprobar ADR-001 y pasar pruebas de autorización;
 - la ronda 1 de esta ADR pedía verificar en staging "antes de cualquier aprobación".
 
 Las pruebas necesitan un esquema; el esquema necesita migraciones; y las migraciones necesitan la aprobación y las pruebas ya aprobadas.
 
-**Propuesta (no vigente).** Hoy **no está autorizada** ninguna implementación, ni siquiera controlada, local o en staging. La secuencia propuesta es:
+**Decisión vigente (P19/P20).** Se adopta un proceso de dos aprobaciones. La primera habilita sólo la validación controlada local/staging; la segunda es la aceptación humana final previa a producción.
 
-**Paso 0 — Gobernanza (primero, antes de cualquier decisión técnica para la prueba):**
+**Paso 0 — Gobernanza (resuelto):**
 
-1. **Decidir P19:** si se adopta el proceso en dos aprobaciones (aprobación para prueba controlada → aceptación para producción).
-2. **Resolver P20:** el alcance de "No generar migraciones hasta aprobar ADR-001 y pasar pruebas de autorización" (§10:279). Mientras rija la lectura estricta (sección 2), ninguna migración es posible antes de aprobar ADR-001, ni siquiera local o en staging, y el ciclo descrito arriba sigue sin salida.
-3. **Alinear los documentos rectores** con lo decidido en P19 y P20, por decisión humana: el texto de `BLUEPRINT.md` §10:279 y §15:433, y los estados de la plantilla de `docs/decisions/README.md` (hoy `propuesta | aprobada | reemplazada`), que no prevén una aprobación intermedia "para prueba controlada". Hasta que esa alineación exista, el estado de esta ADR sigue siendo `propuesta` y no habilita nada.
+1. **P19 RESUELTO:** aprobación para validación controlada → evidencia y auditoría → aceptación humana final antes de producción.
+2. **P20 RESUELTO:** antes del estado intermedio no se generan migraciones dependientes de ADR-001; después se permiten sólo las necesarias para validar en local/staging. Producción sigue prohibida.
+3. **Documentos rectores alineados:** `BLUEPRINT.md`, este ADR y `docs/decisions/README.md` usan el estado único `APROBADA PARA VALIDACIÓN CONTROLADA`.
 
 **Paso 1 — Recién después del paso 0: decisiones técnicas necesarias para una validación controlada local o en staging.** El dueño del proyecto aprueba explícitamente:
 
 | Decisión | Por qué la necesita la validación |
 |---|---|
-| P1 | Topología o topologías a ensayar (C y/o D) |
 | P2, P3, P4 | Esquemas, rol propietario, ownership y RLS: sin ellos no se puede crear ningún objeto |
 | P5, P6, P7 | Modelo de membresía y roles para los datos de prueba (T2–T6) |
 | P8, P9 | Separación de funciones (T13) |
@@ -325,19 +328,19 @@ Las pruebas necesitan un esquema; el esquema necesita migraciones; y las migraci
 
 Si el dueño acota la validación a un subconjunto de operaciones, solo hacen falta las decisiones que ese subconjunto requiera. **P18 no es requisito previo:** es una decisión futura separada (sección 14). Esa aprobación **no** autoriza producción.
 
-**Paso 2 — Implementación exclusivamente local o en staging.** Migraciones, roles, schemas y grants solo en entornos aislados (§10:282). Nada de `supabase db push`, `supabase migration up` ni comandos contra producción (`AGENTS.md` §5).
+**Paso 2 — Implementación exclusivamente local o en staging.** Una vez resueltas las P2–P17 necesarias para el alcance elegido, se permiten migraciones, roles, schemas y grants sólo en entornos aislados (§10). Nada de `supabase db push`, `supabase migration up` ni comandos contra producción (`AGENTS.md` §5).
 
 **Paso 3 — Pruebas.** Toda la matriz de la sección 16 y las verificaciones de la sección 17, con evidencia citada y auditoría independiente (`AGENTS.md` §2).
 
 **Paso 4 — Segunda aceptación humana antes de producción.** El dueño acepta los resultados; recién entonces la ADR pasa a `aprobada` para producción.
 
-**El Blueprint no se modifica ahora.** Mientras tanto rige la lectura estricta de la sección 2.
+**Producción permanece bloqueada.** El estado intermedio no equivale a aceptación productiva ni permite omitir decisiones pendientes.
 
 ---
 
 ## 16. Matriz de pruebas obligatorias
 
-Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabase test db` en un entorno aislado, más pruebas HTTP contra la Data API local y un arnés concurrente. **No se escriben ahora**: dependen de la aprobación de la sección 15, paso 1.
+Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabase test db` en un entorno aislado, más pruebas HTTP contra la Data API local y un arnés concurrente. Su implementación depende de resolver las decisiones P2–P17 necesarias de la sección 15, paso 1.
 
 | # | Caso | Resultado esperado |
 |---|---|---|
@@ -407,11 +410,10 @@ Aserciones de catálogo que se repiten siempre:
 
 ---
 
-## 18. Decisiones PENDIENTE DE APROBACIÓN HUMANA
+## 18. Estado de las decisiones
 
 | # | Decisión | Sección |
 |---|---|---|
-| P1 | Topología: A, B, C o D (incluye resolver la tensión Blueprint–Supabase) | 4, 5 |
 | P2 | Nombre de los esquemas expuesto y privado | 5 |
 | P3 | Rol propietario técnico y sus atributos | 7 |
 | P4 | Ownership de tablas, `FORCE RLS`, RLS como defensa en profundidad o elusión deliberada | 7 |
@@ -429,30 +431,33 @@ Aserciones de catálogo que se repiten siempre:
 | P16 | Contrato de errores | 13 |
 | P17 | Mecanismo de auditoría de operaciones exitosas | 14 |
 | P18 | Registro de intentos rechazados (**decisión futura separada**) | 14 |
-| P19 | Propuesta de gobernanza en dos aprobaciones y la alineación documental que requiere | 15 |
-| P20 | Alcance de "No generar migraciones" en §10:279 | 2 |
 
-**Orden (sección 15):** P19 y P20 se deciden primero; después, las decisiones técnicas que requiera la validación controlada. P18 no es requisito previo.
+**P2–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.**
+
+| # | Decisión resuelta | Resultado | Sección |
+|---|---|---|---|
+| P1 | Topología | **Topología D:** fachada expuesta `SECURITY INVOKER` + implementación privada/no expuesta `SECURITY DEFINER` | 4, 5 |
+| P19 | Gobernanza | Dos etapas: aprobación para validación controlada y aceptación humana final antes de producción | 15 |
+| P20 | Migraciones | Permitidas sólo para validación local/staging; producción bloqueada | 2, 15 |
 
 ---
 
-## 19. Consecuencias sobre `BLUEPRINT.md` si se aprueba
+## 19. Consecuencias sobre `BLUEPRINT.md`
 
-Ningún cambio se aplica ahora. Si el dueño aprueba:
+La alineación documental aplica estos cambios:
 
-- **C:** marcar como aprobada la propuesta de §10:277-278 y dejar constancia de que se adopta **en contra** de la guía explícita de Supabase; las advertencias 0028/0029 quedarían registradas como riesgo aceptado por el proyecto, no como diseño avalado por el proveedor.
-- **D:** alinear §10:277 (wrapper expuesto `SECURITY DEFINER`), §12:342 ("Función wrapper `public`") y §15:433.
-- **B como opción por defecto:** ajustar §10:279, que hoy la admite solo como excepción.
-- **A:** modificar §6:99 y §10:276. Hoy es incompatible.
-- **Gobernanza (sección 15):** alinear §10:279, §15:433 y los estados de la plantilla de ADR.
-- **Modelo de datos:** `auditoria`, `idempotency_key`, membresías y restricciones siguen como propuesta en §8 hasta que se apruebe el modelo.
+- **D:** Blueprint §10 define la fachada expuesta `SECURITY INVOKER`, la implementación privada/no expuesta `SECURITY DEFINER` y la implementación privada como frontera real de seguridad; §12 prueba esa cadena; §15 registra el estado intermedio.
+- **A, B y C:** A queda descartada, B reservada para lógica externa y C no elegida.
+- **Gobernanza:** `docs/decisions/README.md` incorpora `APROBADA PARA VALIDACIÓN CONTROLADA`; las migraciones dependientes de ADR-001 quedan habilitadas sólo local/staging.
+- **Modelo de datos y decisiones técnicas:** P2–P17 siguen pendientes; P18 permanece separada. `auditoria`, `idempotency_key`, membresías y restricciones no quedan aprobadas por P1/P19/P20.
+- **Producción:** continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final.
 
 ---
 
 ## 20. Observaciones documentales
 
-1. Se **retira** la afirmación de la ronda 1 sobre una "contradicción" entre `BLUEPRINT.md` §10:279 y `AGENTS.md` §3. El Blueprint tiene mayor jerarquía y su regla estricta rige; lo que existe es una ambigüedad de alcance (sección 2, P20).
-2. Terminología de estado: el índice usa `PROPUESTA — NO APROBADA` y la plantilla, `propuesta`. Son equivalentes; la plantilla no se modificó.
+1. La ambigüedad histórica sobre migraciones queda resuelta por P20 y la alineación de los documentos rectores.
+2. Terminología de estado: el índice, la ADR y el Blueprint usan `APROBADA PARA VALIDACIÓN CONTROLADA` para la etapa intermedia.
 3. Fuentes que difieren: *Hardening the Data API* (Supabase) frente a *ALTER DEFAULT PRIVILEGES* (PostgreSQL) sobre el `REVOKE ... FROM PUBLIC` por esquema (sección 12.6).
 
 ---
