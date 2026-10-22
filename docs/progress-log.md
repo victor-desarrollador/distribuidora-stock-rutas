@@ -1,4 +1,27 @@
 ---
+## 21/10/2026 — Bloque 6: Retornos compatibles con medias piezas
+
+**Rama:** `feat/retornos-medias-piezas` · **Base:** `6b24d6efbd087553e5423272fbb60544a8ec0832` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; storage sigue v4; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Qué se hizo
+
+- Nuevo dominio `apps/web/src/domain/retornos.ts`: validación única de ítem y retorno (enteros seguros, `0 <= aprobada <= contada`, sin `kg`, sin `productoId` duplicado), conversión de entrada de UI (piezas + media) a cantidad canónica, reconstrucción de la entrada desde la cantidad (completar con contado), `pendiente = contado - aprobado` exacto y comparación exacta del cierre. Reutiliza `domain/cantidades.ts`.
+- `useRetornos.ts`: lectura interna discriminada (ausente = ledger inicial `[]`; válido; corrupto = error). `registrarRetornoOperacion` valida el retorno, lee el storage, aborta si está corrupto, rechaza jornada duplicada contra el storage leído en el momento y recién ahí persiste. `registrarRetornoPersistido` es la frontera real sin React. `leerRetornos()` sigue devolviendo `[]` para la UI.
+- `Retornos.tsx`: pieza = piezas enteras + checkbox de media con preview; unidad = entero. Se eliminaron `cantidadValida` local, `esCantidadValida`, `Math.round(... * 1000)` y toda tolerancia `0.000001`. Un conteo de cierre que no es entero seguro bloquea la fila (fail closed).
+- Semántica conservada: lo no aprobado queda pendiente; no se crea cuarentena, merma, movimiento ni incidencia (Blueprint §7.7 requiere otro diseño).
+- No se tocaron Rendición, Movimientos, Autoventa, Jornadas, precios, venta, claves de storage ni backend.
+
+### Verificación
+
+Ver entrega del bloque para la salida de `typecheck`, `lint`, `build` y Playwright. Tests (ejecutados desde `apps/web/`): **13 archivos / 367 tests** (311 antes: +56).
+
+### Riesgos pendientes
+
+- Rendición sigue pendiente (`pieza_legacy`): los conteos de cierre de piezas aún pueden venir de una semántica anterior; Retornos solo los lee y los valida como cantidades canónicas.
+- Siguen `Number.isInteger` preexistentes en `useJornadas.ts`, `Autoventa.tsx`, `domain/venta.ts` y `domain/validacion.ts` (otros bloques).
+- Sin test de componente de `Retornos.tsx`; la UX queda cubierta por helpers de dominio y verificación manual pendiente.
+
+---
 ## 21/10/2026 — Bloque 5: corrección post-auditoría (SIN COMMIT)
 
 **Rama:** `feat/movimientos-medias-piezas` · **Commit auditado:** `fe255048d1caca8575704978775efa7e2ce85ce9` · **Auditoría:** BLOCKED · **Estado:** correcciones en el working tree **sin commit**; push, merge y deploy: **NO**; **ADR-001 continúa PROPUESTA — NO APROBADA**; storage sigue v4; Retornos y Rendición no se tocan.

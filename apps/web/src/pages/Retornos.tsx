@@ -10,28 +10,26 @@ import {
 
 import { useJornadas, leerJornadas } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
-import {
-  useRetornos,
-  leerRetornos,
-} from "../hooks/useRetornos";
+import { useRetornos } from "../hooks/useRetornos";
 
 import type {
   ItemRetorno,
   RetornoDeposito,
 } from "../data/mockRetornos";
+import { maximo_piezas_segun_disponible } from "../domain/cantidades";
+import {
+  cantidad_a_texto,
+  cantidad_aprobada_desde_entrada,
+  cierre_sin_cambios,
+  contado_desde_cierre,
+  entrada_desde_cantidad,
+  entrada_vacia,
+  media_aprobable,
+  pendiente_retorno,
+  type EntradaRetorno,
+} from "../domain/retornos";
 
-const unidades = {
-  unidad: "un.",
-  pieza: "pzas.",
-};
-
-function cantidadValida(valor: number) {
-  return (
-    Number.isFinite(valor) &&
-    valor >= 0 &&
-    Number.isInteger(valor)
-  );
-}
+const entradaInicial: EntradaRetorno = { texto: "", media: false };
 
 export default function Retornos() {
   const { jornadas } = useJornadas();
@@ -43,8 +41,9 @@ export default function Retornos() {
   const [responsable, setResponsable] = useState("");
   const [observaciones, setObservaciones] = useState("");
 
+  // Entrada de UI por producto. Solo se persiste la cantidad canónica.
   const [aprobados, setAprobados] = useState<
-    Record<string, string>
+    Record<string, EntradaRetorno>
   >({});
 
   const [mensaje, setMensaje] = useState("");
@@ -75,22 +74,32 @@ export default function Retornos() {
     if (!jornada?.cierre) return [];
 
     return jornada.items.map((item) => {
-      const contado =
-        jornada.cierre!.conteos[String(item.productoId)] ?? 0;
+      // null: el conteo del cierre no es una cantidad canónica segura.
+      const contado = contado_desde_cierre(
+        jornada.cierre!.conteos[String(item.productoId)] ?? 0
+      );
 
-      const texto = aprobados[String(item.productoId)] ?? "";
+      const entrada =
+        aprobados[String(item.productoId)] ?? entradaInicial;
 
       const aprobado =
-        texto.trim() === "" ? null : Number(texto);
+        contado === null || entrada_vacia(entrada)
+          ? null
+          : cantidad_aprobada_desde_entrada(
+              item.unidadMedida,
+              entrada,
+              contado
+            );
 
       const pendiente =
-        aprobado === null
+        contado === null || aprobado === null
           ? null
-          : Math.round((contado - aprobado) * 1000) / 1000;
+          : pendiente_retorno(contado, aprobado);
 
       return {
         ...item,
         contado,
+        entrada,
         aprobado,
         pendiente,
       };
@@ -117,10 +126,15 @@ export default function Retornos() {
 
       setAprobados(
         Object.fromEntries(
-          existente.items.map((item) => [
-            String(item.productoId),
-            String(item.cantidadAprobada),
-          ])
+          existente.items.flatMap((item) => {
+            const entrada = entrada_desde_cantidad(
+              item.unidadMedida,
+              item.cantidadAprobada
+            );
+            return entrada
+              ? [[String(item.productoId), entrada] as const]
+              : [];
+          })
         )
       );
     }
@@ -129,14 +143,21 @@ export default function Retornos() {
   function completarConContado() {
     if (!jornada?.cierre || retornoExistente) return;
 
+    // Reconstruye piezas + media desde la cantidad canónica contada.
     setAprobados(
       Object.fromEntries(
-        jornada.items.map((item) => [
-          String(item.productoId),
-          String(
+        jornada.items.flatMap((item) => {
+          const contado = contado_desde_cierre(
             jornada.cierre!.conteos[String(item.productoId)] ?? 0
-          ),
-        ])
+          );
+          const entrada =
+            contado === null
+              ? null
+              : entrada_desde_cantidad(item.unidadMedida, contado);
+          return entrada
+            ? [[String(item.productoId), entrada] as const]
+            : [];
+        })
       )
     );
   }
@@ -163,21 +184,21 @@ export default function Retornos() {
     const items: ItemRetorno[] = [];
 
     for (const fila of filas) {
-      const texto = aprobados[String(fila.productoId)];
+      if (fila.contado === null) {
+        setError(
+          `El conteo de ${fila.nombreProducto} no es una cantidad válida.`
+        );
+        return;
+      }
 
-      if (texto === undefined || texto.trim() === "") {
+      if (entrada_vacia(fila.entrada)) {
         setError(
           `Falta completar ${fila.nombreProducto}.`
         );
         return;
       }
 
-      const cantidad = Number(texto);
-
-      if (
-        !cantidadValida(cantidad) ||
-        cantidad > fila.contado + 0.000001
-      ) {
+      if (fila.aprobado === null) {
         setError(
           `Cantidad aprobada inválida: ${fila.nombreProducto}.`
         );
@@ -189,14 +210,12 @@ export default function Retornos() {
         nombreProducto: fila.nombreProducto,
         unidadMedida: fila.unidadMedida,
         cantidadContada: fila.contado,
-        cantidadAprobada: cantidad,
+        cantidadAprobada: fila.aprobado,
       });
     }
 
     const hayPendientes = items.some(
-      (item) =>
-        item.cantidadAprobada <
-        item.cantidadContada - 0.000001
+      (item) => item.cantidadAprobada < item.cantidadContada
     );
 
     if (hayPendientes && !observaciones.trim()) {
@@ -223,25 +242,12 @@ export default function Retornos() {
       const cantidadActual =
         jornadaActual.cierre.conteos[String(item.productoId)];
 
-      if (
-        cantidadActual === undefined ||
-        Math.abs(cantidadActual - item.cantidadContada) >
-          0.000001
-      ) {
+      if (!cierre_sin_cambios(cantidadActual, item.cantidadContada)) {
         setError(
           "El cierre cambió. Actualizá la pantalla antes de continuar."
         );
         return;
       }
-    }
-
-    if (
-      leerRetornos().some(
-        (r) => r.jornadaId === jornada.id
-      )
-    ) {
-      setError("Ya existe una recepción de esta jornada.");
-      return;
     }
 
     const confirmado = window.confirm(
@@ -409,8 +415,12 @@ export default function Retornos() {
                         Vendible contado al cierre
                       </p>
                       <strong>
-                        {fila.contado}{" "}
-                        {unidades[fila.unidadMedida]}
+                        {fila.contado === null
+                          ? "Conteo inválido"
+                          : cantidad_a_texto(
+                              fila.unidadMedida,
+                              fila.contado
+                            )}
                       </strong>
                     </div>
 
@@ -421,38 +431,91 @@ export default function Retornos() {
                       <strong className="text-amber-700">
                         {fila.pendiente === null
                           ? "—"
-                          : `${fila.pendiente} ${
-                              unidades[fila.unidadMedida]
-                            }`}
+                          : cantidad_a_texto(
+                              fila.unidadMedida,
+                              fila.pendiente
+                            )}
                       </strong>
                     </div>
                   </div>
 
-                  <label className="mt-4 block space-y-2">
-                    <span className="text-sm font-medium">
-                      Cantidad aprobada para depósito *
-                    </span>
+                  <div className="mt-4 space-y-2">
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium">
+                        Cantidad aprobada para depósito *
+                        {fila.unidadMedida === "pieza"
+                          ? " (piezas enteras)"
+                          : ""}
+                      </span>
 
-                    <input
-                      type="number"
-                      min="0"
-                      max={fila.contado}
-                      step="1"
-                      disabled={Boolean(retornoExistente)}
-                      value={
-                        aprobados[String(fila.productoId)] ?? ""
-                      }
-                      onChange={(e) =>
-                        setAprobados((prev) => ({
-                          ...prev,
-                          [String(fila.productoId)]:
-                            e.target.value,
-                        }))
-                      }
-                      className="min-h-12 w-40 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
-                      placeholder="0"
-                    />
-                  </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={
+                          fila.unidadMedida === "pieza"
+                            ? maximo_piezas_segun_disponible(
+                                fila.contado ?? 0,
+                                fila.entrada.media
+                              )
+                            : (fila.contado ?? 0)
+                        }
+                        step="1"
+                        disabled={
+                          Boolean(retornoExistente) ||
+                          fila.contado === null
+                        }
+                        value={fila.entrada.texto}
+                        onChange={(e) =>
+                          setAprobados((prev) => ({
+                            ...prev,
+                            [String(fila.productoId)]: {
+                              texto: e.target.value,
+                              media: fila.entrada.media,
+                            },
+                          }))
+                        }
+                        className="min-h-12 w-40 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
+                        placeholder="0"
+                      />
+                    </label>
+
+                    {fila.unidadMedida === "pieza" && (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={fila.entrada.media}
+                          disabled={
+                            Boolean(retornoExistente) ||
+                            fila.contado === null ||
+                            (!fila.entrada.media &&
+                              !media_aprobable(
+                                fila.contado,
+                                fila.entrada.texto
+                              ))
+                          }
+                          onChange={(e) =>
+                            setAprobados((prev) => ({
+                              ...prev,
+                              [String(fila.productoId)]: {
+                                texto: fila.entrada.texto,
+                                media: e.target.checked,
+                              },
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        <span>Media pieza</span>
+                      </label>
+                    )}
+
+                    {fila.unidadMedida === "pieza" &&
+                      fila.aprobado !== null && (
+                        <p className="text-xs text-slate-600">
+                          ={" "}
+                          {cantidad_a_texto("pieza", fila.aprobado)}
+                        </p>
+                      )}
+                  </div>
                 </div>
               ))}
             </div>

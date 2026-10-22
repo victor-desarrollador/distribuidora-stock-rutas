@@ -23,7 +23,12 @@ import type {
   MovimientoReparto,
   ProductoMovimiento,
 } from "../data/mockMovimientos";
-import { leerRetornos } from "./useRetornos";
+import {
+  leerRetornos,
+  registrarRetornoOperacion,
+  registrarRetornoPersistido,
+} from "./useRetornos";
+import type { RetornoDeposito } from "../data/mockRetornos";
 import { cargarCamiones } from "./useCamiones";
 import { cargarClientes } from "./useClientes";
 import { leerCobros } from "./useCobros";
@@ -1022,5 +1027,149 @@ describe("productos: stock y stockMinimo son enteros seguros (frontera de lectur
     expect(cargarCon(producto(1.5, 1))).toEqual(productosIniciales);
     expect(cargarCon(producto(1, 0.5))).toEqual(productosIniciales);
     expect(cargarCon(producto(-1, 1))).toEqual(productosIniciales);
+  });
+});
+
+describe("retornos: frontera REAL de escritura", () => {
+  const CLAVE = CLAVES_STORAGE.retornos;
+
+  const item = (
+    unidadMedida: string,
+    contada: unknown,
+    aprobada: unknown,
+    productoId = 1
+  ) => ({
+    productoId,
+    nombreProducto: "Jamón",
+    unidadMedida,
+    cantidadContada: contada,
+    cantidadAprobada: aprobada,
+  });
+
+  const retorno = (
+    jornadaId: string,
+    items: unknown[] = [item("pieza", 5, 3)]
+  ) =>
+    ({
+      id: `r-${jornadaId}`,
+      jornadaId,
+      camionId: 1,
+      fecha: "2026-10-21T10:00:00.000Z",
+      responsable: "Ana",
+      observaciones: "",
+      items,
+    }) as unknown as RetornoDeposito;
+
+  const intentar = (r: RetornoDeposito) => {
+    const guardar = vi.fn();
+    const antes = mockLS.getItem(CLAVE);
+    mockLS.setItem.mockClear();
+    const error = registrarRetornoPersistido(r, guardar);
+    return { error, guardar, antes };
+  };
+
+  const intacto = (antes: string | null) => {
+    expect(mockLS.getItem(CLAVE)).toBe(antes);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+  };
+
+  it("A. storage ausente: se registra y se persiste", () => {
+    expect(mockLS.getItem(CLAVE)).toBeNull();
+    const r = retorno("j1");
+    const { error, guardar } = intentar(r);
+    expect(error).toBeNull();
+    expect(guardar).toHaveBeenCalledWith([r]);
+    expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([r]);
+  });
+
+  it.each([
+    ["B. JSON inválido", "{no es json"],
+    ["B. cadena vacía", ""],
+    ["C. no array", JSON.stringify({ retornos: [] })],
+    ["C. null", "null"],
+    ["D. array con retorno inválido", JSON.stringify([{ id: "x" }])],
+    [
+      "D. array con aprobado > contado",
+      JSON.stringify([retorno("j0", [item("unidad", 1, 2)])]),
+    ],
+  ])("%s: aborta, no guarda y el string crudo queda idéntico", (_n, crudo) => {
+    mockLS._store.set(CLAVE, crudo);
+    const { error, guardar, antes } = intentar(retorno("j1"));
+    expect(error).toMatch(/No se puede registrar/);
+    expect(guardar).not.toHaveBeenCalled();
+    expect(antes).toBe(crudo);
+    intacto(crudo);
+    // La lectura de UI sigue siendo vacía pero no escribe.
+    expect(leerRetornos()).toEqual([]);
+    intacto(crudo);
+  });
+
+  it("E. jornada duplicada contra el storage actual: rechaza y no guarda", () => {
+    const crudo = JSON.stringify([retorno("j1")]);
+    mockLS._store.set(CLAVE, crudo);
+    const { error, guardar } = intentar({ ...retorno("j1"), id: "otro" });
+    expect(error).toMatch(/ya tiene un retorno/);
+    expect(guardar).not.toHaveBeenCalled();
+    intacto(crudo);
+  });
+
+  it.each([
+    ["decimal", item("unidad", 5, 1.5)],
+    ["NaN", item("unidad", 5, NaN)],
+    ["Infinity", item("unidad", Infinity, 0)],
+    ["negativo", item("unidad", 5, -1)],
+    ["aprobado > contado", item("pieza", 5, 6)],
+    ["kg", item("kg", 5, 1)],
+    ["no seguro", item("unidad", Number.MAX_SAFE_INTEGER + 1, 0)],
+  ])("F. %s: rechaza sin tocar el storage", (_n, it_) => {
+    mockLS._store.set(CLAVE, JSON.stringify([retorno("j0")]));
+    const { error, guardar, antes } = intentar(retorno("j1", [it_]));
+    expect(error).toMatch(/no es válido/);
+    expect(guardar).not.toHaveBeenCalled();
+    intacto(antes);
+  });
+
+  it("F. productos duplicados y responsable vacío se rechazan", () => {
+    const dup = intentar(
+      retorno("j1", [item("unidad", 5, 1), item("unidad", 5, 1)])
+    );
+    expect(dup.error).toMatch(/no es válido/);
+    const sinResp = intentar({ ...retorno("j2"), responsable: " " });
+    expect(sinResp.error).toMatch(/no es válido/);
+    expect(mockLS.getItem(CLAVE)).toBeNull();
+  });
+
+  it("G. historial válido + nuevo válido: conserva y agrega al final", () => {
+    const previo = retorno("j0", [item("unidad", 5, 5)]);
+    mockLS._store.set(CLAVE, JSON.stringify([previo]));
+    const nuevo = retorno("j1");
+    expect(intentar(nuevo).error).toBeNull();
+    expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([previo, nuevo]);
+  });
+
+  it("registrarRetornoOperacion: retorno inválido no lee ni guarda ni valida", () => {
+    const cargar = vi.fn();
+    const guardar = vi.fn();
+    const validar = vi.fn(() => null);
+    const error = registrarRetornoOperacion(
+      retorno("j1", [item("unidad", 5, 1.5)]),
+      validar,
+      cargar,
+      guardar
+    );
+    expect(error).toMatch(/no es válido/);
+    expect(cargar).not.toHaveBeenCalled();
+    expect(validar).not.toHaveBeenCalled();
+    expect(guardar).not.toHaveBeenCalled();
+  });
+
+  it("lectura: kg y decimales en el storage invalidan el payload", () => {
+    mockLS._store.set(CLAVE, JSON.stringify([retorno("j1", [item("kg", 5, 1)])]));
+    expect(leerRetornos()).toEqual([]);
+    mockLS._store.set(CLAVE, JSON.stringify([retorno("j1", [item("pieza", 5, 2.5)])]));
+    expect(leerRetornos()).toEqual([]);
+    const valido = [retorno("j1", [item("pieza", 5, 3)])];
+    mockLS._store.set(CLAVE, JSON.stringify(valido));
+    expect(leerRetornos()).toEqual(valido);
   });
 });
