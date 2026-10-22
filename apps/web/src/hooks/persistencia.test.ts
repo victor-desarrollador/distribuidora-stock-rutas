@@ -6,7 +6,10 @@
 // Vitest corre en entorno node: se simula localStorage sobre globalThis.
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 
-import { cargarProductos } from "./useProductos";
+import { cargarProductos, leerProductos } from "./useProductos";
+import { persistirCatalogo, type ResultadoLectura } from "./catalogoStorage";
+import { camionesIniciales } from "../data/mockCamiones";
+import { clientesIniciales } from "../data/mockClientes";
 import {
   productosIniciales,
   type Producto,
@@ -34,8 +37,8 @@ import {
   registrarRetornoPersistido,
 } from "./useRetornos";
 import type { RetornoDeposito } from "../data/mockRetornos";
-import { cargarCamiones } from "./useCamiones";
-import { cargarClientes } from "./useClientes";
+import { cargarCamiones, leerCamiones } from "./useCamiones";
+import { cargarClientes, leerClientes } from "./useClientes";
 import { leerCobros } from "./useCobros";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 
@@ -1411,5 +1414,134 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
 
   it("la clave de jornadas sigue siendo v4", () => {
     expect(CLAVE).toBe("distribuidora_jornadas_demo_v4");
+  });
+});
+
+describe("catálogos (productos, camiones, clientes): storage corrupto fail-closed", () => {
+  const MAX = Number.MAX_SAFE_INTEGER;
+
+  const producto = {
+    id: 1, nombre: "Yogur", categoria: "Lácteos", unidadMedida: "unidad",
+    stock: 5, precio: 100, stockMinimo: 1,
+  };
+  const camion = {
+    id: 1, nombre: "Camión 1", patente: "AA123BB", marca: "M", modelo: "X",
+    observaciones: "", estado: "disponible",
+  };
+  const cliente = {
+    id: 1, nombreComercio: "Almacén", titular: "Ana", telefono: "1", direccion: "d",
+    zona: "z", condicionPago: "contado", limiteCredito: 0, activo: true,
+  };
+
+  const catalogos: Array<{
+    nombre: string;
+    clave: string;
+    leer: () => ResultadoLectura<unknown>;
+    valido: unknown;
+    invalido: unknown;
+    iniciales: unknown[];
+  }> = [
+    {
+      nombre: "productos",
+      clave: CLAVES_STORAGE.productos,
+      leer: leerProductos,
+      valido: producto,
+      invalido: { ...producto, stock: MAX + 1 },
+      iniciales: productosIniciales,
+    },
+    {
+      nombre: "camiones",
+      clave: CLAVES_STORAGE.camiones,
+      leer: leerCamiones,
+      valido: camion,
+      invalido: { ...camion, estado: "roto" },
+      iniciales: camionesIniciales,
+    },
+    {
+      nombre: "clientes",
+      clave: "distribuidora_clientes_demo_v2",
+      leer: leerClientes,
+      valido: cliente,
+      invalido: { ...cliente, limiteCredito: -1 },
+      iniciales: clientesIniciales,
+    },
+  ];
+
+  const CORRUPTOS: Array<[string, string]> = [
+    ["JSON inválido", "{no es json"],
+    ["string vacío presente", ""],
+    ["null", "null"],
+    ["objeto no array", JSON.stringify({ datos: [] })],
+  ];
+
+  describe.each(catalogos)("$nombre", (c) => {
+    // Misma frontera que el efecto del hook: lectura inicial + persistirCatalogo.
+    const montar = () => {
+      const lectura = c.leer();
+      const estadoInicial: unknown[] = lectura.ok ? lectura.datos : c.iniciales;
+      return { lectura, estadoInicial };
+    };
+
+    it("A. storage ausente: estado inicial legítimo y se inicializa (persiste los demo)", () => {
+      const { lectura, estadoInicial } = montar();
+      expect(lectura.ok).toBe(true);
+      if (lectura.ok) expect(lectura.estado).toBe("inicial");
+      expect(persistirCatalogo(c.clave, estadoInicial, lectura)).toBe(true);
+      expect(mockLS.getItem(c.clave)).toBe(JSON.stringify(estadoInicial));
+    });
+
+    it("B. storage válido: usa los datos guardados", () => {
+      mockLS._store.set(c.clave, JSON.stringify([c.valido]));
+      const { lectura } = montar();
+      expect(lectura.ok).toBe(true);
+      if (lectura.ok) {
+        expect(lectura.estado).toBe("valido");
+        expect(lectura.datos).toEqual([c.valido]);
+      }
+    });
+
+    it.each(CORRUPTOS)("%s: raw intacto y sin setItem al montar ni al editar", (_n, crudo) => {
+      mockLS._store.set(c.clave, crudo);
+      mockLS.setItem.mockClear();
+      const antes = mockLS.getItem(c.clave);
+      const { lectura, estadoInicial } = montar();
+
+      expect(lectura.ok).toBe(false);
+      // Efecto de montaje con los datos demo: no escribe.
+      expect(persistirCatalogo(c.clave, estadoInicial, lectura)).toBe(false);
+      // Edición posterior del usuario en la sesión: tampoco escribe.
+      expect(
+        persistirCatalogo(c.clave, [...estadoInicial, c.valido], lectura)
+      ).toBe(false);
+      expect(mockLS.getItem(c.clave)).toBe(antes);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    });
+
+    it("G. array con un elemento inválido: raw intacto y sin setItem", () => {
+      const crudo = JSON.stringify([c.valido, c.invalido]);
+      mockLS._store.set(c.clave, crudo);
+      mockLS.setItem.mockClear();
+      const { lectura, estadoInicial } = montar();
+
+      expect(lectura.ok).toBe(false);
+      expect(persistirCatalogo(c.clave, estadoInicial, lectura)).toBe(false);
+      expect(mockLS.getItem(c.clave)).toBe(crudo);
+      expect(mockLS.setItem).not.toHaveBeenCalled();
+    });
+  });
+
+  it("las funciones públicas cargarX siguen devolviendo datos demo ante corrupción, sin escribir", () => {
+    mockLS._store.set(CLAVES_STORAGE.productos, "{roto");
+    mockLS._store.set(CLAVES_STORAGE.camiones, "");
+    mockLS._store.set("distribuidora_clientes_demo_v2", "null");
+    expect(cargarProductos()).toEqual(productosIniciales);
+    expect(cargarCamiones()).toEqual(camionesIniciales);
+    expect(cargarClientes()).toEqual(clientesIniciales);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+  });
+
+  it("claves sin cambios", () => {
+    expect(CLAVES_STORAGE.productos).toBe("distribuidora_productos_demo_v4");
+    expect(CLAVES_STORAGE.camiones).toBe("distribuidora_camiones_demo_v4");
   });
 });

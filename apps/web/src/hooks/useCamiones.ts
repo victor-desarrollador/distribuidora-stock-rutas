@@ -7,49 +7,53 @@ import {
   type Camion,
 } from "../data/mockCamiones";
 
+import {
+  leerCatalogo,
+  persistirCatalogo,
+  type ResultadoLectura,
+} from "./catalogoStorage";
+
 const STORAGE_KEY = CLAVES_STORAGE.camiones;
 
+function camionValido(camion: unknown): boolean {
+  if (camion === null || typeof camion !== "object") return false;
+
+  const c = camion as Partial<Camion>;
+
+  return (
+    Number.isSafeInteger(c.id) &&
+    typeof c.nombre === "string" &&
+    typeof c.patente === "string" &&
+    typeof c.marca === "string" &&
+    typeof c.modelo === "string" &&
+    typeof c.observaciones === "string" &&
+    ["disponible", "en_reparto", "mantenimiento"].includes(
+      c.estado ?? ""
+    )
+  );
+}
+
+/** Lectura discriminada (ausente / válido / corrupto). */
+export function leerCamiones(): ResultadoLectura<Camion> {
+  return leerCatalogo(STORAGE_KEY, camionValido, camionesIniciales);
+}
+
+/** Datos para la UI: iniciales si está ausente o corrupto (nunca persiste). */
 export function cargarCamiones(): Camion[] {
-  try {
-    const guardados = localStorage.getItem(STORAGE_KEY);
-
-    if (!guardados) return camionesIniciales;
-
-    const datos: unknown = JSON.parse(guardados);
-
-    if (!Array.isArray(datos)) return camionesIniciales;
-
-    const validos = datos.every(
-      (camion) =>
-        camion !== null &&
-        typeof camion === "object" &&
-        Number.isSafeInteger(camion.id) &&
-        typeof camion.nombre === "string" &&
-        typeof camion.patente === "string" &&
-        typeof camion.marca === "string" &&
-        typeof camion.modelo === "string" &&
-        typeof camion.observaciones === "string" &&
-        ["disponible", "en_reparto", "mantenimiento"].includes(
-          camion.estado
-        )
-    );
-
-    return validos ? (datos as Camion[]) : camionesIniciales;
-  } catch {
-    return camionesIniciales;
-  }
+  const lectura = leerCamiones();
+  return lectura.ok ? lectura.datos : camionesIniciales;
 }
 
 export function useCamiones() {
-  const [camiones, setCamiones] = useState<Camion[]>(cargarCamiones);
+  const [lectura] = useState(leerCamiones);
+  const [camiones, setCamiones] = useState<Camion[]>(
+    lectura.ok ? lectura.datos : camionesIniciales
+  );
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(camiones));
-    } catch (error) {
-      console.error("Error al guardar camiones:", error);
-    }
-  }, [camiones]);
+    // Storage corrupto: no se pisa el raw con datos demo ni con ediciones.
+    persistirCatalogo(STORAGE_KEY, camiones, lectura);
+  }, [camiones, lectura]);
 
   return { camiones, setCamiones };
 }

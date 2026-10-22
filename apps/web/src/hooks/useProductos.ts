@@ -10,59 +10,62 @@ import {
   validar_combinacion_categoria_unidad,
 } from "../domain/productos";
 import { precio_valido } from "../domain/precios";
+import {
+  leerCatalogo,
+  persistirCatalogo,
+  type ResultadoLectura,
+} from "./catalogoStorage";
 
 const STORAGE_KEY = CLAVES_STORAGE.productos;
 
+function productoValido(producto: unknown): boolean {
+  if (producto === null || typeof producto !== "object") return false;
+
+  const p = producto as Partial<Producto>;
+
+  return (
+    Number.isSafeInteger(p.id) &&
+    typeof p.nombre === "string" &&
+    ["Lácteos", "Fiambres"].includes(p.categoria ?? "") &&
+    ["unidad", "pieza"].includes(p.unidadMedida ?? "") &&
+    // Frontera de persistencia: la combinación categoría ↔ unidad
+    // debe ser la canónica (Lácteos -> unidad; Fiambres -> pieza).
+    // Nada se corrige aquí (no se cambia categoría ni unidad ni se
+    // reinterpreta stock): un dato inválido invalida el payload
+    // igual que cualquier otro campo inválido.
+    validar_combinacion_categoria_unidad(
+      p.categoria as Producto["categoria"],
+      p.unidadMedida as Producto["unidadMedida"]
+    ).valido &&
+    // Precios (ADR-003): máximo 2 decimales; NO hay precioMediaPieza configurable.
+    // pieza: solo precio; unidad: solo precio.
+    precio_valido(p.precio as number) &&
+    // Stock y stock mínimo: enteros seguros >= 0 (dominio compartido).
+    stock_producto_valido(p.stock as number, p.stockMinimo as number)
+  );
+}
+
+/** Lectura discriminada (ausente / válido / corrupto). */
+export function leerProductos(): ResultadoLectura<Producto> {
+  return leerCatalogo(STORAGE_KEY, productoValido, productosIniciales);
+}
+
+/** Datos para la UI: iniciales si está ausente o corrupto (nunca persiste). */
 export function cargarProductos(): Producto[] {
-  try {
-    const guardado = localStorage.getItem(STORAGE_KEY);
-
-    if (!guardado) return productosIniciales;
-
-    const datos: unknown = JSON.parse(guardado);
-
-    if (!Array.isArray(datos)) return productosIniciales;
-
-    const validos = datos.every(
-      (producto) =>
-        producto !== null &&
-        typeof producto === "object" &&
-        Number.isSafeInteger(producto.id) &&
-        typeof producto.nombre === "string" &&
-        ["Lácteos", "Fiambres"].includes(producto.categoria) &&
-        ["unidad", "pieza"].includes(producto.unidadMedida) &&
-        // Frontera de persistencia: la combinación categoría ↔ unidad
-        // debe ser la canónica (Lácteos -> unidad; Fiambres -> pieza).
-        // Nada se corrige aquí (no se cambia categoría ni unidad ni se
-        // reinterpreta stock): un dato inválido invalida el payload
-        // igual que cualquier otro campo inválido.
-        validar_combinacion_categoria_unidad(
-          producto.categoria,
-          producto.unidadMedida
-        ).valido &&
-        // Precios (ADR-003): máximo 2 decimales; NO hay precioMediaPieza configurable.
-        // pieza: solo precio; unidad: solo precio.
-        precio_valido(producto.precio) &&
-        // Stock y stock mínimo: enteros seguros >= 0 (dominio compartido).
-        stock_producto_valido(producto.stock, producto.stockMinimo)
-    );
-
-    return validos ? (datos as Producto[]) : productosIniciales;
-  } catch {
-    return productosIniciales;
-  }
+  const lectura = leerProductos();
+  return lectura.ok ? lectura.datos : productosIniciales;
 }
 
 export function useProductos() {
-  const [productos, setProductos] = useState<Producto[]>(cargarProductos);
+  const [lectura] = useState(leerProductos);
+  const [productos, setProductos] = useState<Producto[]>(
+    lectura.ok ? lectura.datos : productosIniciales
+  );
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(productos));
-    } catch (error) {
-      console.error("No se pudieron guardar los productos:", error);
-    }
-  }, [productos]);
+    // Storage corrupto: no se pisa el raw con datos demo ni con ediciones.
+    persistirCatalogo(STORAGE_KEY, productos, lectura);
+  }, [productos, lectura]);
 
   return { productos, setProductos };
 }

@@ -1,4 +1,30 @@
 ---
+## 21/10/2026 — Hardening de catálogos (Productos, Camiones, Clientes): storage corrupto fail-closed
+
+**Rama:** `fix/catalogos-storage-fail-closed` · **Base:** `ca34192a90f4809c3b9033ed9c9e95d44e5bc3f1` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Riesgo cerrado
+
+`cargarProductos/Camiones/Clientes` devolvían los datos demo ante cualquier storage inválido (y trataban `""` como ausente por `if (!guardado)`). Luego `useState(cargarX)` los dejaba como estado y el `useEffect` los escribía con `localStorage.setItem` al montar: un raw corrupto se pisaba automáticamente con datos demo, y también con cualquier edición posterior.
+
+### Qué se hizo
+
+- Nuevo `hooks/catalogoStorage.ts`: `leerCatalogo` distingue ausente (`getItem === null` → `inicial`, datos demo), válido y corrupto (`""`, `"null"`, JSON inválido, no array, elemento inválido, error de lectura); `persistirCatalogo` está atado al resultado de la lectura y **nunca escribe si fue corrupta**, ni al montar ni tras ediciones en la sesión.
+- `useProductos`, `useCamiones`, `useClientes`: cada uno conserva su validador (extraído a `productoValido`, `camionValido`, `clienteValido`, sin cambios de reglas), expone `leerX()` discriminada y mantiene `cargarX()` (datos demo para la UI). El efecto llama a `persistirCatalogo(clave, datos, lectura)`. Contrato público sin cambios: `{ productos, setProductos }`, `{ camiones, setCamiones }`, `{ clientes, setClientes }`.
+- Storage ausente conserva la inicialización demo existente. No hay acción de recuperación ni borrado del raw.
+- Claves sin cambios: `distribuidora_productos_demo_v4`, `distribuidora_camiones_demo_v4`, `distribuidora_clientes_demo_v2`. No se tocaron ventas, cobros, jornadas, movimientos, retornos ni pantallas.
+
+### Verificación
+
+Tests (ejecutados desde `apps/web/`): **13 archivos / 465 tests** (442 antes: +23). Matriz por catálogo (ausente, válido, 4 variantes corruptas, elemento inválido) con raw idéntico y `setItem` no llamado al montar ni al editar. Mutaciones temporales: tratar `""`/`"null"` como ausente hizo fallar 6 tests; hacer que `persistirCatalogo` ignore la lectura hizo fallar 15; ambas revertidas. Resultado de typecheck, lint, build y Playwright: ver entrega.
+
+### Riesgos pendientes
+
+- Con storage corrupto la UI muestra los datos demo sin avisar y las ediciones de la sesión no se persisten (se pierden al recargar); falta un aviso visible y una acción de recuperación aprobada.
+- `useVentas`, `useCobros` y `useJornadas` (ya endurecido) no se revisaron en esta tarea para el patrón del efecto.
+- Sin tests de componente ni del hook React; la frontera probada es la función usada por el efecto.
+
+---
 ## 21/10/2026 — Hardening Jornadas: storage corrupto fail-closed
 
 **Rama:** `fix/jornadas-storage-fail-closed` · **Base:** `5cfe3bbbe5c3e27db954d98dd7c957ef66ec6207` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; storage sigue v4 (`distribuidora_jornadas_demo_v4`); **ADR-001 continúa PROPUESTA — NO APROBADA**.
