@@ -409,4 +409,3 @@ test("Retornos: el camión de la jornada cambió en la ventana del confirm, la r
   );
   expect(await leerRaw(page, claves.retornos)).toBe("[]");
 });
-

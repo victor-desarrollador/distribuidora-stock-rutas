@@ -1,4 +1,47 @@
 ---
+## 22/10/2026 — Limpieza final pre-push · Bloque F
+
+**Rama:** `feat/cierre-frontend-pre-backend` · **Base obligatoria / COMMIT_E:** `b8f7f067a6c48e27dd2ed04d838e1ca92f2a3f64` · **Estado:** limpieza y trazabilidad implementadas; pendiente de auditoría independiente sobre el hash de F. **ADR-001 continúa PROPUESTA — NO APROBADA**; backend no iniciado; sin push, merge ni deploy.
+
+### Secuencia y alcance
+
+- La auditoría del Bloque E concluyó `APPROVED WITH CORRECTIONS`.
+- La security re-review de E concluyó `SECURITY APPROVED WITH CORRECTIONS`.
+- M-1/M-2/M-3 quedaron cerrados en E.
+- E-A1: se eliminó exclusivamente la línea vacía adicional al EOF de `apps/web/tests/toctou-jornadas-revalidacion.spec.ts`; no cambiaron assertions, tests ni lógica.
+- E-A2: se actualizó el encabezado y la trazabilidad del incidente de ledgers corruptos con la secuencia real de B, C, D, security review de D, E, security re-review de E y F. F no se declara aprobado.
+- Se registró ADR-004, `PROPUESTA — NO APROBADA`, sobre si un cobro puede asociarse a una jornada cerrada. El comportamiento actual exige jornada abierta cuando existe `jornadaId`; es preexistente y fue reforzado por E, pero el Blueprint no formaliza la regla. No se resolvió ni implementó la decisión.
+- E-A3 queda como deuda conocida no bloqueante, clasificación L: preparación usa `producto.stock` del snapshot React. No existe un flujo intra-app que modifique el stock de un producto existente y el Blueprint no exige una relectura actual en esta etapa. No bloquea push ni merge.
+- E-A4 queda como deuda conocida no bloqueante, clasificación INFO/L: preparación no revalida el estado actual del camión. El Blueprint no define esa precondición en preparación y la salida sí tiene una compuerta específica. No bloquea push.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `apps/web/tests/toctou-jornadas-revalidacion.spec.ts` | eliminación de blank line al EOF (E-A1) |
+| `docs/incidents/2026-10-22-ledgers-corruptos-en-consumidores-operativos.md` | encabezado, secuencia y deudas E-A3/E-A4 (E-A2) |
+| `docs/decisions/004-cobros-jornada-cerrada.md` | nueva decisión propuesta, no aprobada |
+| `docs/decisions/README.md` | índice de ADR-004 |
+| `docs/progress-log.md` | esta entrada |
+
+### Verificación
+
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → **18 archivos / 591 tests passed**.
+- `npm run lint` → exit 0.
+- `npm run build` → exit 0.
+- `npx playwright test` → **35 tests passed**. El primer intento dentro del sandbox no inició Vite (`listen EPERM` sobre `127.0.0.1:4173`); el mismo comando ejecutado con permiso para abrir el puerto terminó con exit 0.
+- `git diff --check` → sin errores.
+- Alcance del diff verificado: solo el whitespace E-A1 del spec y documentación.
+
+### Riesgos pendientes
+
+1. E-A3 y E-A4 permanecen como deuda no bloqueante, sin implementación en F.
+2. ADR-004 requiere decisión humana futura; no autoriza cambios de comportamiento.
+3. F permanece pendiente de auditoría independiente sobre su hash.
+4. Backend no iniciado. Sin push, merge ni deploy.
+
+---
 ## 22/10/2026 — Cierre final de integridad pre-backend · Bloque E
 
 **Rama:** `feat/cierre-frontend-pre-backend` · **Base obligatoria / COMMIT_D:** `9959f173b33577899172f1f9d5ebe9a64a27ddfc` · **Estado:** corrección implementada y verificada; pendiente de revisión humana previa al commit, auditoría independiente del nuevo hash y aprobación. **ADR-001 continúa PROPUESTA — NO APROBADA**; sin backend, sin push, merge ni deploy.
