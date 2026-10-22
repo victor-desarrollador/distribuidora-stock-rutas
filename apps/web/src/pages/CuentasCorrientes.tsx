@@ -10,7 +10,7 @@ import {
 
 import { useClientes } from "../hooks/useClientes";
 import { useVentas } from "../hooks/useVentas";
-import { useJornadas } from "../hooks/useJornadas";
+import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
 import { useCobros } from "../hooks/useCobros";
 
 import type { Cobro, MedioCobro } from "../data/mockCobros";
@@ -21,6 +21,7 @@ import {
 } from "./avisosStorage";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
+import { revalidar_jornada_para_cobro } from "../domain/jornadas";
 
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
@@ -242,6 +243,24 @@ export default function CuentasCorrientes() {
     );
 
     if (!confirmado) return;
+
+    // M-2 (bloque E): revalidar la Jornada asociada justo antes de persistir.
+    // El confirm abre una ventana en la que el storage de Jornadas puede
+    // haberse corrompido o la jornada puede haber desaparecido o cerrado.
+    // Cobros sin jornada asociada no crea dependencia: la revalidación solo
+    // aplica con jornadaId. Si un cobro puede asociarse a una jornada
+    // cerrada es una decisión pendiente del Blueprint (no se inventa).
+    if (jornadaId) {
+      const revalidacionCobro = revalidar_jornada_para_cobro(
+        leerJornadasDiscriminado(),
+        jornadaId
+      );
+
+      if (!revalidacionCobro.ok) {
+        setError(`No se puede registrar el cobro: ${revalidacionCobro.error}`);
+        return;
+      }
+    }
 
     const cobro: Cobro = {
       id: crypto.randomUUID(),

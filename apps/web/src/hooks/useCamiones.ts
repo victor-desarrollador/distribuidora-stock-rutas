@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 import {
@@ -8,8 +8,8 @@ import {
 } from "../data/mockCamiones";
 
 import {
+  actualizarCatalogoPersistido,
   leerCatalogo,
-  persistirCatalogo,
   type ResultadoLectura,
 } from "./catalogoStorage";
 
@@ -46,14 +46,31 @@ export function cargarCamiones(): Camion[] {
 
 export function useCamiones() {
   const [lectura] = useState(leerCamiones);
-  const [camiones, setCamiones] = useState<Camion[]>(
+  const [camiones, setCamionesEstado] = useState<Camion[]>(
     lectura.ok ? lectura.datos : []
   );
 
-  useEffect(() => {
-    // Storage corrupto: no se pisa el raw con datos demo ni con ediciones.
-    persistirCatalogo(STORAGE_KEY, camiones, lectura);
-  }, [camiones, lectura]);
+  /**
+   * Frontera explícita de edición (bloque E / M-1): relee la clave, aborta si
+   * está corrupta (sin escribir ni cambiar React), persiste y solo si la
+   * escritura tuvo éxito actualiza el estado. Devuelve false cuando la
+   * operación no se guardó.
+   */
+  function actualizarCamiones(
+    transformar: (actuales: Camion[]) => Camion[]
+  ): boolean {
+    const nuevos = actualizarCatalogoPersistido(
+      STORAGE_KEY,
+      camionValido,
+      camionesIniciales,
+      transformar
+    );
 
-  return { camiones, setCamiones, estadoLectura: lectura.estado };
+    if (nuevos === null) return false;
+
+    setCamionesEstado(nuevos);
+    return true;
+  }
+
+  return { camiones, actualizarCamiones, estadoLectura: lectura.estado };
 }

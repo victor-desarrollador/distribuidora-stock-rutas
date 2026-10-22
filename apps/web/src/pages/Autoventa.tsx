@@ -9,7 +9,7 @@ import {
   Receipt,
 } from "lucide-react";
 
-import { useJornadas } from "../hooks/useJornadas";
+import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
 import { useClientes } from "../hooks/useClientes";
 import { useCamiones } from "../hooks/useCamiones";
 import { useVentas } from "../hooks/useVentas";
@@ -43,6 +43,7 @@ import {
   sumar_importes,
 } from "../domain/precios";
 import { construirItemsVenta } from "../domain/venta";
+import { revalidar_jornada_para_operacion } from "../domain/jornadas";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
@@ -305,6 +306,20 @@ export default function Autoventa() {
     const resultado = registrarVenta(
       venta,
       (ventasActuales) => {
+        // M-2 (bloque E): revalidar la Jornada vigente justo antes de
+        // persistir. La jornada del render es un snapshot: puede haberse
+        // cerrado, desaparecido o cambiado de camión, y el storage de
+        // Jornadas puede haberse corrompido, desde el montaje.
+        const revalidacionJornada = revalidar_jornada_para_operacion(
+          leerJornadasDiscriminado(),
+          jornada,
+          "abierta"
+        );
+
+        if (!revalidacionJornada.ok) {
+          return `No se puede registrar: ${revalidacionJornada.error}`;
+        }
+
         // Leemos los movimientos más recientes de la demo.
         const lecturaMovimientos = leerMovimientosDiscriminado();
         if (!lecturaMovimientos.ok) {
@@ -314,7 +329,7 @@ export default function Autoventa() {
 
         for (const item of itemsVenta) {
           // Cantidad que salió cargada en el camión.
-          const cargado = jornada.items.find(
+          const cargado = revalidacionJornada.jornada.items.find(
             (producto) =>
               producto.productoId === item.productoId
           );

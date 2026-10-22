@@ -58,7 +58,7 @@ function formularioVacio(): FormularioProducto {
 
 export default function Productos() {
   // El hook se encarga de guardar los productos localmente.
-  const { productos, setProductos, estadoLectura } = useProductos();
+  const { productos, actualizarProductos, estadoLectura } = useProductos();
   const estadoOperacion = estadoStorageOperativo({ productos: estadoLectura });
 
   const [busqueda, setBusqueda] = useState("");
@@ -178,7 +178,7 @@ export default function Productos() {
       // Editar información comercial sin alterar el stock ni la
       // interpretación de las cantidades existentes: categoría y
       // unidadMedida se preservan tal como están.
-      setProductos((actuales) =>
+      const guardado = actualizarProductos((actuales) =>
         actuales.map((producto) =>
           producto.id === productoEditando
             ? {
@@ -190,6 +190,13 @@ export default function Productos() {
             : producto
         )
       );
+
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el producto en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
 
       setMensaje("Producto actualizado correctamente.");
     } else {
@@ -204,7 +211,17 @@ export default function Productos() {
         stockMinimo,
       };
 
-      setProductos((actuales) => [...actuales, producto]);
+      const guardado = actualizarProductos((actuales) => [
+        ...actuales,
+        producto,
+      ]);
+
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el producto en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
 
       setMensaje("Producto agregado correctamente.");
     }

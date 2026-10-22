@@ -46,7 +46,7 @@ const etiquetasEstado: Record<EstadoCamion, string> = {
 };
 
 export default function Camiones() {
-  const { camiones, setCamiones, estadoLectura } = useCamiones();
+  const { camiones, actualizarCamiones, estadoLectura } = useCamiones();
   const estadoOperacion = estadoStorageOperativo({ camiones: estadoLectura });
 
   const [busqueda, setBusqueda] = useState("");
@@ -159,7 +159,7 @@ export default function Camiones() {
         return;
       }
 
-      setCamiones((anteriores) =>
+      const guardado = actualizarCamiones((anteriores) =>
         anteriores.map((camion) =>
           camion.id === camionEditando
             ? { ...camion, ...datos, estado: formulario.estado }
@@ -167,9 +167,16 @@ export default function Camiones() {
         )
       );
 
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el camión en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
+
       setMensaje("Camión actualizado correctamente.");
     } else {
-      setCamiones((anteriores) => [
+      const guardado = actualizarCamiones((anteriores) => [
         ...anteriores,
         {
           id: Math.max(0, ...anteriores.map((c) => c.id)) + 1,
@@ -177,6 +184,13 @@ export default function Camiones() {
           estado: formulario.estado,
         },
       ]);
+
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el camión en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
 
       setMensaje("Camión registrado correctamente.");
     }

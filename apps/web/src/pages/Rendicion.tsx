@@ -259,22 +259,87 @@ export default function Rendicion() {
       return;
     }
 
+    // L-1 (bloque E): primer armado del cierre, con lecturas frescas de
+    // Ventas, Cobros y Movimientos y todas las comprobaciones vigentes.
+    const armadoPrevio = armarCierre();
+    if (!armadoPrevio.ok) {
+      setError(armadoPrevio.error);
+      return;
+    }
+
+    const confirmado = window.confirm(
+      "¿Confirmás el cierre de esta jornada?\n\n" +
+        "Después no se podrán registrar más ventas ni movimientos en ella."
+    );
+
+    if (!confirmado) return;
+
+    // L-1 (bloque E): la ventana que abre el confirm también es una ventana
+    // en la que los ledgers pueden corromperse. Releer y rearmar el cierre
+    // completo con lecturas nuevas: lo que se persiste es ese armado final,
+    // no el previo al confirm. Si algo falla, no se escribe nada.
+    const armadoFinal = armarCierre();
+    if (!armadoFinal.ok) {
+      setError(armadoFinal.error);
+      return;
+    }
+
+    if (
+      !cerrarJornada(
+        jornada.id,
+        armadoFinal.cierre
+      )
+    ) {
+      setError(
+        "No se pudo guardar el cierre. Verificá que la jornada siga abierta."
+      );
+      return;
+    }
+
+    setMensaje(
+      "Jornada cerrada correctamente."
+    );
+  }
+
+  /**
+   * L-1 (bloque E): arma el cierre completo con lecturas FRESCAS de Ventas,
+   * Cobros y Movimientos. Es la misma secuencia de comprobaciones que la
+   * pantalla hacía antes de confirmar; se ejecuta dos veces (antes y después
+   * del confirm) para que la ventana del confirm no pueda cerrar la jornada
+   * con datos leídos antes de que el storage cambiara.
+   */
+  function armarCierre():
+    | { ok: true; cierre: Parameters<typeof cerrarJornada>[1] }
+    | { ok: false; error: string } {
+    if (!jornada || jornada.estado !== "abierta") {
+      return {
+        ok: false,
+        error: "Seleccioná una jornada abierta.",
+      };
+    }
+
     const lecturaVentas = leerVentas();
     if (!lecturaVentas.ok) {
-      setError(`No se puede cerrar: ${lecturaVentas.error}`);
-      return;
+      return {
+        ok: false,
+        error: `No se puede cerrar: ${lecturaVentas.error}`,
+      };
     }
 
     const lecturaCobros = leerCobrosDiscriminado();
     if (!lecturaCobros.ok) {
-      setError(`No se puede cerrar: ${lecturaCobros.error}`);
-      return;
+      return {
+        ok: false,
+        error: `No se puede cerrar: ${lecturaCobros.error}`,
+      };
     }
 
     const lecturaMovimientos = leerMovimientosDiscriminado();
     if (!lecturaMovimientos.ok) {
-      setError(`No se puede cerrar: ${lecturaMovimientos.error}`);
-      return;
+      return {
+        ok: false,
+        error: `No se puede cerrar: ${lecturaMovimientos.error}`,
+      };
     }
 
     const disponibilidadActual = disponibilidadRendicion(
@@ -298,20 +363,24 @@ export default function Rendicion() {
     const stockInconsistenteActual = filasMercaderiaActuales.some(
       (fila) => fila.estado === "inconsistente"
     );
+
+    if (stockInconsistenteActual) {
+      return {
+        ok: false,
+        error: MENSAJE_INCONSISTENCIA_MERCADERIA,
+      };
+    }
+
     const hayUnidadNoSoportadaActual = filasMercaderiaActuales.some(
       (fila) => fila.estado === "no_soportada"
     );
 
-    if (stockInconsistenteActual) {
-      setError(MENSAJE_INCONSISTENCIA_MERCADERIA);
-      return;
-    }
-
     if (hayUnidadNoSoportadaActual) {
-      setError(
-        "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar."
-      );
-      return;
+      return {
+        ok: false,
+        error:
+          "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar.",
+      };
     }
 
     const conteosFinales: Record<
@@ -326,10 +395,10 @@ export default function Rendicion() {
       );
 
       if (valor === null) {
-        setError(
-          `Ingresá un conteo válido para ${fila.nombreProducto}.`
-        );
-        return;
+        return {
+          ok: false,
+          error: `Ingresá un conteo válido para ${fila.nombreProducto}.`,
+        };
       }
 
       conteosFinales[
@@ -337,23 +406,28 @@ export default function Rendicion() {
       ] = valor;
     }
 
+    const efectivoContadoActual = leerCantidad(
+      efectivoEntregado
+    );
+
     if (
-      efectivoContado === null ||
+      efectivoContadoActual === null ||
       Math.abs(
-        efectivoContado * 100 -
+        efectivoContadoActual * 100 -
           Math.round(
-            efectivoContado * 100
+            efectivoContadoActual * 100
           )
       ) > 0.000001
     ) {
-      setError(
-        "Ingresá un importe válido de efectivo entregado (puede ser 0)."
-      );
-      return;
+      return {
+        ok: false,
+        error:
+          "Ingresá un importe válido de efectivo entregado (puede ser 0).",
+      };
     }
 
     const diferenciaEfectivoActual = Math.round(
-      (efectivoContado - resumenCajaActual.efectivo) * 100
+      (efectivoContadoActual - resumenCajaActual.efectivo) * 100
     ) / 100;
     const tieneDiferenciasActuales =
       filasMercaderiaActuales.some(
@@ -361,46 +435,27 @@ export default function Rendicion() {
       ) || Math.abs(diferenciaEfectivoActual) > 0.009;
 
     if (tieneDiferenciasActuales && !observaciones.trim()) {
-      setError(
-        "Hay diferencias de stock o de caja. Es obligatorio explicar el motivo."
-      );
-      return;
+      return {
+        ok: false,
+        error:
+          "Hay diferencias de stock o de caja. Es obligatorio explicar el motivo.",
+      };
     }
 
-    const confirmado = window.confirm(
-      "¿Confirmás el cierre de esta jornada?\n\n" +
-        "Después no se podrán registrar más ventas ni movimientos en ella."
-    );
-
-    if (!confirmado) return;
-
-    const cierre = {
-      fecha: new Date().toISOString(),
-      conteos: conteosFinales,
-      efectivoEntregado: efectivoContado,
-      efectivoEsperado: resumenCajaActual.efectivo,
-      transferenciasInformadas:
-        resumenCajaActual.transferencias,
-      ventasCuentaCorriente:
-        resumenCajaActual.cuentaCorriente,
-      observaciones: observaciones.trim(),
+    return {
+      ok: true,
+      cierre: {
+        fecha: new Date().toISOString(),
+        conteos: conteosFinales,
+        efectivoEntregado: efectivoContadoActual,
+        efectivoEsperado: resumenCajaActual.efectivo,
+        transferenciasInformadas:
+          resumenCajaActual.transferencias,
+        ventasCuentaCorriente:
+          resumenCajaActual.cuentaCorriente,
+        observaciones: observaciones.trim(),
+      },
     };
-
-    if (
-      !cerrarJornada(
-        jornada.id,
-        cierre
-      )
-    ) {
-      setError(
-        "No se pudo guardar el cierre. Verificá que la jornada siga abierta."
-      );
-      return;
-    }
-
-    setMensaje(
-      "Jornada cerrada correctamente."
-    );
   }
 
   return (

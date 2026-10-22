@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   productosIniciales,
@@ -11,8 +11,8 @@ import {
 } from "../domain/productos";
 import { precio_valido } from "../domain/precios";
 import {
+  actualizarCatalogoPersistido,
   leerCatalogo,
-  persistirCatalogo,
   type ResultadoLectura,
 } from "./catalogoStorage";
 
@@ -58,14 +58,31 @@ export function cargarProductos(): Producto[] {
 
 export function useProductos() {
   const [lectura] = useState(leerProductos);
-  const [productos, setProductos] = useState<Producto[]>(
+  const [productos, setProductosEstado] = useState<Producto[]>(
     lectura.ok ? lectura.datos : []
   );
 
-  useEffect(() => {
-    // Storage corrupto: no se pisa el raw con datos demo ni con ediciones.
-    persistirCatalogo(STORAGE_KEY, productos, lectura);
-  }, [productos, lectura]);
+  /**
+   * Frontera explícita de edición (bloque E / M-1): relee la clave, aborta si
+   * está corrupta (sin escribir ni cambiar React), persiste y solo si la
+   * escritura tuvo éxito actualiza el estado. Devuelve false cuando la
+   * operación no se guardó.
+   */
+  function actualizarProductos(
+    transformar: (actuales: Producto[]) => Producto[]
+  ): boolean {
+    const nuevos = actualizarCatalogoPersistido(
+      STORAGE_KEY,
+      productoValido,
+      productosIniciales,
+      transformar
+    );
 
-  return { productos, setProductos, estadoLectura: lectura.estado };
+    if (nuevos === null) return false;
+
+    setProductosEstado(nuevos);
+    return true;
+  }
+
+  return { productos, actualizarProductos, estadoLectura: lectura.estado };
 }

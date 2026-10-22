@@ -10,10 +10,7 @@ import {
 import { useCamiones } from "../hooks/useCamiones";
 import { useProductos } from "../hooks/useProductos";
 import { useJornadas } from "../hooks/useJornadas";
-import {
-  leerRetornosDiscriminado,
-  useRetornos,
-} from "../hooks/useRetornos";
+import { useRetornos } from "../hooks/useRetornos";
 import {
   cantidad_unidad_desde_texto,
   es_cantidad_valida,
@@ -102,7 +99,7 @@ export default function Jornadas() {
   const { retornos, estadoLectura: estadoRetornos } = useRetornos();
   const {
     jornadas,
-    crearJornada,
+    crearPreparacion,
     confirmarSalida,
     estadoLectura: estadoJornadas,
   } = useJornadas();
@@ -250,18 +247,9 @@ export default function Jornadas() {
       return;
     }
 
-    const lecturaRetornos = leerRetornosDiscriminado();
-    if (!lecturaRetornos.ok) {
-      setError(`No se puede guardar la preparación: ${lecturaRetornos.error}`);
-      return;
-    }
-
-    const stockReservadoActual = calcularStockReservado(
-      jornadas,
-      lecturaRetornos.retornos
-    );
-
-    // Comprobamos todas las cantidades antes de guardar.
+    // M-3 (bloque E): el stock NO se comprueba aquí con el snapshot del
+    // render. Las cantidades de la UX sí; el stock se valida dentro de la
+    // frontera, con Jornadas y Retornos reídos en el momento de persistir.
     for (const producto of productos) {
       if (hayCantidadUnidadInvalida(producto.id)) {
         setError(`Cantidad inválida: ${producto.nombre}`);
@@ -274,17 +262,8 @@ export default function Jornadas() {
         setError(`Cantidad inválida: ${producto.nombre}`);
         return;
       }
-      const disponibleActual = Math.max(
-        0,
-        producto.stock - (stockReservadoActual[producto.id] ?? 0)
-      );
-      if (canonica > disponibleActual) {
-        setError(
-          `No hay stock suficiente de ${producto.nombre}.`
-        );
-        return;
-      }
     }
+
     // Validación defensiva de precios: no se persiste un ítem cuyo valor no
     // se pueda calcular con el dominio de precios.
     for (const item of itemsSeleccionados) {
@@ -295,6 +274,34 @@ export default function Jornadas() {
         return;
       }
     }
+
+    // Validación de stock sobre lecturas frescas: la frontera relee Jornadas
+    // y Retornos justo antes de persistir y pasa esos conjuntos a esta
+    // función pura. El snapshot del render no participa en la persistencia.
+    const validarStockConLecturas = (
+      jornadasActuales: Jornada[],
+      retornosActuales: RetornoDeposito[]
+    ): string | null => {
+      const reservadoActual = calcularStockReservado(
+        jornadasActuales,
+        retornosActuales
+      );
+
+      for (const producto of productos) {
+        const canonica = obtenerCantidadCanonica(producto.id);
+        if (canonica === 0) continue;
+        const disponible = Math.max(
+          0,
+          producto.stock - (reservadoActual[producto.id] ?? 0)
+        );
+        if (canonica > disponible) {
+          return `No hay stock suficiente de ${producto.nombre}.`;
+        }
+      }
+
+      return null;
+    };
+
     const jornada: Jornada = {
       id: crypto.randomUUID(),
       camionId: idCamion,
@@ -305,10 +312,17 @@ export default function Jornadas() {
       estado: "preparacion",
       items: itemsSeleccionados,
     };
-    if (!crearJornada(jornada)) {
-      setError("No se pudo guardar la jornada.");
+
+    const errorPreparacion = crearPreparacion(
+      jornada,
+      validarStockConLecturas
+    );
+
+    if (errorPreparacion) {
+      setError(errorPreparacion);
       return;
     }
+
     limpiarFormulario();
     setMensaje("Carga preparada correctamente.");
   }

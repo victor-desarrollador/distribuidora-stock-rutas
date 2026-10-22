@@ -8,7 +8,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-import { useJornadas } from "../hooks/useJornadas";
+import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
 import { useClientes } from "../hooks/useClientes";
 import { useProductos } from "../hooks/useProductos";
@@ -30,6 +30,7 @@ import {
   disponibilidad_de_jornada,
   validar_stock_movimiento,
 } from "../domain/movimientos";
+import { revalidar_jornada_para_operacion } from "../domain/jornadas";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
@@ -364,13 +365,28 @@ export default function Movimientos() {
 
     // Volvemos a calcular el stock al registrar.
     const resultado = registrarMovimiento(movimiento, (actuales) => {
+      // M-2 (bloque E): revalidar la Jornada vigente justo antes de
+      // persistir. La jornada del render es un snapshot: puede haberse
+      // cerrado, desaparecido o cambiado de camión, y el storage de
+      // Jornadas puede haberse corrompido, desde el montaje. Ningún
+      // movimiento se persiste después del cierre.
+      const revalidacionJornada = revalidar_jornada_para_operacion(
+        leerJornadasDiscriminado(),
+        jornada,
+        "abierta"
+      );
+
+      if (!revalidacionJornada.ok) {
+        return `No se puede registrar: ${revalidacionJornada.error}`;
+      }
+
       const lecturaVentas = leerVentas();
       if (!lecturaVentas.ok) {
         return `No se puede registrar: ${lecturaVentas.error}`;
       }
       return validar_stock_movimiento(
         movimiento,
-        jornada.items,
+        revalidacionJornada.jornada.items,
         lecturaVentas.ventas,
         actuales
       );

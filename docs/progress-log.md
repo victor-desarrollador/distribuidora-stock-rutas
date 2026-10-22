@@ -1,4 +1,44 @@
 ---
+## 22/10/2026 — Cierre final de integridad pre-backend · Bloque E
+
+**Rama:** `feat/cierre-frontend-pre-backend` · **Base obligatoria / COMMIT_D:** `9959f173b33577899172f1f9d5ebe9a64a27ddfc` · **Estado:** corrección implementada y verificada; pendiente de revisión humana previa al commit, auditoría independiente del nuevo hash y aprobación. **ADR-001 continúa PROPUESTA — NO APROBADA**; sin backend, sin push, merge ni deploy.
+
+### Alcance
+
+Security review del Bloque D quedó `BLOCKED` por M-1/M-2/M-3 (+ L-1 y L-2 triviales). Este bloque los corrige:
+
+- **M-1 (catálogos):** Productos, Camiones y Clientes persistían con la lectura capturada al montar (un effect seguía pisando el storage con `lecturaInicial.ok === true` aunque la clave se hubiera corrompido después del montaje). Nueva frontera `catalogoStorage.actualizarCatalogoPersistido(clave, validar, iniciales, transformar)`: relee la clave discriminadamente en el momento de la operación, aborta (sin escribir y sin pisar el raw) ante corrupción, y solo actualiza React después de un `setItem` exitoso. Los hooks `useProductos`/`useCamiones`/`useClientes` dejaron de hablar con localStorage por effect: exponen `actualizarProductos`/`actualizarCamiones`/`actualizarClientes(transformar) => boolean`; las páginas muestran `No se pudo guardar el X en este navegador.` si el guardado falló. `persistirCatalogo` se conserva.
+- **M-2 (jornada como dependencia mutable):** Autoventa (ventas) y Movimientos revalidan la Jornada vigente dentro del callback `validar` (última compuerta antes de persistir), usando la jornada fresca para armar ítems y stock. Cobros y Retornos revalidan después del `window.confirm` (Retornos además antes). Helpers puros en `domain/jornadas.ts` (`revalidar_jornada_para_operacion`, `revalidar_jornada_para_cobro`) sobre el lector discriminatorio `leerJornadasDiscriminado` (export de `useJornadas.ts`, sin parser paralelo). Cobros: la revalidación exige jornada existente y abierta (espejo del contrato vigente de la UI); si un cobro puede asociarse a una jornada cerrada es una decisión pendiente del Blueprint, no se inventó.
+- **M-3 (preparación):** nueva frontera `crearPreparacionPersistida(jornada, validarStock)` en `useJornadas.ts` (devuelve `{ok,jornadas}|{ok,error}`): relee Jornadas y Retornos discriminadamente, comprueba unicidad (id / camión activo) contra lo leído AHORA, calcula el stock reservado con esas lecturas frescas y persiste al final. Hook `crearPreparacion(jornada, validarStock) => error|null`; `guardarPreparacion` ya no usa el snapshot del render para calcular stock de persistencia (el render mantiene el aviso de disponibilidad para la UI).
+- **L-1 (rendición post-confirm):** `confirmarCierre` extrae `armarCierre()` (lecturas frescas de Ventas/Cobros/Movimientos + filas + resumen + conteos + diferencias) y lo ejecuta antes Y después del `window.confirm`; lo que se persiste es el armado final. Sin corrupción en la ventana, el cierre es idéntico (E2E de cierre exitoso).
+- **L-2:** el incidente `docs/incidents/2026-10-22-ledgers-corruptos-en-consumidores-operativos.md` quedó actualizado: B y C como `BLOCKED` históricos, D `APPROVED`, E pendiente de auditoría del hash propio.
+
+### Pruebas y sensibilidad
+
+- Unit: +11 (`hooks/actualizarCatalogo.test.ts`), +14 (`domain/jornadas.test.ts`), +8 (`hooks/crearPreparacion.test.ts`) — fronteras M-1/M-2/M-3: lecturas frescas, raw intacto ante rechazo, claves ausentes como ledgers iniciales, duplicados, callback con lecturas frescas.
+- E2E: +5 (`tests/catalogos-escritura-post-montaje.spec.ts`), +8 (`tests/toctou-jornadas-revalidacion.spec.ts`), +3 (`tests/toctou-preparacion-stock.spec.ts`), +2 (`tests/toctou-rendicion-post-confirm.spec.ts`) — corrupción/cierre/cambio de camión después del montaje y en la ventana del confirm; verifican aborto sin persistencia y raw intacto.
+- Mutaciones temporales (todas revertidas antes de la verificación final; `grep` sin restos):
+  - M-1: `useProductos` volvió a persistir con la lectura inicial por effect → 2 E2E de catálogos fallaron.
+  - M-2: Autoventa y Movimientos sin revalidar Jornada (snapshot del render) → 2 E2E (jornada cerrada) fallaron.
+  - M-3: `validarStockConLecturas` con las Jornadas del render → 1 E2E de stock fresco falló.
+  - L-1: persistir con el armado previo (sin re-armado post-confirm) → 1 E2E post-confirm falló.
+
+### Verificación final
+
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → **18 archivos / 591 tests passed**.
+- `npm run lint` → exit 0.
+- `npm run build` → exit 0.
+- `npx playwright test` → **35 tests passed**.
+- `git diff --check` → sin errores.
+
+### Alcance y estado
+
+- No se cambiaron precios, ADR-003, unidades, piezas/medias piezas, reglas de stock, dinero, saldos, tolerancias, medios de pago ni claves de storage. No se borraron ni debilitaron tests existentes (baseline 15 archivos / 558 tests y 17 E2E se mantienen).
+- Sin recuperación, migraciones, Supabase, SQL, RPC, RLS, Auth ni service_role. Backend no iniciado.
+- Confirmación definitiva sujeta a revisión humana del diff, auditoría independiente del hash del commit E y aprobación.
+
+---
 ## 22/10/2026 — Cierre de hallazgos post-auditoría · Bloque D
 
 **Rama:** `feat/cierre-frontend-pre-backend` · **Base obligatoria / COMMIT_C:** `a32c68abb542e5ca8c84c6f5f85baa1e7ac2b6fc` · **Estado:** corrección implementada y verificada; pendiente de auditoría independiente del nuevo hash. El Bloque B permanece históricamente `BLOCKED`; aprobar D no lo aprueba retroactivamente. **ADR-001 continúa PROPUESTA — NO APROBADA**.

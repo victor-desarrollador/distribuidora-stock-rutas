@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   clientesIniciales,
@@ -7,8 +7,8 @@ import {
 } from "../data/mockClientes";
 
 import {
+  actualizarCatalogoPersistido,
   leerCatalogo,
-  persistirCatalogo,
   type ResultadoLectura,
 } from "./catalogoStorage";
 
@@ -46,14 +46,31 @@ export function cargarClientes(): Cliente[] {
 
 export function useClientes() {
   const [lectura] = useState(leerClientes);
-  const [clientes, setClientes] = useState<Cliente[]>(
+  const [clientes, setClientesEstado] = useState<Cliente[]>(
     lectura.ok ? lectura.datos : []
   );
 
-  useEffect(() => {
-    // Storage corrupto: no se pisa el raw con datos demo ni con ediciones.
-    persistirCatalogo(STORAGE_KEY, clientes, lectura);
-  }, [clientes, lectura]);
+  /**
+   * Frontera explícita de edición (bloque E / M-1): relee la clave, aborta si
+   * está corrupta (sin escribir ni cambiar React), persiste y solo si la
+   * escritura tuvo éxito actualiza el estado. Devuelve false cuando la
+   * operación no se guardó.
+   */
+  function actualizarClientes(
+    transformar: (actuales: Cliente[]) => Cliente[]
+  ): boolean {
+    const nuevos = actualizarCatalogoPersistido(
+      STORAGE_KEY,
+      clienteValido,
+      clientesIniciales,
+      transformar
+    );
 
-  return { clientes, setClientes, estadoLectura: lectura.estado };
+    if (nuevos === null) return false;
+
+    setClientesEstado(nuevos);
+    return true;
+  }
+
+  return { clientes, actualizarClientes, estadoLectura: lectura.estado };
 }

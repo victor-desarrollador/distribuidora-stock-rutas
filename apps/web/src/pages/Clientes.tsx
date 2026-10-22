@@ -51,7 +51,7 @@ const formatoMoneda = (valor: number) =>
   }).format(valor);
 
 export default function Clientes() {
-  const { clientes, setClientes, estadoLectura } = useClientes();
+  const { clientes, actualizarClientes, estadoLectura } = useClientes();
   const estadoOperacion = estadoStorageOperativo({ clientes: estadoLectura });
 
   const [busqueda, setBusqueda] = useState("");
@@ -158,7 +158,7 @@ export default function Clientes() {
     };
 
     if (clienteEditando !== null) {
-      setClientes((actuales) =>
+      const guardado = actualizarClientes((actuales) =>
         actuales.map((cliente) =>
           cliente.id === clienteEditando
             ? { ...cliente, ...datos }
@@ -166,15 +166,29 @@ export default function Clientes() {
         )
       );
 
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el cliente en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
+
       setMensaje("Cliente actualizado correctamente.");
     } else {
-      setClientes((actuales) => [
+      const guardado = actualizarClientes((actuales) => [
         ...actuales,
         {
           id: Math.max(0, ...actuales.map((c) => c.id)) + 1,
           ...datos,
         },
       ]);
+
+      if (!guardado) {
+        alert(
+          "No se pudo guardar el cliente en este navegador. Intentá de nuevo."
+        );
+        return;
+      }
 
       setMensaje("Cliente registrado correctamente.");
     }

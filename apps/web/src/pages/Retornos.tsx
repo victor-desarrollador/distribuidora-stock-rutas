@@ -8,7 +8,7 @@ import {
   PackageCheck,
 } from "lucide-react";
 
-import { useJornadas, leerJornadas } from "../hooks/useJornadas";
+import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
 import { useRetornos } from "../hooks/useRetornos";
 
@@ -30,6 +30,7 @@ import {
 } from "../domain/retornos";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
+import { revalidar_jornada_para_operacion } from "../domain/jornadas";
 
 const entradaInicial: EntradaRetorno = { texto: "", media: false };
 
@@ -236,22 +237,26 @@ export default function Retornos() {
       return;
     }
 
-    // Consultamos nuevamente los datos guardados.
-    const jornadaActual = leerJornadas().find(
-      (j) => j.id === jornada.id
+    // M-2 (bloque E): relectura discriminada de Jornadas antes del confirm.
+    const revalidacionPrevia = revalidar_jornada_para_operacion(
+      leerJornadasDiscriminado(),
+      jornada,
+      "cerrada"
     );
 
-    if (
-      jornadaActual?.estado !== "cerrada" ||
-      !jornadaActual.cierre
-    ) {
+    if (!revalidacionPrevia.ok) {
+      setError(revalidacionPrevia.error);
+      return;
+    }
+
+    if (!revalidacionPrevia.jornada.cierre) {
       setError("La jornada ya no está disponible para retorno.");
       return;
     }
 
     for (const item of items) {
       const cantidadActual =
-        jornadaActual.cierre.conteos[String(item.productoId)];
+        revalidacionPrevia.jornada.cierre.conteos[String(item.productoId)];
 
       if (!cierre_sin_cambios(cantidadActual, item.cantidadContada)) {
         setError(
@@ -269,6 +274,30 @@ export default function Retornos() {
     );
 
     if (!confirmado) return;
+
+    // M-2 (bloque E): la ventana del confirm cierra el problema de M-1. El
+    // storage de Jornadas puede cambiarse/corromperse mientras el usuario
+    // confirma; RELEER Jornadas aquí y abortar antes de persistir si la
+    // revalidación final ya no pasa.
+    const revalidacionFinal = revalidar_jornada_para_operacion(
+      leerJornadasDiscriminado(),
+      jornada,
+      "cerrada"
+    );
+
+    // La revalidación final reporta la causa concreta (storage corrupto,
+    // jornada inexistente, camión cambiado, estado distinto): es la última
+    // compuerta antes de persistir y el operador necesita saber por qué.
+    // El fallback genérico queda solo para la jornada sin cierre.
+    if (!revalidacionFinal.ok) {
+      setError(revalidacionFinal.error);
+      return;
+    }
+
+    if (!revalidacionFinal.jornada.cierre) {
+      setError("La jornada ya no está disponible para retorno.");
+      return;
+    }
 
     const retorno: RetornoDeposito = {
       id: crypto.randomUUID(),

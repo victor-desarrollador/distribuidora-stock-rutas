@@ -8,6 +8,8 @@ import {
   type Jornada,
   type CierreJornada,
 } from "../data/mockJornadas";
+import type { RetornoDeposito } from "../data/mockRetornos";
+import { leerRetornosDiscriminado } from "./useRetornos";
 
 const STORAGE_KEY = CLAVES_STORAGE.jornadas;
 
@@ -99,7 +101,13 @@ export type ResultadoLecturaJornadas =
  * JSON inválido, no array y cualquier jornada/ítem/cierre inválido).
  * Es la única autoridad para las escrituras.
  */
-function leerJornadasInterno(): ResultadoLecturaJornadas {
+/**
+ * Lectura discriminada y exportada (bloque E / M-2): es la única autoridad
+ * tanto para las escrituras como para la revalidación de la Jornada vigente
+ * justo antes de persistir en operaciones operativas (ventas, movimientos,
+ * cobros con jornada, retornos, preparación). No existe parser paralelo.
+ */
+export function leerJornadasDiscriminado(): ResultadoLecturaJornadas {
   try {
     const guardado = localStorage.getItem(STORAGE_KEY);
 
@@ -149,7 +157,7 @@ function leerJornadasInterno(): ResultadoLecturaJornadas {
  * para corrupto). NO usar como autoridad en una escritura.
  */
 export function leerJornadas(): Jornada[] {
-  const lectura = leerJornadasInterno();
+  const lectura = leerJornadasDiscriminado();
   return lectura.ok ? lectura.jornadas : [];
 }
 
@@ -174,7 +182,7 @@ function guardarJornadas(jornadas: Jornada[]): boolean {
 function escribirJornadas(
   transformar: (actuales: Jornada[]) => Jornada[] | null
 ): Jornada[] | null {
-  const lectura = leerJornadasInterno();
+  const lectura = leerJornadasDiscriminado();
 
   if (!lectura.ok) return null;
 
@@ -275,8 +283,89 @@ export function cerrarJornadaPersistida(
   });
 }
 
+export type ResultadoCreacionPreparacion =
+  | { ok: true; jornadas: Jornada[] }
+  | { ok: false; error: string };
+
+/**
+ * M-3 (bloque E): creación de una preparación con relectura de las
+ * dependencias mutables justo antes de persistir. Jornadas y Retornos pueden
+ * cambiar o corromperse entre el montaje y el guardar: el snapshot del render
+ * NO es autoridad para calcular el stock reservado ni para las comprobaciones
+ * de unicidad. Esta frontera:
+ *   1) releer Jornadas y Retornos discriminadamente (sin reinterpretar
+ *      corrupto como vacío) y abortar si alguna falla;
+ *   2) comprobar unicidad contra lo leído AHORA (id duplicado / camión con
+ *      otra jornada activa);
+ *   3) calcular el stock con las lecturas frescas vía el callback
+ *      `validarStock` (pura, testeable) y abortar si no alcanza;
+ *   4) persistir. Si algo falla, no se escribe nada y el raw queda intacto.
+ * Devuelve las jornadas guardadas o el error concreto.
+ */
+export function crearPreparacionPersistida(
+  jornada: Jornada,
+  validarStock: (
+    jornadasActuales: Jornada[],
+    retornosActuales: RetornoDeposito[]
+  ) => string | null
+): ResultadoCreacionPreparacion {
+  const lecturaJornadas = leerJornadasDiscriminado();
+
+  if (!lecturaJornadas.ok) {
+    return {
+      ok: false,
+      error: `No se puede guardar la preparación: ${lecturaJornadas.error}`,
+    };
+  }
+
+  const lecturaRetornos = leerRetornosDiscriminado();
+
+  if (!lecturaRetornos.ok) {
+    return {
+      ok: false,
+      error: `No se puede guardar la preparación: ${lecturaRetornos.error}`,
+    };
+  }
+
+  const jornadasActuales = lecturaJornadas.jornadas;
+
+  // Unicidad contra el storage leído AHORA, no contra el montaje: la misma
+  // jornada no dos veces y un camión sin otra jornada en curso.
+  if (
+    jornadasActuales.some((j) => j.id === jornada.id) ||
+    jornadasActuales.some(
+      (j) =>
+        j.camionId === jornada.camionId &&
+        j.estado !== "cerrada"
+    )
+  ) {
+    return {
+      ok: false,
+      error: "Ya existe una jornada activa para ese camión.",
+    };
+  }
+
+  const errorStock = validarStock(
+    jornadasActuales,
+    lecturaRetornos.retornos
+  );
+
+  if (errorStock) {
+    return { ok: false, error: errorStock };
+  }
+
+  const jornadasNuevas = [...jornadasActuales, jornada];
+
+  return guardarJornadas(jornadasNuevas)
+    ? { ok: true, jornadas: jornadasNuevas }
+    : {
+        ok: false,
+        error: "No se pudo guardar la preparación en este navegador.",
+      };
+}
+
 export function useJornadas() {
-  const [lectura] = useState(leerJornadasInterno);
+  const [lectura] = useState(leerJornadasDiscriminado);
   const [jornadas, setJornadas] = useState<Jornada[]>(
     lectura.ok ? lectura.jornadas : []
   );
@@ -305,9 +394,32 @@ export function useJornadas() {
     return aplicar(cerrarJornadaPersistida(id, cierre));
   }
 
+  // M-3 (bloque E): el error concreto que devuelve la frontera persistida es
+  // el que muestra la pantalla, sin duplicar lógica en el render.
+  function crearPreparacion(
+    jornada: Jornada,
+    validarStock: (
+      jornadasActuales: Jornada[],
+      retornosActuales: RetornoDeposito[]
+    ) => string | null
+  ): string | null {
+    const resultado = crearPreparacionPersistida(
+      jornada,
+      validarStock
+    );
+
+    if (resultado.ok) {
+      setJornadas(resultado.jornadas);
+      return null;
+    }
+
+    return resultado.error;
+  }
+
   return {
     jornadas,
     crearJornada,
+    crearPreparacion,
     confirmarSalida,
     cerrarJornada,
     estadoLectura: lectura.estado,
