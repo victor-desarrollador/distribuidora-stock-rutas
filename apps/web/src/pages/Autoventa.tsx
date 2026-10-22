@@ -43,6 +43,8 @@ import {
   sumar_importes,
 } from "../domain/precios";
 import { construirItemsVenta } from "../domain/venta";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 // --------------------------------------------------
 // FUNCIONES AUXILIARES
@@ -66,13 +68,18 @@ const unidades = {
 
 export default function Autoventa() {
   // Datos de los módulos existentes.
-  const { jornadas } = useJornadas();
-  const { clientes } = useClientes();
-  const { camiones } = useCamiones();
+  const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
+  const { clientes, estadoLectura: estadoClientes } = useClientes();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
   const { ventas, registrarVenta } = useVentas();
 
   // Movimientos: mermas, devoluciones y cambios.
   const { movimientos } = useMovimientos();
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    clientes: estadoClientes,
+    camiones: estadoCamiones,
+  });
 
   // Formulario de venta.
   const [jornadaId, setJornadaId] = useState("");
@@ -249,6 +256,7 @@ export default function Autoventa() {
   function guardarVenta() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
 
     if (!jornada || !camion) {
       setError("Seleccioná una jornada abierta.");
@@ -409,6 +417,8 @@ export default function Autoventa() {
           Registro de ventas desde el camión
         </p>
       </div>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {/* MENSAJES */}
       {mensaje && (
@@ -825,6 +835,7 @@ export default function Autoventa() {
               type="button"
               onClick={guardarVenta}
               disabled={
+                estadoOperacion.bloqueado ||
                 !cliente ||
                 itemsVenta.length === 0 ||
                 !camion

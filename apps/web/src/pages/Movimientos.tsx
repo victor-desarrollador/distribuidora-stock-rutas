@@ -30,6 +30,8 @@ import {
   disponibilidad_de_jornada,
   validar_stock_movimiento,
 } from "../domain/movimientos";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 type DatosFormulario = {
   tipo: TipoMovimiento;
@@ -162,14 +164,20 @@ function textoCantidad(unidad: UnidadMedida, cantidad: number) {
 }
 
 export default function Movimientos() {
-  const { jornadas } = useJornadas();
-  const { camiones } = useCamiones();
-  const { clientes } = useClientes();
-  const { productos } = useProductos();
+  const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const { clientes, estadoLectura: estadoClientes } = useClientes();
+  const { productos, estadoLectura: estadoProductos } = useProductos();
   const { ventas } = useVentas();
 
   const { movimientos, registrarMovimiento } =
     useMovimientos();
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    camiones: estadoCamiones,
+    clientes: estadoClientes,
+    productos: estadoProductos,
+  });
 
   const [formulario, setFormulario] =
     useState<DatosFormulario>(inicial);
@@ -243,6 +251,7 @@ export default function Movimientos() {
   function guardarMovimiento() {
     setMensaje("");
     setError("");
+    if (estadoOperacion.bloqueado) return;
 
     if (!jornada) {
       setError("Seleccioná una jornada abierta.");
@@ -380,6 +389,8 @@ export default function Movimientos() {
           Mermas, devoluciones y cambios de productos
         </p>
       </div>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {mensaje && (
         <div role="status" className="flex items-center gap-2 rounded-xl bg-green-50 p-4 text-green-800">
@@ -636,6 +647,7 @@ export default function Movimientos() {
             <button
               type="button"
               onClick={guardarMovimiento}
+              disabled={estadoOperacion.bloqueado}
               className="min-h-14 w-full rounded-xl bg-blue-600 px-5 text-base font-bold text-white hover:bg-blue-700"
             >
               Registrar {etiquetas[formulario.tipo].toLowerCase()}

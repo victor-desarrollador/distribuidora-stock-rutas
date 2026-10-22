@@ -16,6 +16,8 @@ import {
 } from "../data/mockClientes";
 
 import { useClientes } from "../hooks/useClientes";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 type FormularioCliente = {
   nombreComercio: string;
@@ -49,7 +51,8 @@ const formatoMoneda = (valor: number) =>
   }).format(valor);
 
 export default function Clientes() {
-  const { clientes, setClientes } = useClientes();
+  const { clientes, setClientes, estadoLectura } = useClientes();
+  const estadoOperacion = estadoStorageOperativo({ clientes: estadoLectura });
 
   const [busqueda, setBusqueda] = useState("");
   const [filtro, setFiltro] = useState("todos");
@@ -98,6 +101,7 @@ export default function Clientes() {
   }
 
   function abrirNuevoCliente() {
+    if (estadoOperacion.bloqueado) return;
     cancelarFormulario();
     setMensaje("");
     setMostrarFormulario(true);
@@ -124,6 +128,7 @@ export default function Clientes() {
 
   function guardarCliente(evento: React.SubmitEvent<HTMLFormElement>) {
     evento.preventDefault();
+    if (estadoOperacion.bloqueado) return;
 
     const limiteCredito = Number(formulario.limiteCredito);
 
@@ -193,12 +198,15 @@ export default function Clientes() {
         <button
           type="button"
           onClick={abrirNuevoCliente}
+          disabled={estadoOperacion.bloqueado}
           className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700"
         >
           <Plus size={20} />
           Nuevo cliente
         </button>
       </div>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {/* Tarjetas de resumen */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -384,6 +392,7 @@ export default function Clientes() {
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="submit"
+              disabled={estadoOperacion.bloqueado}
               className="min-h-11 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white"
             >
               {clienteEditando === null

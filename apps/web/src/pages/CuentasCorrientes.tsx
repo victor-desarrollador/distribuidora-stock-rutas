@@ -19,6 +19,8 @@ import {
   disponibilidadCuentas,
   saldoSiDisponible,
 } from "./avisosStorage";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
@@ -30,14 +32,18 @@ const moneda = (valor: number) =>
 const redondear = (n: number) => Math.round(n * 100) / 100;
 
 export default function CuentasCorrientes() {
-  const { clientes } = useClientes();
+  const { clientes, estadoLectura: estadoClientes } = useClientes();
   const { ventas, estadoLectura: estadoVentas } = useVentas();
-  const { jornadas } = useJornadas();
+  const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
   const { cobros, registrarCobro, estadoLectura: estadoCobros } =
     useCobros();
 
   // Ledger corrupto ≠ ledger vacío: sin ambos ledgers legibles no hay saldo.
   const disponibilidad = disponibilidadCuentas(estadoVentas, estadoCobros);
+  const estadoOperacion = estadoStorageOperativo({
+    clientes: estadoClientes,
+    jornadas: estadoJornadas,
+  });
 
   const [busqueda, setBusqueda] = useState("");
   const [clienteId, setClienteId] = useState("");
@@ -181,6 +187,7 @@ export default function CuentasCorrientes() {
   function guardarCobro() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
 
     if (!disponibilidad.saldoDisponible || saldoCliente === null) {
       setError(disponibilidad.aviso ?? "No se puede calcular el saldo.");
@@ -281,6 +288,8 @@ export default function CuentasCorrientes() {
           Control de deudas y cobros de comercios
         </p>
       </header>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       <div className="grid gap-4 sm:grid-cols-3">
         {[
@@ -540,6 +549,7 @@ export default function CuentasCorrientes() {
               type="button"
               onClick={guardarCobro}
               disabled={
+                estadoOperacion.bloqueado ||
                 !cliente.activo ||
                 saldoCliente === null ||
                 saldoCliente <= 0 ||

@@ -59,7 +59,7 @@ export function cargarProductos(): Producto[] {
 export function useProductos() {
   const [lectura] = useState(leerProductos);
   const [productos, setProductos] = useState<Producto[]>(
-    lectura.ok ? lectura.datos : productosIniciales
+    lectura.ok ? lectura.datos : []
   );
 
   useEffect(() => {
@@ -67,5 +67,5 @@ export function useProductos() {
     persistirCatalogo(STORAGE_KEY, productos, lectura);
   }, [productos, lectura]);
 
-  return { productos, setProductos };
+  return { productos, setProductos, estadoLectura: lectura.estado };
 }

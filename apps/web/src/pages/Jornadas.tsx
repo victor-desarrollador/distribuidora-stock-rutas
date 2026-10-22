@@ -24,6 +24,8 @@ import {
   type Jornada,
   type ItemCarga,
 } from "../data/mockJornadas";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -46,14 +48,20 @@ function valorItem(item: ItemCarga): number {
 }
 
 export default function Jornadas() {
-  const { camiones } = useCamiones();
-  const { productos } = useProductos();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const { productos, estadoLectura: estadoProductos } = useProductos();
   const { retornos } = useRetornos();
   const {
     jornadas,
     crearJornada,
     confirmarSalida,
+    estadoLectura: estadoJornadas,
   } = useJornadas();
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    productos: estadoProductos,
+    camiones: estadoCamiones,
+  });
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [camionId, setCamionId] = useState("");
   const [chofer, setChofer] = useState("");
@@ -203,6 +211,7 @@ export default function Jornadas() {
     setCantidades({});
   }
   function abrirFormulario() {
+    if (estadoOperacion.bloqueado) return;
     setError("");
     setMensaje("");
     setMostrarFormulario(true);
@@ -210,6 +219,7 @@ export default function Jornadas() {
   function guardarPreparacion() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
     const idCamion = Number(camionId);
     if (
       !camionId ||
@@ -276,6 +286,7 @@ export default function Jornadas() {
   function iniciarReparto(jornada: Jornada) {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
     if (jornada.estado !== "preparacion") return;
     const camion = camiones.find(
       (c) => c.id === jornada.camionId
@@ -307,12 +318,14 @@ export default function Jornadas() {
         <button
           type="button"
           onClick={abrirFormulario}
+          disabled={estadoOperacion.bloqueado}
           className="flex min-h-12 items-center gap-2 rounded-lg bg-blue-600 px-5 font-medium text-white hover:bg-blue-700"
         >
           <Plus size={20} />
           Nueva jornada
         </button>
       </div>
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
       {/* Estadísticas */}
       <div className="grid gap-4 sm:grid-cols-3">
         {[
@@ -590,6 +603,7 @@ export default function Jornadas() {
             <button
               type="button"
               onClick={guardarPreparacion}
+              disabled={estadoOperacion.bloqueado}
               className="min-h-12 rounded-lg bg-blue-600 px-5 font-semibold text-white"
             >
               Guardar preparación
@@ -707,6 +721,7 @@ export default function Jornadas() {
                   <button
                     type="button"
                     onClick={() => iniciarReparto(jornada)}
+                    disabled={estadoOperacion.bloqueado}
                     className="min-h-12 rounded-lg bg-green-600 px-5 font-semibold text-white hover:bg-green-700"
                   >
                     Confirmar salida

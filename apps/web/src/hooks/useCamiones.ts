@@ -47,7 +47,7 @@ export function cargarCamiones(): Camion[] {
 export function useCamiones() {
   const [lectura] = useState(leerCamiones);
   const [camiones, setCamiones] = useState<Camion[]>(
-    lectura.ok ? lectura.datos : camionesIniciales
+    lectura.ok ? lectura.datos : []
   );
 
   useEffect(() => {
@@ -55,5 +55,5 @@ export function useCamiones() {
     persistirCatalogo(STORAGE_KEY, camiones, lectura);
   }, [camiones, lectura]);
 
-  return { camiones, setCamiones };
+  return { camiones, setCamiones, estadoLectura: lectura.estado };
 }

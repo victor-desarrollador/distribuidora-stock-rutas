@@ -26,6 +26,8 @@ import {
   NO_DISPONIBLE,
   disponibilidadRendicion,
 } from "./avisosStorage";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 const conteoInicial: EntradaConteo = { texto: "", media: false };
 
@@ -49,8 +51,12 @@ const MENSAJE_INCONSISTENCIA_MERCADERIA =
   "Hay una inconsistencia de mercadería: las salidas superan lo cargado o existen cantidades inválidas. Revisá los datos antes de cerrar.";
 
 export default function Rendicion() {
-  const { jornadas, cerrarJornada } = useJornadas();
-  const { camiones } = useCamiones();
+  const {
+    jornadas,
+    cerrarJornada,
+    estadoLectura: estadoJornadas,
+  } = useJornadas();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
   const { ventas, estadoLectura: estadoVentas } = useVentas();
   const { movimientos, estadoLectura: estadoMovimientos } = useMovimientos();
   const { cobros, estadoLectura: estadoCobros } = useCobros();
@@ -62,6 +68,10 @@ export default function Rendicion() {
     estadoCobros,
     estadoMovimientos
   );
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    camiones: estadoCamiones,
+  });
 
   const [jornadaId, setJornadaId] = useState("");
   // Entrada de UI por producto; solo se persiste la cantidad canónica.
@@ -310,6 +320,7 @@ export default function Rendicion() {
   function confirmarCierre() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
 
     if (
       !jornada ||
@@ -437,6 +448,8 @@ export default function Rendicion() {
           Conciliación de mercadería y dinero por jornada
         </p>
       </header>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {mensaje && (
         <div
@@ -1120,7 +1133,9 @@ export default function Rendicion() {
                   confirmarCierre
                 }
                 disabled={
-                  rendicionBloqueada || !disponibilidad.cierreDisponible
+                  rendicionBloqueada ||
+                  !disponibilidad.cierreDisponible ||
+                  estadoOperacion.bloqueado
                 }
                 className="mt-5 min-h-14 w-full rounded-xl bg-green-600 px-5 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40"
               >

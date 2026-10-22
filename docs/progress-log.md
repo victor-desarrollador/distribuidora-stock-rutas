@@ -1,4 +1,31 @@
 ---
+## 22/10/2026 — Plan maestro pre-backend · Bloque B: corrupción operativa visible en Jornadas y catálogos
+
+**Rama:** `feat/cierre-frontend-pre-backend` · **Base del bloque:** `9f9d4c5d021f2f0969b6374474b533258f3a6661` (COMMIT_A) · **Estado:** Bloque B implementado y verificado, pendiente del commit atómico autorizado; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.
+
+### Qué se hizo
+
+- `useJornadas`, `useProductos`, `useCamiones` y `useClientes` exponen `estadoLectura` desde sus lectores discriminados existentes; no se agregó ningún parser paralelo ni se cambiaron las fronteras de escritura.
+- Cuando un catálogo está corrupto, el hook ya no entrega semillas demo como datos operativos: expone una lista vacía acompañada por `estadoLectura: "corrupto"`. La ausencia legítima conserva la inicialización demo vigente.
+- Aviso común y focalizado en las pantallas que dependen operativamente de esas fuentes: Productos, Camiones, Clientes, Jornadas, Autoventa, Movimientos, Retornos, Rendición y Cuentas Corrientes. Cada pantalla declara solo sus dependencias reales y bloquea su acción crítica principal si alguna está corrupta.
+- El Dashboard, Login y Configuración Demo no reciben avisos nuevos: no consumen estas fuentes para una operación crítica de este bloque.
+- No hay recuperación automática: raw intacto, sin borrar, reparar, migrar, resetear ni crear claves. Sin backend, Supabase, SQL, RPC, RLS ni Auth.
+
+### Verificación
+
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → **15 archivos / 554 tests passed** (546 previos; +8).
+- `npm run lint` → exit 0.
+- `npx playwright test` → **6 tests passed**; los cuatro casos nuevos prueban Productos, Camiones, Clientes y Jornadas corruptos: aviso visible, semillas no usadas como catálogo, acción principal bloqueada, raw intacto y cero escrituras/borrados sobre la clave afectada.
+- `npm run build` y verificaciones Git: se registran al cerrar el bloque antes del commit.
+
+### Riesgos pendientes
+
+- Las listas vacías durante corrupción no se presentan como un estado operativo válido porque siempre van acompañadas de aviso y bloqueo en las pantallas consumidoras; no se implementó recuperación.
+- Retornos conserva su propio lector fail-closed previo, sin cambio de visibilidad en este bloque porque el inventario solicitado abarcó Jornadas, Productos, Camiones y Clientes.
+- Por tocar ventas, cobros y cierre solo en sus dependencias visuales, corresponde revisión de seguridad y auditoría independiente posterior sobre el hash concreto.
+
+---
 ## 22/10/2026 — Plan maestro pre-backend · Bloque A: Rendición fail-closed ante Movimientos corruptos
 
 **Rama:** `feat/cierre-frontend-pre-backend` · **Base:** `42620e6ca5c061640aa1b58a5c42dd2939a3f02c` · **Estado:** Bloque A implementado y verificado, pendiente del commit atómico autorizado; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.

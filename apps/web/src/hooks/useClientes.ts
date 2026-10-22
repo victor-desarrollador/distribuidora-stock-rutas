@@ -47,7 +47,7 @@ export function cargarClientes(): Cliente[] {
 export function useClientes() {
   const [lectura] = useState(leerClientes);
   const [clientes, setClientes] = useState<Cliente[]>(
-    lectura.ok ? lectura.datos : clientesIniciales
+    lectura.ok ? lectura.datos : []
   );
 
   useEffect(() => {
@@ -55,5 +55,5 @@ export function useClientes() {
     persistirCatalogo(STORAGE_KEY, clientes, lectura);
   }, [clientes, lectura]);
 
-  return { clientes, setClientes };
+  return { clientes, setClientes, estadoLectura: lectura.estado };
 }

@@ -9,6 +9,8 @@ import {
   validar_combinacion_categoria_unidad,
 } from "../domain/productos";
 import { precio_media_pieza, validar_precio } from "../domain/precios";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 // Formato de moneda argentina.
 const formatoMoneda = (valor: number) =>
@@ -56,7 +58,8 @@ function formularioVacio(): FormularioProducto {
 
 export default function Productos() {
   // El hook se encarga de guardar los productos localmente.
-  const { productos, setProductos } = useProductos();
+  const { productos, setProductos, estadoLectura } = useProductos();
+  const estadoOperacion = estadoStorageOperativo({ productos: estadoLectura });
 
   const [busqueda, setBusqueda] = useState("");
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
@@ -87,6 +90,7 @@ export default function Productos() {
 
   // Abrir un formulario vacío.
   function abrirNuevoProducto() {
+    if (estadoOperacion.bloqueado) return;
     cancelarFormulario();
     setMensaje("");
     setMostrarFormulario(true);
@@ -114,6 +118,7 @@ export default function Productos() {
   // Guardar un producto nuevo o actualizar uno existente.
   function guardarProducto(evento: React.SubmitEvent<HTMLFormElement>) {
     evento.preventDefault();
+    if (estadoOperacion.bloqueado) return;
 
     const precio = Number(nuevoProducto.precio);
     const stock = Number(nuevoProducto.stock);
@@ -224,12 +229,15 @@ export default function Productos() {
         <button
           type="button"
           onClick={abrirNuevoProducto}
+          disabled={estadoOperacion.bloqueado}
           className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700"
         >
           <Plus size={20} />
           Nuevo producto
         </button>
       </div>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {/* Mensaje de confirmación */}
       {mensaje && (
@@ -426,6 +434,7 @@ export default function Productos() {
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="submit"
+              disabled={estadoOperacion.bloqueado}
               className="min-h-11 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700"
             >
               {productoEditando !== null

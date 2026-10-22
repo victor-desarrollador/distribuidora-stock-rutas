@@ -276,8 +276,9 @@ export function cerrarJornadaPersistida(
 }
 
 export function useJornadas() {
+  const [lectura] = useState(leerJornadasInterno);
   const [jornadas, setJornadas] = useState<Jornada[]>(
-    leerJornadas
+    lectura.ok ? lectura.jornadas : []
   );
 
   // Cada operación delega en su función persistida (misma frontera que los
@@ -309,5 +310,6 @@ export function useJornadas() {
     crearJornada,
     confirmarSalida,
     cerrarJornada,
+    estadoLectura: lectura.estado,
   };
 }

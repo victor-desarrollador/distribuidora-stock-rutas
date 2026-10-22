@@ -28,12 +28,18 @@ import {
   pendiente_retorno,
   type EntradaRetorno,
 } from "../domain/retornos";
+import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 const entradaInicial: EntradaRetorno = { texto: "", media: false };
 
 export default function Retornos() {
-  const { jornadas } = useJornadas();
-  const { camiones } = useCamiones();
+  const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
+  const { camiones, estadoLectura: estadoCamiones } = useCamiones();
+  const estadoOperacion = estadoStorageOperativo({
+    jornadas: estadoJornadas,
+    camiones: estadoCamiones,
+  });
 
   const { retornos, registrarRetorno } = useRetornos();
 
@@ -165,6 +171,7 @@ export default function Retornos() {
   function guardarRetorno() {
     setError("");
     setMensaje("");
+    if (estadoOperacion.bloqueado) return;
 
     if (!jornada?.cierre) {
       setError("Seleccioná una jornada cerrada.");
@@ -294,6 +301,8 @@ export default function Retornos() {
           Recepción de sobrantes de jornadas cerradas
         </p>
       </header>
+
+      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
 
       {mensaje && (
         <div
@@ -576,6 +585,7 @@ export default function Retornos() {
               <button
                 type="button"
                 onClick={guardarRetorno}
+                disabled={estadoOperacion.bloqueado}
                 className="mt-5 flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-5 font-bold text-white hover:bg-green-700"
               >
                 <PackageCheck size={22} />
