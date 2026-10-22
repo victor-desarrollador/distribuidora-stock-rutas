@@ -1,4 +1,38 @@
 ---
+## 22/10/2026 — Corrección documental post-auditoría · Bloque G / ADR-001
+
+**Rama:** `chore/adr-001-gobernanza` · **Base obligatoria:** `c1190851de68e18b56edf10f56c701f9addb20c3` · **Estado:** H-1/H-2 corregidos; pendiente de nuevo commit y auditoría independiente del nuevo hash. Sin push, merge, deploy, backend, SQL ni migraciones.
+
+### Correcciones
+
+- **H-1:** ADR-003 deja de presentar ADR-001 como propuesta vigente y refleja su estado `APROBADA PARA VALIDACIÓN CONTROLADA`, con P1/P19/P20 resueltas, P2–P17 pendientes, P18 separada y producción bloqueada. ADR-003 no modifica ADR-001.
+- **H-2:** ADR-004 conserva su propio estado `PROPUESTA — NO APROBADA`, refleja el estado intermedio vigente de ADR-001 y aclara que no la modifica ni amplía la autorización local/staging; P2–P17 y el bloqueo productivo se mantienen.
+
+### Archivos
+
+- `docs/decisions/003-precio-derivado-media-pieza.md`
+- `docs/decisions/004-cobros-jornada-cerrada.md`
+- `docs/progress-log.md` (trazabilidad obligatoria de `AGENTS.md`)
+
+### Verificación
+
+- Cambio exclusivamente documental; sin cambios de diseño ni resolución adicional de decisiones.
+- `npm run lint` → exit 0.
+- `npm run typecheck` → exit 0.
+- `npm test -- --run` → 18 archivos / 591 tests passed.
+- `npm run build` → exit 0.
+- `npx playwright test` → 35 tests passed.
+- `git diff --check` → sin errores.
+- La búsqueda solicitada deja las referencias vigentes de ADR-003/ADR-004 alineadas; las coincidencias anteriores del progress log pertenecen a entradas cronológicas históricas.
+- `git status --short` → sólo los tres archivos documentales enumerados, antes del commit.
+
+### Riesgos pendientes
+
+1. P2–P17 siguen pendientes y P18 continúa como decisión futura separada.
+2. Producción continúa bloqueada.
+3. El nuevo hash requiere auditoría independiente; no hubo push, merge ni deploy.
+
+---
 ## 22/10/2026 — Alineación de gobernanza y Topología D · Bloque G / ADR-001
 
 **Rama:** `chore/adr-001-gobernanza` · **Base:** `main` posterior al merge del PR #3 · **Estado:** cambio documental implementado; commit autorizado pendiente de auditoría independiente. **Sin backend, SQL, migraciones, Supabase, RPC, RLS, roles ni deploy.**
