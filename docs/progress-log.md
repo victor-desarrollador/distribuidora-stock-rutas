@@ -1,4 +1,26 @@
 ---
+## 21/10/2026 — Bloque 5: corrección post-auditoría (SIN COMMIT)
+
+**Rama:** `feat/movimientos-medias-piezas` · **Commit auditado:** `fe255048d1caca8575704978775efa7e2ce85ce9` · **Auditoría:** BLOCKED · **Estado:** correcciones en el working tree **sin commit**; push, merge y deploy: **NO**; **ADR-001 continúa PROPUESTA — NO APROBADA**; storage sigue v4; Retornos y Rendición no se tocan.
+
+### Hallazgos de la auditoría y corrección
+
+- **H-1 (storage corrupto):** la escritura distingue clave ausente (ledger vacío) de storage corrupto (JSON inválido, no array, item inválido) y aborta sin llamar al callback de stock ni guardar. Faltaban tests de la frontera de escritura: se agregó `registrarMovimientoPersistido` (misma ruta que el hook, sin React) y tests contra un `localStorage` simulado que comparan el contenido antes/después y verifican `validar`/`guardar` no llamados.
+- **M-1 (acumulación):** `salidas_de_jornada` acumula con `sumar_cantidades_seguras`; `disponibles_de_jornada` valida lo cargado y las salidas; `disponibilidad_de_jornada` es la única cadena (UI y validación previa al registro) y devuelve `ok:false` ante cantidades inválidas o desbordamiento, sin saldo aproximado, saturación ni redondeo.
+- **M-2 (contrato):** `cantidad_movimiento_desde_entrada` captura en el dominio el desbordamiento de `recomponer_medias` y devuelve `null`; `Movimientos.tsx` la consume sin try/catch.
+- **M-3 (Productos):** nuevo `stock_producto_valido` (basado en `es_cantidad_valida`, enteros seguros >= 0) usado por `Productos.tsx` y por la lectura de `useProductos.ts`.
+- **L-1:** esta entrada.
+
+### Verificación
+
+Baseline auditado: 261 tests. La evidencia intermedia anterior de 278 tests correspondía a +17 en `cantidades` (no +23). Total tras estas correcciones (ejecutado desde `apps/web/`): **12 archivos / 311 tests** (+50 sobre 261); typecheck, lint, build y Playwright: ver entrega.
+
+### Riesgos pendientes
+
+- Quedan validaciones `Number.isInteger` (no `isSafeInteger`) en `Retornos.tsx`, `useRetornos.ts`, `useJornadas.ts`, `Autoventa.tsx:353`, `domain/venta.ts` y `domain/validacion.ts`; fuera del alcance de este bloque.
+- Sin test de componente de `Movimientos.tsx`.
+
+---
 ## 21/10/2026 — Bloque 5: Movimientos compatibles con medias piezas
 
 **Rama:** `feat/movimientos-medias-piezas` · **Base:** `b48ce2c0c69ee6200e314af5727295e855228576` · **Estado:** implementado **sin commit**, pendiente de revisión humana; sin push, merge ni deploy; **ADR-001 continúa PROPUESTA — NO APROBADA**.

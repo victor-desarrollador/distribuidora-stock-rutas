@@ -5,8 +5,8 @@
 // enteras, nunca decimales, nunca negativos).
 //
 // Reglas:
-//   - Una cantidad almacenable es un entero, >= 0 y finito; nunca NaN ni
-//     Infinity.
+//   - Una cantidad almacenable es un ENTERO SEGURO (Number.isSafeInteger),
+//     >= 0 y finito; nunca NaN ni Infinity.
 //   - 1 pieza = 2 medias piezas; 1/2 pieza = 1 media pieza. La representación
 //     persistible siempre es un entero en medias piezas.
 //
@@ -15,10 +15,17 @@
 
 export const MEDIAS_POR_PIEZA = 2;
 
-/** Una cantidad almacenable: entero, >= 0 y finito. */
+/**
+ * Una cantidad almacenable: ENTERO SEGURO, >= 0 y finito.
+ * Usa Number.isSafeInteger para garantizar exactitud en todas las operaciones
+ * aritméticas (sumas, restas, multiplicaciones) sin pérdida de precisión.
+ * Rechaza enteros fuera del rango seguro (ej. Number.MAX_SAFE_INTEGER + 1).
+ */
 export function es_cantidad_valida(cantidad: number): boolean {
   return (
-    Number.isFinite(cantidad) && Number.isInteger(cantidad) && cantidad >= 0
+    Number.isFinite(cantidad) &&
+    Number.isSafeInteger(cantidad) &&
+    cantidad >= 0
   );
 }
 
@@ -30,9 +37,31 @@ export function es_cantidad_valida(cantidad: number): boolean {
 export function validar_cantidad(cantidad: number): void {
   if (!es_cantidad_valida(cantidad)) {
     throw new Error(
-      `Cantidad inválida: ${String(cantidad)}. Se esperaba un entero finito mayor o igual que cero.`
+      `Cantidad inválida: ${String(cantidad)}. Se esperaba un entero seguro finito mayor o igual que cero.`
     );
   }
+}
+
+/**
+ * Verifica que la suma de dos cantidades canónicas no desborde el rango seguro.
+ * Fallo cerrado: devuelve false si el resultado excede Number.MAX_SAFE_INTEGER.
+ */
+export function es_suma_segura(a: number, b: number): boolean {
+  if (!es_cantidad_valida(a) || !es_cantidad_valida(b)) return false;
+  return a + b <= Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Suma dos cantidades canónicas con verificación de desbordamiento.
+ * Lanza Error si el resultado excede Number.MAX_SAFE_INTEGER.
+ */
+export function sumar_cantidades_seguras(a: number, b: number): number {
+  if (!es_suma_segura(a, b)) {
+    throw new Error(
+      `Desbordamiento de cantidad canónica: ${a} + ${b} excede Number.MAX_SAFE_INTEGER.`
+    );
+  }
+  return a + b;
 }
 
 /**
@@ -54,7 +83,13 @@ export function piezas_a_medias(piezas: number): number {
       `Piezas inválidas: ${String(piezas)}. Se esperaba un múltiplo exacto de 0.5, finito y mayor o igual que cero.`
     );
   }
-  return piezas * MEDIAS_POR_PIEZA;
+  const resultado = piezas * MEDIAS_POR_PIEZA;
+  if (!es_cantidad_valida(resultado)) {
+    throw new Error(
+      `Desbordamiento al convertir piezas a medias: ${resultado} excede rango seguro.`
+    );
+  }
+  return resultado;
 }
 
 /**
@@ -145,7 +180,13 @@ export function recomponer_medias({ piezas, media }: {
   if (typeof media !== "boolean") {
     throw new Error("El campo 'media' debe ser booleano.");
   }
-  return piezas * MEDIAS_POR_PIEZA + (media ? 1 : 0);
+  const resultado = piezas * MEDIAS_POR_PIEZA + (media ? 1 : 0);
+  if (!es_cantidad_valida(resultado)) {
+    throw new Error(
+      `Desbordamiento al recomponer medias: ${resultado} excede rango seguro.`
+    );
+  }
+  return resultado;
 }
 
 /**
@@ -157,6 +198,7 @@ export function maximo_piezas_segun_disponible(
   disponible_medias: number,
   tiene_media: boolean
 ): number {
+  if (!es_cantidad_valida(disponible_medias)) return 0;
   const libre = disponible_medias - (tiene_media ? 1 : 0);
   return Math.max(0, Math.floor(libre / MEDIAS_POR_PIEZA));
 }
@@ -169,13 +211,16 @@ export function puede_agregar_media(
   disponible_medias: number,
   piezas: number
 ): boolean {
+  if (!es_cantidad_valida(disponible_medias) || !es_cantidad_valida(piezas)) {
+    return false;
+  }
   return piezas * MEDIAS_POR_PIEZA + 1 <= disponible_medias;
 }
 
 /**
  * Interpreta el texto de un input de producto por "unidad".
  *   - vacío o solo espacios -> 0 (no seleccionado)
- *   - entero finito >= 0     -> ese entero
+ *   - entero seguro finito >= 0     -> ese entero
  *   - cualquier otra cosa    -> null (inválido; no se redondea ni trunca)
  */
 export function cantidad_unidad_desde_texto(texto: string): number | null {

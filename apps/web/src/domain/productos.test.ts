@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  stock_producto_valido,
   unidad_para_categoria,
   validar_combinacion_categoria_unidad,
 } from "./productos";
@@ -66,5 +67,24 @@ describe("validar_combinacion_categoria_unidad", () => {
     );
     expect(conKg.valido).toBe(false);
     expect(conKg.mensaje).toContain("unidad");
+  });
+});
+
+describe("stock_producto_valido", () => {
+  const MAX = Number.MAX_SAFE_INTEGER;
+
+  it("acepta enteros seguros >= 0, incluido el límite", () => {
+    expect(stock_producto_valido(0, 0)).toBe(true);
+    expect(stock_producto_valido(MAX, MAX)).toBe(true);
+  });
+
+  it("rechaza stock o stockMinimo fuera del rango seguro", () => {
+    expect(stock_producto_valido(MAX + 1, 0)).toBe(false);
+    expect(stock_producto_valido(0, MAX + 1)).toBe(false);
+  });
+
+  it.each([1.5, -1, NaN, Infinity])("rechaza %s en cualquiera de los dos", (v) => {
+    expect(stock_producto_valido(v, 1)).toBe(false);
+    expect(stock_producto_valido(1, v)).toBe(false);
   });
 });

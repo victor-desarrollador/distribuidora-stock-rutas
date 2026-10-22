@@ -5,7 +5,8 @@
 // enteras, nunca decimales, nunca negativos).
 //
 // Reglas:
-//   1. Cantidad almacenable: entero, >= 0, finito; nunca NaN ni Infinity.
+//   1. Cantidad almacenable: ENTERO SEGURO (Number.isSafeInteger), >= 0, finito;
+//      nunca NaN ni Infinity.
 //   2. 1 pieza = 2 medias piezas; 1/2 pieza = 1 media pieza. La representación
 //      persistible siempre es un entero en medias piezas.
 //
@@ -17,10 +18,12 @@ import {
   MEDIAS_POR_PIEZA,
   descomponer_medias,
   es_cantidad_valida,
+  es_suma_segura,
   medias_a_piezas,
   medias_a_texto,
   piezas_a_medias,
   recomponer_medias,
+  sumar_cantidades_seguras,
   validar_cantidad,
 } from "./cantidades";
 
@@ -201,5 +204,121 @@ describe("descomposición y recomposición para UX (§7.1)", () => {
       const partes = descomponer_medias(medias);
       expect(recomponer_medias(partes)).toBe(medias);
     }
+  });
+});
+
+describe("M-1: enteros seguros y desbordamiento (Number.isSafeInteger)", () => {
+  it("acepta Number.MAX_SAFE_INTEGER como cantidad válida", () => {
+    expect(es_cantidad_valida(Number.MAX_SAFE_INTEGER)).toBe(true);
+  });
+
+  it("rechaza Number.MAX_SAFE_INTEGER + 1 (fuera de rango seguro)", () => {
+    expect(es_cantidad_valida(Number.MAX_SAFE_INTEGER + 1)).toBe(false);
+  });
+
+  it("rechaza Number.MAX_SAFE_INTEGER + 2", () => {
+    expect(es_cantidad_valida(Number.MAX_SAFE_INTEGER + 2)).toBe(false);
+  });
+
+  it("rechaza Number.MAX_SAFE_INTEGER * 2", () => {
+    expect(es_cantidad_valida(Number.MAX_SAFE_INTEGER * 2)).toBe(false);
+  });
+
+  it("rechaza números grandes fuera de rango aunque sean enteros", () => {
+    expect(es_cantidad_valida(1e20)).toBe(false);
+    expect(es_cantidad_valida(Number.MAX_SAFE_INTEGER + 2)).toBe(false); // MAX_SAFE_INTEGER + 2
+  });
+
+  describe("es_suma_segura y sumar_cantidades_seguras", () => {
+    it("acepta suma dentro del rango seguro", () => {
+      expect(es_suma_segura(100, 200)).toBe(true);
+      expect(sumar_cantidades_seguras(100, 200)).toBe(300);
+    });
+
+    it("acepta suma exacta al límite seguro", () => {
+      const a = Number.MAX_SAFE_INTEGER - 100;
+      const b = 100;
+      expect(es_suma_segura(a, b)).toBe(true);
+      expect(sumar_cantidades_seguras(a, b)).toBe(Number.MAX_SAFE_INTEGER);
+    });
+
+    it("rechaza suma que excede MAX_SAFE_INTEGER", () => {
+      const a = Number.MAX_SAFE_INTEGER - 50;
+      const b = 100;
+      expect(es_suma_segura(a, b)).toBe(false);
+      expect(() => sumar_cantidades_seguras(a, b)).toThrow(
+        /Desbordamiento de cantidad canónica/
+      );
+    });
+
+    it("rechaza suma de dos valores grandes", () => {
+      expect(es_suma_segura(Number.MAX_SAFE_INTEGER, 1)).toBe(false);
+      expect(es_suma_segura(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)).toBe(false);
+    });
+
+    it("rechaza si algún operando no es cantidad válida", () => {
+      expect(es_suma_segura(-1, 100)).toBe(false);
+      expect(es_suma_segura(1.5, 100)).toBe(false);
+      expect(es_suma_segura(NaN, 100)).toBe(false);
+    });
+  });
+
+  describe("piezas_a_medias con desbordamiento", () => {
+    it("convierte MAX_SAFE_INTEGER / 2 piezas sin desbordamiento", () => {
+      const piezas = Math.floor(Number.MAX_SAFE_INTEGER / 2);
+      const resultado = piezas_a_medias(piezas);
+      expect(resultado).toBe(piezas * 2);
+      expect(es_cantidad_valida(resultado)).toBe(true);
+    });
+
+    it("rechaza conversión que desbordaría MAX_SAFE_INTEGER", () => {
+      const piezas = Math.floor(Number.MAX_SAFE_INTEGER / 2) + 1;
+      expect(() => piezas_a_medias(piezas)).toThrow(
+        /Desbordamiento al convertir piezas a medias/
+      );
+    });
+  });
+
+  describe("recomponer_medias con desbordamiento", () => {
+    it("recompone dentro del rango seguro", () => {
+      const resultado = recomponer_medias({
+        piezas: Math.floor(Number.MAX_SAFE_INTEGER / 2),
+        media: false,
+      });
+      expect(resultado).toBe(Math.floor(Number.MAX_SAFE_INTEGER / 2) * 2);
+    });
+
+    it("rechaza recomposición que desbordaría MAX_SAFE_INTEGER", () => {
+      expect(() =>
+        recomponer_medias({
+          piezas: Math.floor(Number.MAX_SAFE_INTEGER / 2) + 1,
+          media: false,
+        })
+      ).toThrow(/Desbordamiento al recomponer medias/);
+    });
+
+    it("rechaza recomposición con media que desborda", () => {
+      const piezas = Math.floor((Number.MAX_SAFE_INTEGER - 1) / 2);
+      // piezas * 2 + 1 = MAX_SAFE_INTEGER, válido
+      expect(recomponer_medias({ piezas, media: true })).toBe(
+        Number.MAX_SAFE_INTEGER
+      );
+      // piezas + 1 * 2 + 1 > MAX_SAFE_INTEGER
+      expect(() =>
+        recomponer_medias({ piezas: piezas + 1, media: true })
+      ).toThrow(/Desbordamiento al recomponer medias/);
+    });
+  });
+
+  describe("validar_cantidad con enteros seguros", () => {
+    it("acepta MAX_SAFE_INTEGER", () => {
+      expect(() => validar_cantidad(Number.MAX_SAFE_INTEGER)).not.toThrow();
+    });
+
+    it("rechaza MAX_SAFE_INTEGER + 1", () => {
+      expect(() => validar_cantidad(Number.MAX_SAFE_INTEGER + 1)).toThrow(
+        /Cantidad inválida/
+      );
+    });
   });
 });

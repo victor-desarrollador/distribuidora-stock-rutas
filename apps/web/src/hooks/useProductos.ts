@@ -5,7 +5,10 @@ import {
   type Producto,
 } from "../data/mockProductos";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
-import { validar_combinacion_categoria_unidad } from "../domain/productos";
+import {
+  stock_producto_valido,
+  validar_combinacion_categoria_unidad,
+} from "../domain/productos";
 import { precio_valido } from "../domain/precios";
 
 const STORAGE_KEY = CLAVES_STORAGE.productos;
@@ -40,10 +43,8 @@ export function cargarProductos(): Producto[] {
         // Precios (ADR-003): máximo 2 decimales; NO hay precioMediaPieza configurable.
         // pieza: solo precio; unidad: solo precio.
         precio_valido(producto.precio) &&
-        Number.isFinite(producto.stock) &&
-        producto.stock >= 0 &&
-        Number.isFinite(producto.stockMinimo) &&
-        producto.stockMinimo >= 0
+        // Stock y stock mínimo: enteros seguros >= 0 (dominio compartido).
+        stock_producto_valido(producto.stock, producto.stockMinimo)
     );
 
     return validos ? (datos as Producto[]) : productosIniciales;

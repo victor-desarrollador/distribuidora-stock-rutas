@@ -4,6 +4,7 @@ import { Package, Plus, Search, Pencil, CheckCircle2 } from "lucide-react";
 import { type Producto, type UnidadMedida } from "../data/mockProductos";
 import { useProductos } from "../hooks/useProductos";
 import {
+  stock_producto_valido,
   unidad_para_categoria,
   validar_combinacion_categoria_unidad,
 } from "../domain/productos";
@@ -130,9 +131,8 @@ export default function Productos() {
       stock >= 0 &&
       stockMinimo >= 0;
 
-    // Para piezas y unidades solamente aceptamos cantidades enteras.
-    const cantidadesValidas =
-      Number.isInteger(stock) && Number.isInteger(stockMinimo);
+    // Para piezas y unidades solamente aceptamos enteros seguros (dominio).
+    const cantidadesValidas = stock_producto_valido(stock, stockMinimo);
 
     // Validación defensiva: la combinación categoría ↔ unidad debe ser
     // canónica (Lácteos -> unidad; Fiambres -> pieza) aunque la UI ya

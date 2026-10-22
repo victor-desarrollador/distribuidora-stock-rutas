@@ -18,6 +18,8 @@ import {
   cantidad_unidad_desde_texto,
   es_cantidad_valida,
   recomponer_medias,
+  sumar_cantidades_seguras,
+  validar_cantidad,
 } from "./cantidades";
 
 /** Entrada de UI de una cantidad: texto del input entero + media opcional. */
@@ -43,7 +45,13 @@ export function cantidad_movimiento_desde_entrada(
 
   let canonica: number;
   if (unidad === "pieza") {
-    canonica = recomponer_medias({ piezas: base, media: entrada.media });
+    // recomponer_medias lanza ante desbordamiento: el contrato de esta función
+    // es devolver null ante cualquier entrada inválida, sin propagar errores.
+    try {
+      canonica = recomponer_medias({ piezas: base, media: entrada.media });
+    } catch {
+      return null;
+    }
   } else if (unidad === "unidad") {
     if (entrada.media) return null;
     canonica = base;
@@ -127,10 +135,26 @@ interface ItemCargado {
   cantidad: number;
 }
 
+function acumular(
+  resultado: Record<number, number>,
+  producto_id: number,
+  cantidad: number
+): void {
+  // Suma exacta o error: nunca satura, redondea ni aproxima.
+  resultado[producto_id] = sumar_cantidades_seguras(
+    resultado[producto_id] ?? 0,
+    cantidad
+  );
+}
+
 /**
  * Cantidades de la jornada que dejaron de estar disponibles: ventas más
  * salidas de movimientos (merma y producto entregado en un cambio; la
  * devolución no descuenta). Todo en cantidades canónicas.
+ *
+ * Lanza Error si alguna cantidad es inválida o si una acumulación supera
+ * Number.MAX_SAFE_INTEGER. Los consumidores de UI y de escritura deben usar
+ * `disponibilidad_de_jornada`, que convierte ese error en un resultado.
  */
 export function salidas_de_jornada(
   jornada_id: string,
@@ -142,35 +166,63 @@ export function salidas_de_jornada(
   for (const venta of ventas) {
     if (venta.jornadaId !== jornada_id) continue;
     for (const item of venta.items) {
-      resultado[item.productoId] =
-        (resultado[item.productoId] ?? 0) + item.cantidad;
+      acumular(resultado, item.productoId, item.cantidad);
     }
   }
 
   for (const movimiento of movimientos) {
     if (movimiento.jornadaId !== jornada_id) continue;
     for (const item of salidasPorMovimiento(movimiento)) {
-      resultado[item.productoId] =
-        (resultado[item.productoId] ?? 0) + item.cantidad;
+      acumular(resultado, item.productoId, item.cantidad);
     }
   }
 
   return resultado;
 }
 
-/** Disponible por producto = cargado - salidas, nunca negativo. */
+/**
+ * Disponible por producto = cargado - salidas, nunca negativo. Lanza Error si
+ * lo cargado no es una cantidad canónica válida.
+ */
 export function disponibles_de_jornada(
   cargados: ReadonlyArray<ItemCargado>,
   salidas: Readonly<Record<number, number>>
 ): Record<number, number> {
   const resultado: Record<number, number> = {};
   for (const item of cargados) {
-    resultado[item.productoId] = Math.max(
-      0,
-      item.cantidad - (salidas[item.productoId] ?? 0)
-    );
+    validar_cantidad(item.cantidad);
+    const salida = salidas[item.productoId] ?? 0;
+    validar_cantidad(salida);
+    resultado[item.productoId] = Math.max(0, item.cantidad - salida);
   }
   return resultado;
+}
+
+export type DisponibilidadJornada =
+  | { ok: true; disponibles: Record<number, number> }
+  | { ok: false; error: string };
+
+/**
+ * Única cadena de cálculo de disponibilidad (UI y validación previa al
+ * registro). Falla cerrado: ante cantidades inválidas o desbordamiento
+ * devuelve ok:false y NO un saldo aproximado.
+ */
+export function disponibilidad_de_jornada(
+  jornada_id: string,
+  cargados: ReadonlyArray<ItemCargado>,
+  ventas: ReadonlyArray<VentaConItems>,
+  movimientos: ReadonlyArray<MovimientoReparto>
+): DisponibilidadJornada {
+  try {
+    const salidas = salidas_de_jornada(jornada_id, ventas, movimientos);
+    return { ok: true, disponibles: disponibles_de_jornada(cargados, salidas) };
+  } catch {
+    return {
+      ok: false,
+      error:
+        "No se puede calcular el stock disponible: hay cantidades inválidas o fuera del rango seguro.",
+    };
+  }
 }
 
 /**
@@ -184,12 +236,14 @@ export function validar_stock_movimiento(
   ventas: ReadonlyArray<VentaConItems>,
   movimientos_actuales: ReadonlyArray<MovimientoReparto>
 ): string | null {
-  const salidas = salidas_de_jornada(
+  const disponibilidad = disponibilidad_de_jornada(
     movimiento.jornadaId,
+    cargados,
     ventas,
     movimientos_actuales
   );
-  const disponibles = disponibles_de_jornada(cargados, salidas);
+  if (!disponibilidad.ok) return disponibilidad.error;
+  const { disponibles } = disponibilidad;
 
   for (const item of salidasPorMovimiento(movimiento)) {
     if (!(item.productoId in disponibles)) {

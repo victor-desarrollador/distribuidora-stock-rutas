@@ -17,6 +17,7 @@ import { cargarVentas } from "./useVentas";
 import {
   leerMovimientos,
   registrarMovimientoOperacion,
+  registrarMovimientoPersistido,
 } from "./useMovimientos";
 import type {
   MovimientoReparto,
@@ -863,7 +864,7 @@ describe("movimientos: persistencia falla cerrado ante cantidades inválidas", (
         const error = registrarMovimientoOperacion(
           mov({ productoId: 1, nombreProducto: "P", unidadMedida: "pieza", cantidad: c }),
           validar,
-          () => [],
+          () => ({ ok: true, movimientos: [], estado: 'inicial' }),
           guardar_fn
         );
         expect(error).toMatch(/no es válido/);
@@ -875,11 +876,151 @@ describe("movimientos: persistencia falla cerrado ante cantidades inválidas", (
     it("persiste un movimiento válido y rechaza duplicados", () => {
       const guardar_fn = vi.fn();
       const m = mov({ productoId: 1, nombreProducto: "P", unidadMedida: "pieza", cantidad: 3 });
-      expect(registrarMovimientoOperacion(m, () => null, () => [], guardar_fn)).toBeNull();
+      expect(registrarMovimientoOperacion(m, () => null, () => ({ ok: true, movimientos: [], estado: 'inicial' }), guardar_fn)).toBeNull();
       expect(guardar_fn).toHaveBeenCalledWith([m]);
       expect(
-        registrarMovimientoOperacion(m, () => null, () => [m], vi.fn())
+        registrarMovimientoOperacion(m, () => null, () => ({ ok: true, movimientos: [m], estado: 'valido' }), vi.fn())
       ).toMatch(/ya está registrado/);
     });
+  });
+});
+
+describe("movimientos: frontera REAL de escritura ante storage corrupto", () => {
+  const CLAVE = CLAVES_STORAGE.movimientos;
+
+  type MermaDePrueba = Extract<MovimientoReparto, { tipo: "merma" }>;
+
+  const nuevo = (id: string, cantidad = 3): MermaDePrueba => ({
+    id,
+    jornadaId: "j1",
+    camionId: 1,
+    fecha: "2026-10-21T10:00:00.000Z",
+    motivo: "Otro motivo",
+    tipo: "merma",
+    producto: {
+      productoId: 1,
+      nombreProducto: "Jamón",
+      unidadMedida: "pieza",
+      cantidad,
+    },
+    clienteId: null,
+    nombreCliente: null,
+  });
+
+  // Registra contra el localStorage simulado y devuelve lo observado.
+  const intentar = (movimiento: MovimientoReparto) => {
+    const validar = vi.fn(() => null);
+    const guardar = vi.fn();
+    const antes = mockLS.getItem(CLAVE);
+    mockLS.setItem.mockClear();
+    const error = registrarMovimientoPersistido(movimiento, validar, guardar);
+    return { error, validar, guardar, antes };
+  };
+
+  const quedaIntacto = (antes: string | null) => {
+    expect(mockLS.getItem(CLAVE)).toBe(antes);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+  };
+
+  it("A. storage ausente: ledger vacío válido, se registra y se persiste", () => {
+    expect(mockLS.getItem(CLAVE)).toBeNull();
+    const m = nuevo("a1");
+    const { error, validar, guardar } = intentar(m);
+    expect(error).toBeNull();
+    expect(validar).toHaveBeenCalledWith([]);
+    expect(guardar).toHaveBeenCalledWith([m]);
+    expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([m]);
+  });
+
+  it.each([
+    ["B. JSON inválido", "{no es json"],
+    ["C. JSON válido pero no array", JSON.stringify({ movimientos: [] })],
+    ["C. JSON válido: null", "null"],
+    [
+      "D. array con un movimiento inválido",
+      JSON.stringify([{ id: "x", tipo: "merma" }]),
+    ],
+    [
+      "D. array con cantidad decimal",
+      JSON.stringify([{ ...nuevo("d1"), producto: { ...nuevo("d1").producto, cantidad: 1.5 } }]),
+    ],
+  ])("%s: error, sin validar, sin guardar y contenido intacto", (_n, crudo) => {
+    mockLS._store.set(CLAVE, crudo);
+    const { error, validar, guardar, antes } = intentar(nuevo("n1"));
+    expect(error).toMatch(/No se puede registrar/);
+    expect(validar).not.toHaveBeenCalled();
+    expect(guardar).not.toHaveBeenCalled();
+    expect(antes).toBe(crudo);
+    quedaIntacto(crudo);
+  });
+
+  it("E. historial válido + registro corrupto: no se reinterpreta como [] ni se guarda solo el nuevo", () => {
+    const crudo = JSON.stringify([
+      nuevo("h1"),
+      nuevo("h2"),
+      { ...nuevo("h3"), producto: { ...nuevo("h3").producto, cantidad: -4 } },
+    ]);
+    mockLS._store.set(CLAVE, crudo);
+    const { error, validar, guardar } = intentar(nuevo("e1"));
+    expect(error).toMatch(/No se puede registrar/);
+    expect(validar).not.toHaveBeenCalled();
+    expect(guardar).not.toHaveBeenCalled();
+    quedaIntacto(crudo);
+    // La lectura de UI sigue siendo fail-closed (vacía) pero sin escribir.
+    expect(leerMovimientos()).toEqual([]);
+    quedaIntacto(crudo);
+  });
+
+  it("historial válido: agrega al final conservando lo previo", () => {
+    const previo = nuevo("p1");
+    mockLS._store.set(CLAVE, JSON.stringify([previo]));
+    const m = nuevo("p2");
+    expect(intentar(m).error).toBeNull();
+    expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([previo, m]);
+  });
+
+  it("movimiento inválido con storage corrupto: rechaza sin tocar el storage", () => {
+    mockLS._store.set(CLAVE, "{roto");
+    const { error, validar, guardar, antes } = intentar(nuevo("i1", 1.5));
+    expect(error).toMatch(/no es válido/);
+    expect(validar).not.toHaveBeenCalled();
+    expect(guardar).not.toHaveBeenCalled();
+    quedaIntacto(antes);
+  });
+});
+
+describe("productos: stock y stockMinimo son enteros seguros (frontera de lectura)", () => {
+  const producto = (stock: number, stockMinimo: number): Producto => ({
+    ...productosIniciales[0],
+    stock,
+    stockMinimo,
+  });
+
+  const cargarCon = (p: Producto) => {
+    mockLS._store.set(CLAVES_STORAGE.productos, JSON.stringify([p]));
+    return cargarProductos();
+  };
+
+  it("MAX_SAFE_INTEGER es válido", () => {
+    const p = producto(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+    expect(cargarCon(p)).toEqual([p]);
+  });
+
+  it("stock > MAX_SAFE_INTEGER invalida el payload", () => {
+    expect(cargarCon(producto(Number.MAX_SAFE_INTEGER + 1, 1))).toEqual(
+      productosIniciales
+    );
+  });
+
+  it("stockMinimo > MAX_SAFE_INTEGER invalida el payload", () => {
+    expect(cargarCon(producto(1, Number.MAX_SAFE_INTEGER + 1))).toEqual(
+      productosIniciales
+    );
+  });
+
+  it("decimales y negativos invalidan el payload", () => {
+    expect(cargarCon(producto(1.5, 1))).toEqual(productosIniciales);
+    expect(cargarCon(producto(1, 0.5))).toEqual(productosIniciales);
+    expect(cargarCon(producto(-1, 1))).toEqual(productosIniciales);
   });
 });

@@ -27,8 +27,7 @@ import {
 } from "../domain/cantidades";
 import {
   cantidad_movimiento_desde_entrada,
-  disponibles_de_jornada,
-  salidas_de_jornada,
+  disponibilidad_de_jornada,
   validar_stock_movimiento,
 } from "../domain/movimientos";
 
@@ -213,15 +212,22 @@ export default function Movimientos() {
     [movimientos, formulario.jornadaId]
   );
 
-  // Cantidades canónicas que dejaron de estar disponibles.
-  const salidas = useMemo(
-    () => salidas_de_jornada(formulario.jornadaId, ventas, movimientosJornada),
-    [ventas, movimientosJornada, formulario.jornadaId]
+  // Disponibilidad canónica: misma cadena de dominio que la validación previa
+  // al registro. Si el cálculo es inseguro no se muestra un saldo aproximado.
+  const disponibilidad = useMemo(
+    () =>
+      disponibilidad_de_jornada(
+        formulario.jornadaId,
+        jornada?.items ?? [],
+        ventas,
+        movimientosJornada
+      ),
+    [jornada, ventas, movimientosJornada, formulario.jornadaId]
   );
 
   const disponibles = useMemo(
-    () => disponibles_de_jornada(jornada?.items ?? [], salidas),
-    [jornada, salidas]
+    () => (disponibilidad.ok ? disponibilidad.disponibles : {}),
+    [disponibilidad]
   );
 
   function seleccionarTipo(tipo: TipoMovimiento) {
@@ -379,6 +385,13 @@ export default function Movimientos() {
         <div role="status" className="flex items-center gap-2 rounded-xl bg-green-50 p-4 text-green-800">
           <CheckCircle2 size={22} />
           {mensaje}
+        </div>
+      )}
+
+      {!disponibilidad.ok && (
+        <div role="alert" className="flex items-center gap-2 rounded-xl bg-red-50 p-4 text-red-800">
+          <AlertTriangle size={22} />
+          {disponibilidad.error}
         </div>
       )}
 

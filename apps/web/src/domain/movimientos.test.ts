@@ -6,6 +6,7 @@ import type {
 } from "../data/mockMovimientos";
 import {
   cantidad_movimiento_desde_entrada,
+  disponibilidad_de_jornada,
   disponibles_de_jornada,
   movimiento_valido,
   salidas_de_jornada,
@@ -220,5 +221,123 @@ describe("devolución", () => {
     const salidas = salidas_de_jornada("j1", [], [m]);
     expect(salidas).toEqual({});
     expect(disponibles_de_jornada(cargados, salidas)[1]).toBe(5);
+  });
+});
+
+const MAX = Number.MAX_SAFE_INTEGER;
+
+describe("M-2: cantidad_movimiento_desde_entrada no lanza ante desbordamiento", () => {
+  it.each([true, false])("pieza que desborda (media=%s) → null, sin throw", (media) => {
+    // 2^52 piezas * 2 = 2^53 > MAX_SAFE_INTEGER.
+    const texto = String(2 ** 52);
+    expect(() =>
+      cantidad_movimiento_desde_entrada("pieza", { texto, media })
+    ).not.toThrow();
+    expect(
+      cantidad_movimiento_desde_entrada("pieza", { texto, media })
+    ).toBeNull();
+  });
+
+  it("unidad fuera del rango seguro → null, sin throw", () => {
+    expect(
+      cantidad_movimiento_desde_entrada("unidad", {
+        texto: String(MAX + 1),
+        media: false,
+      })
+    ).toBeNull();
+  });
+
+  it("pieza en el límite seguro sigue siendo válida", () => {
+    // (MAX - 1) / 2 piezas + media = MAX medias.
+    expect(
+      cantidad_movimiento_desde_entrada("pieza", {
+        texto: String((MAX - 1) / 2),
+        media: true,
+      })
+    ).toBe(MAX);
+  });
+});
+
+describe("M-1: acumulación segura en la ruta real de disponibilidad", () => {
+  const venta = (cantidad: number, jornadaId = "j1") => ({
+    jornadaId,
+    items: [{ productoId: 1, cantidad }],
+  });
+
+  it("suma exacta a MAX_SAFE_INTEGER está permitida", () => {
+    const salidas = salidas_de_jornada(
+      "j1",
+      [venta(MAX - 1), venta(1)],
+      []
+    );
+    expect(salidas[1]).toBe(MAX);
+  });
+
+  it("una suma que excede MAX_SAFE_INTEGER lanza", () => {
+    expect(() =>
+      salidas_de_jornada("j1", [venta(MAX), venta(1)], [])
+    ).toThrow(/Desbordamiento/);
+  });
+
+  it("overflow por varias ventas", () => {
+    const mitad = Math.floor(MAX / 2);
+    expect(() =>
+      salidas_de_jornada("j1", [venta(mitad), venta(mitad), venta(2)], [])
+    ).toThrow(/Desbordamiento/);
+  });
+
+  it("overflow por ventas + movimientos", () => {
+    expect(() =>
+      salidas_de_jornada("j1", [venta(MAX - 1)], [merma(jamon(2))])
+    ).toThrow(/Desbordamiento/);
+  });
+
+  it("ventas de otra jornada no cuentan para el desbordamiento", () => {
+    expect(() =>
+      salidas_de_jornada("j1", [venta(MAX), venta(MAX, "j2")], [])
+    ).not.toThrow();
+  });
+
+  it("una cantidad inválida en una venta falla cerrado", () => {
+    expect(() => salidas_de_jornada("j1", [venta(1.5)], [])).toThrow();
+    expect(() => salidas_de_jornada("j1", [venta(-1)], [])).toThrow();
+  });
+
+  it("disponibles_de_jornada falla si lo cargado no es canónico", () => {
+    expect(() =>
+      disponibles_de_jornada([{ productoId: 1, cantidad: MAX + 1 }], {})
+    ).toThrow();
+  });
+
+  it("disponibilidad_de_jornada devuelve ok:false (sin saldo aproximado)", () => {
+    const r = disponibilidad_de_jornada(
+      "j1",
+      [{ productoId: 1, cantidad: MAX }],
+      [venta(MAX), venta(1)],
+      []
+    );
+    expect(r.ok).toBe(false);
+    expect("disponibles" in r).toBe(false);
+  });
+
+  it("validar_stock_movimiento NO autoriza si el acumulado es inseguro", () => {
+    const cargados = [{ productoId: 1, cantidad: MAX }];
+    const error = validar_stock_movimiento(
+      merma(jamon(1)),
+      cargados,
+      [venta(MAX), venta(1)],
+      []
+    );
+    expect(error).toMatch(/No se puede calcular/);
+  });
+
+  it("con acumulado seguro en el límite exacto: disponible 0 y rechaza otra salida", () => {
+    const cargados = [{ productoId: 1, cantidad: MAX }];
+    expect(
+      validar_stock_movimiento(merma(jamon(1)), cargados, [venta(MAX)], [])
+    ).toMatch(/Stock insuficiente/);
+    expect(
+      validar_stock_movimiento(merma(jamon(1)), cargados, [venta(MAX - 1)], [])
+    ).toBeNull();
   });
 });

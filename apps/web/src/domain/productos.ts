@@ -5,6 +5,7 @@
 //   - Fiambres -> "pieza"
 // Toda otra combinación es inválida.
 // Los tipos se reutilizan del modelo canónico (sin unions duplicadas).
+import { es_cantidad_valida } from "./cantidades";
 import type {
   Producto,
   UnidadMedida,
@@ -34,4 +35,15 @@ export function validar_combinacion_categoria_unidad(
     valido: false,
     mensaje: `La categoría "${categoria}" solo permite la unidad "${esperado}".`,
   };
+}
+
+/**
+ * Stock y stock mínimo de un producto: enteros seguros >= 0 en la unidad
+ * mínima del producto (unidad entera o medias piezas). No redondea ni trunca.
+ */
+export function stock_producto_valido(
+  stock: number,
+  stock_minimo: number
+): boolean {
+  return es_cantidad_valida(stock) && es_cantidad_valida(stock_minimo);
 }
