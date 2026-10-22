@@ -34,8 +34,8 @@ Claude `/security-review` es **opcional/pendiente**: la obligación es la revisi
 
 ## Decisiones y alcance
 
-- No conviertas **ADR-001** en `aprobada` ni cambies su estado: sigue **PROPUESTA — NO APROBADA**.
-- No resuelvas por cuenta propia los puntos **P1–P20** de ADR-001.
+- No conviertas **ADR-001** en `aprobada` productivamente ni cambies su estado: está **APROBADA PARA VALIDACIÓN CONTROLADA**.
+- No resuelvas por cuenta propia los puntos **P2–P17** de ADR-001. P18 sigue como decisión futura separada; P1/P19/P20 ya fueron resueltas por decisión humana.
 - **No introduzcas reglas funcionales nuevas**: si una regla del Blueprint parece incorrecta, se propone una decisión en `docs/decisions/` con estado `propuesta` (AGENTS.md §6.5).
 
 ## Permisos y acciones

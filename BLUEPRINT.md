@@ -1,9 +1,9 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 1.9 (documento de trabajo controlado; propuestas no aprobadas identificadas)
-**Fecha:** 21/10/2026 (hora local Argentina)
-**Estado:** Apto para inventario técnico de solo lectura y planificación de tareas independientes. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
+**Versión:** 2.0 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Fecha:** 22/10/2026 (hora local Argentina)
+**Estado:** Apto para inventario técnico, planificación y validación controlada de ADR-001 exclusivamente en local/staging. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
 > Este documento es la fuente de referencia del proyecto. Todo agente (Claude Code, OpenCode, Codex) y toda persona que trabaje en el repositorio debe leerlo antes de escribir código. Si algo del código contradice este documento, el documento manda hasta que se registre una decisión que lo cambie (ver sección 13: ADR).
 
@@ -386,9 +386,9 @@ No se crean roles independientes de depósito o administración en Fase 1; esas 
 - RLS en todas las tablas expuestas por la API, restringiendo consultas/escrituras simples por empresa, rol y estado. Nunca confiar en controles visuales como única defensa.
 - `authenticated` y `anon` **no reciben INSERT, UPDATE ni DELETE directos** sobre libros de movimientos de stock/caja o registros confirmados; registros inmutables y rectificación por asientos compensatorios.
 - **Auditoría (Fase 1):** **no se crea una tabla genérica `auditoria`**. La trazabilidad surge de `operaciones`, los ledgers (`movimientos_stock`), los documentos, el actor, los timestamps, los motivos, la jornada y las relaciones. Si más adelante se requiere auditoría técnica transversal (cambios de datos maestros, intentos bloqueados), se diseña explícitamente con su propia aprobación.
-- **ADR-001 — PROPUESTA TÉCNICA PARA APROBAR Y PROBAR:** exponer una RPC pública `SECURITY DEFINER` exclusivamente como puerta de entrada para cada operación privilegiada, con `SET search_path = ''`, referencias a objetos completamente calificadas, `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC, anon` y `GRANT EXECUTE ... TO authenticated`; invocar lógica interna en esquema privado. La función pública debe validar `auth.uid()`, membresía vigente, `empresa_id` obtenida/verificada del servidor, rol, estado de la jornada, cantidades y permisos sobre cada objeto antes de escribir. Evitar que existan otras rutas con privilegios equivalentes.
-- **Importante:** `SECURITY DEFINER` ejecuta con privilegios del propietario y puede evitar RLS. Usar propietario de privilegio mínimo, controlar `search_path`, revisar grants por defecto y realizar pruebas reales desde `anon`, `authenticated` ajeno y roles válidos. No asumir que ubicar un wrapper en `public` lo vuelve seguro por sí solo. No poner la lógica privilegiada libremente ejecutable en un esquema expuesto.
-- `SECURITY INVOKER` para lecturas y ediciones ordinarias con grants y RLS apropiados; Edge Functions solo si aparece lógica externa no conveniente en SQL. **No generar migraciones hasta aprobar ADR-001 y pasar pruebas de autorización.**
+- **ADR-001 — APROBADA PARA VALIDACIÓN CONTROLADA (Topología D):** cada operación privilegiada se expone a la Data API mediante una fachada `SECURITY INVOKER`, que delega en una implementación `SECURITY DEFINER` ubicada en un esquema privado/no expuesto. La implementación privada constituye la frontera real de seguridad y debe hacer las validaciones completas antes de escribir: `auth.uid()`, membresía vigente, `empresa_id` obtenida/verificada del servidor, rol, estado, cantidades y permisos sobre cada objeto. La cadena conceptual es: Data API → fachada expuesta `SECURITY INVOKER` → implementación privada `SECURITY DEFINER` → validaciones completas → transacción de negocio.
+- **Importante:** la implementación `SECURITY DEFINER` ejecuta con privilegios del propietario y puede evitar RLS. Debe fijar `SET search_path = ''`, usar referencias totalmente calificadas y un propietario de privilegio mínimo, revisar grants y privilegios por defecto y probar desde `anon`, `authenticated` ajeno y roles válidos. La función privada no se expone por la Data API y no deben existir rutas alternativas con privilegios equivalentes. `anon` y `authenticated` no reciben DML directo sobre los ledgers.
+- `SECURITY INVOKER` también se usa para lecturas y ediciones ordinarias con grants y RLS apropiados; Edge Functions quedan reservadas para lógica externa no conveniente en SQL. **Antes de la aprobación para validación controlada no se generan migraciones dependientes de ADR-001. Con el estado actual se permiten únicamente las migraciones necesarias para validar ADR-001 en local/staging; producción permanece prohibida hasta completar las pruebas requeridas, la auditoría independiente y la aceptación humana final.** P2–P17 siguen pendientes y deben resolverse en el alcance que requiera la validación antes de implementar sus partes; P18 es una decisión futura separada.
 - Idempotencia por clave única y transacciones atómicas para compras futuras, cargas, ventas, retiros y cierres; protección contra concurrencia/bloqueos adecuados.
 - Timestamp del servidor UTC y zona horaria operativa explícita; distinguir hora declarada del hecho y hora efectiva de registro.
 - Secretos fuera del frontend; entornos local/staging/producción separados, migraciones revisadas, restauración de backups probada, auditoría y monitoreo.
@@ -452,7 +452,7 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] Salto en la numeración genera aviso.
 
 **Seguridad**
-- [ ] Función wrapper `public` rechaza `anon`, usuario sin membresía, usuario de otra empresa y vendedor intentando cerrar jornada o realizar retiros.
+- [ ] La fachada expuesta `SECURITY INVOKER` y la implementación privada `SECURITY DEFINER` rechazan `anon`, usuario sin membresía, usuario de otra empresa y vendedor intentando cerrar jornada o realizar retiros.
 - [ ] Revocación efectiva de escrituras directas en ledger; ninguna ruta alternativa puede escribir sin pasar validaciones y auditoría.
 - [ ] Un usuario sin rol no ve datos.
 - [ ] Ningún rol puede hacer UPDATE/DELETE en movimientos.
@@ -504,7 +504,7 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 ```
 # NNN — Título
 Fecha:
-Estado: propuesta | aprobada | reemplazada por NNN
+Estado: propuesta | aprobada para validación controlada | aprobada | reemplazada por NNN
 Contexto: qué problema hay
 Decisión: qué se decidió
 Alternativas descartadas: y por qué
@@ -552,7 +552,7 @@ Estado: abierto | resuelto (solo con prueba)
 - [ ] **Venta con stock insuficiente — propuesta:** negativo transitorio solo para camión en jornada abierta, venta marcada `excede_stock` y cierre bloqueado hasta regularización aprobada. Confirmar o corregir.
 - [ ] **Anulaciones — propuesta:** vendedor anula sus ventas antes de finalizar, con motivo; luego solo dueño/encargado. Confirmar o corregir.
 - [ ] **Descuentos — propuesta:** prohibidos para vendedor en Fase 1. Confirmar o corregir.
-- [ ] **ADR-001:** aprobar el patrón de wrapper público `SECURITY DEFINER` y lógica privada, probar revocaciones y permisos de ejecución desde roles reales; no asumir aprobación automática.
+- [ ] **ADR-001 — APROBADA PARA VALIDACIÓN CONTROLADA:** P1 resolvió la Topología D (fachada expuesta `SECURITY INVOKER` + implementación `SECURITY DEFINER` en esquema privado/no expuesto) y P19/P20 resolvieron la gobernanza en dos etapas y las migraciones de validación sólo local/staging. P2–P17 siguen pendientes antes de una validación completa; P18 es una decisión futura separada. Producción exige pruebas, auditoría independiente y aceptación humana final.
 - [ ] **Ventas con pagos combinados:** confirmar medios exactos (efectivo, transferencia, débito/QR y/o importe a cuenta); si una misma venta admite saldo impago y cómo se anota en papel.
 - [ ] **Alta de clientes por vendedor:** campos mínimos, manejo de duplicados y cuándo el encargado valida ficha y límites de crédito. Confirmado solo que puede **crear**, nunca editar existente.
 - [ ] **Talonarios:** por vendedor o camión, serie, numeración, modo de asignación y control de duplicados de venta digital transcripta en papel.
@@ -605,7 +605,8 @@ Estado: abierto | resuelto (solo con prueba)
 | 1.7 | 20/10/2026 | **Decisiones arquitectónicas aprobadas conceptualmente (con ajustes)**: operaciones, ubicaciones (merma no es ubicación interna), cierres sin tabla propia, roles funcionales sin tabla roles, conteos separados, movimientos_stock ledger append-only, dinero sin ledger separado, saldos derivados, auditoría sin tabla genérica, idempotencia por operaciones, concurrencia funcional. Actualización de tabla de entidades (§8) y secciones 7.2, 7.9, 8, 9. |
 | 1.8 | 20/10/2026 | **ADR-002 aprobada** (precios comerciales independientes de pieza y media pieza): §7.1 (precio, cantidad canónica vs presentación comercial, subtotal, decimales), §8 (`productos`, `venta_items`), criterios de aceptación y cierre del pendiente de §15; claves operativas del prototipo `localStorage` v2 → v3 con inicialización limpia. Sin cambios en ADR-001 ni en SQL. |
 | 1.9 | 21/10/2026 | **ADR-003 aprobada — Precio derivado de media pieza** (supera a ADR-002 solo en la política de precio de media pieza; ADR-002 queda histórica): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube) calculada en centavos enteros; cantidad canónica en medias sin cambios; snapshot histórico conserva la media aplicada sin re-derivarla. §4, §7.1, §8 (`productos`, `venta_items`), §12 y §15; claves operativas del prototipo `localStorage` v3 → v4 con inicialización limpia. Sin cambios en ADR-001 ni SQL aprobado. |
+| 2.0 | 22/10/2026 | **ADR-001 aprobada para validación controlada:** P1 selecciona Topología D; P19 adopta dos aprobaciones; P20 permite migraciones dependientes de ADR-001 sólo en local/staging. §10, §12, §13 y §15 alineados. P2–P17 siguen pendientes, P18 queda como decisión futura separada y producción continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final. Sin backend, SQL ni migraciones en este cambio. |
 
 ---
 
-*Fin de BLUEPRINT.md v1.9*
+*Fin de BLUEPRINT.md v2.0*

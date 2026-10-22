@@ -1,8 +1,8 @@
 # Revisión de seguridad
 
-**Fecha:** 17/10/2026
+**Fecha:** 22/10/2026
 **Ámbito:** cambios que tocan autenticación, autorización, datos por empresa, RPC, RLS, dinero o stock.
-**Fuente:** `BLUEPRINT.md` §6 y §10, `AGENTS.md` §5, `CLAUDE.md`, ADR-001 v1.2 (ronda 3; **PROPUESTA — NO APROBADA**). Este documento **no** aprueba ADR-001, sus **P1–P20** ni ninguna propuesta pendiente.
+**Fuente:** `BLUEPRINT.md` §6 y §10, `AGENTS.md` §5, `CLAUDE.md`, ADR-001 v1.3 (**APROBADA PARA VALIDACIÓN CONTROLADA**). Este documento no amplía esa aprobación: P2–P17 siguen pendientes, P18 es una decisión futura separada y producción continúa bloqueada.
 
 ---
 
@@ -43,7 +43,7 @@ Si el cambio no toca ninguna de estas superficies, la revisión de seguridad no 
 
 ## 3. Verificación de permisos negativos (pgTAP)
 
-Las pruebas de base y permisos **se escribirán** con **pgTAP** en `supabase/tests/` y se ejecutarán con `supabase test db` en un entorno aislado **una vez aprobada ADR-001** (ADR-001 §16; Blueprint §12). **Hoy no están autorizadas.** Deben probar, como mínimo, que **fallan** los accesos no autorizados:
+Las pruebas de base y permisos **se escribirán** con **pgTAP** en `supabase/tests/` y se ejecutarán con `supabase test db` exclusivamente en local/staging, una vez resueltas las P2–P17 necesarias para el alcance de validación (ADR-001 §16; Blueprint §12). Deben probar, como mínimo, que **fallan** los accesos no autorizados:
 
 | Caso negativo | Resultado esperado |
 |---|---|
@@ -56,7 +56,7 @@ Las pruebas de base y permisos **se escribirán** con **pgTAP** en `supabase/tes
 
 Además, pruebas positivas: la operación autorizada **sí** funciona para el rol habilitado, con los controles de idempotencia y concurrencia.
 
-> **Bloqueo vigente:** estas pruebas dependen de la arquitectura propuesta de RPC privilegiadas, objeto de **ADR-001, versión 1.2 (ronda 3), en estado `propuesta` — NO APROBADA**. Sus puntos **P1–P20** son **decisiones pendientes de aprobación humana** y sus recomendaciones son **no vinculantes**: la ADR propone resolver **P19 y P20 primero**, y **P18** es una decisión futura separada que **no** es requisito previo (ADR-001 §15 y §18). Hasta la aprobación y prueba de la ADR **no se generan migraciones** ni se adopta ningún patrón de RPC privilegiada (Blueprint §10, viñeta «ADR-001 — PROPUESTA TÉCNICA PARA APROBAR Y PROBAR»; `docs/decisions/001-rpc-privilegiadas.md`). Queda además **pendiente de decisión humana (P1)** la contradicción entre esa misma viñeta del Blueprint §10 (RPC `SECURITY DEFINER` en esquema expuesto) y la guía de Supabase, que este documento **no** resuelve. Las pruebas de **dominio** e **integración** que no dependan de esa arquitectura pueden prepararse por separado (`INVENTARIO_ETAPA_0.md`, errata E-1).
+> **Bloqueo vigente:** ADR-001 v1.3 resolvió P1 con Topología D y P19/P20 con validación en dos etapas y migraciones sólo local/staging. Las pruebas e implementaciones que dependan de P2–P17 continúan bloqueadas hasta resolverlas; P18 no es requisito previo. Nada de esto autoriza producción, que exige evidencia, auditoría independiente y aceptación humana final.
 
 ---
 
@@ -65,9 +65,9 @@ Además, pruebas positivas: la operación autorizada **sí** funciona para el ro
 - `authenticated` y `anon` **no reciben INSERT/UPDATE/DELETE directos** sobre libros de movimientos de stock/caja ni sobre registros confirmados; los registros son inmutables y se rectifican con asientos compensatorios.
 - Los **roles y la membresía** se leen de tablas protegidas, **no** de `user_metadata` modificable por el usuario.
 - **RLS en todas las tablas expuestas.** Los controles visuales nunca son la única defensa.
-- **`SECURITY DEFINER` ejecuta con privilegios del propietario y puede eludir RLS.** Si se usa (de aprobarse **ADR-001, v1.2 ronda 3, hoy `propuesta`**), debe tener propietario de mínimo privilegio, `search_path` controlado, grants revisados y pruebas reales desde `anon`, `authenticated` ajeno y roles válidos. **No se asume que ubicar un wrapper en `public` lo vuelva seguro.**
-- **`SECURITY INVOKER`** para lecturas y ediciones ordinarias, con grants y RLS apropiados.
-- Las **escrituras críticas de stock y dinero** pasan por RPC en la base, con autorización comprobada en el servidor (Blueprint §6, primera viñeta sobre la lógica en RPC; Blueprint §10, viñetas de RLS, escrituras directas e idempotencia). La **cadena exacta de validaciones** y el **patrón concreto** (topología y wrapper) pertenecen a ADR-001 (v1.2, ronda 3; hoy `propuesta`): **no son un requisito vigente** ni este documento los adopta como tales.
+- **`SECURITY DEFINER` ejecuta con privilegios del propietario y puede eludir RLS.** La implementación privada de Topología D debe tener propietario de mínimo privilegio, `search_path = ''`, referencias totalmente calificadas, grants revisados y pruebas reales desde `anon`, `authenticated` ajeno y roles válidos. No se ubica en un esquema expuesto.
+- **`SECURITY INVOKER`** para la fachada expuesta y para lecturas/ediciones ordinarias, con grants y RLS apropiados.
+- Las **escrituras críticas de stock y dinero** siguen la cadena Data API → fachada expuesta `SECURITY INVOKER` → implementación privada `SECURITY DEFINER` → validaciones completas → transacción. La implementación privada es la frontera real de seguridad (ADR-001 v1.3; Blueprint §10).
 - **No usar credenciales administrativas en el navegador** (AGENTS.md §5).
 - **Idempotencia y transacciones atómicas** para cargas, ventas, retiros y cierres; protección contra concurrencia/bloqueos (Blueprint §10).
 

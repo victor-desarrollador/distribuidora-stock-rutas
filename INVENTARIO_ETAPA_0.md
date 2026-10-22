@@ -1,6 +1,6 @@
 # Inventario Etapa 0
 
-> **Precedencia (actualización posterior a la auditoría).** Las erratas y aclaraciones E-1 a E-12 prevalecen y sustituyen las afirmaciones originales a las que hacen referencia. El cuerpo original se conserva exclusivamente como registro histórico. En caso de contradicción, la interpretación vigente es la establecida en las erratas, siempre subordinada a BLUEPRINT.md y a las ADR aprobadas.
+> **Precedencia (actualización posterior a la auditoría).** Las erratas y aclaraciones E-1 a E-13 prevalecen y sustituyen las afirmaciones originales a las que hacen referencia. El cuerpo original se conserva exclusivamente como registro histórico. En caso de contradicción, la interpretación vigente es la establecida en las erratas, siempre subordinada a BLUEPRINT.md y a las ADR vigentes.
 
 Documento de inventario técnico de solo lectura. Convenciones de evidencia:
 HECHO = observado directamente en código o documentación (con ruta y línea).
@@ -342,6 +342,10 @@ Cierre del informe
 Esta sección registra las correcciones surgidas de las revisiones independientes de Codex (primera: **APPROVE WITH CORRECTIONS**; segunda: **CHANGES REQUIRED**; ver «Revisiones independientes» en el apéndice de verificación). **El informe original se conserva como registro histórico auditable**: salvo la corrección editorial del título (E-9), ninguna afirmación del cuerpo original se reescribe; las erratas **E-1 a E-12 prevalecen** sobre las afirmaciones originales a las que refieren (ver la nota de «Precedencia» al inicio del documento). E-1, E-3 y E-4 se **ampliaron en la segunda ronda** de correcciones. Cada ítem cita la afirmación original afectada y precisa su efecto.
 
 ### Correcciones importantes
+
+**E-13 — Estado vigente de ADR-001 después de P1/P19/P20** (actualización del 22/10/2026; afecta a toda referencia del inventario y de sus verificaciones a ADR-001 como `propuesta`, a P1–P20 como pendientes y al bloqueo absoluto de migraciones).
+
+El inventario y las revisiones E-1 a E-12 reflejan el estado histórico de sus commits de base. Desde ADR-001 v1.3 y Blueprint v2.0 rige **APROBADA PARA VALIDACIÓN CONTROLADA**: P1 seleccionó Topología D; P19 adoptó la gobernanza en dos etapas; P20 habilitó migraciones dependientes de ADR-001 exclusivamente local/staging. P2–P17 siguen pendientes, P18 es una decisión futura separada y producción continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final. Esta errata actualiza sólo el estado normativo; no reescribe ni invalida la evidencia histórica del inventario.
 
 **E-1 — Alcance del bloqueo por ADR-001** (afecta a §12, cierre de «Tests existentes»; §18 ítem 2; §19 pasos 1 y 4; y «Cierre del informe», viñeta «Bloqueo vigente»).
 Afirmación original (§12): «ni ninguna de las pruebas obligatorias de BLUEPRINT.md sec. 12 (todas requieren base de datos + pgTAP, **bloqueadas por ADR-001** en estado propuesta)».

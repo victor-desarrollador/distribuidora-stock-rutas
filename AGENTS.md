@@ -97,7 +97,7 @@ Criterios y detalle en `docs/quality/security-review.md`. Si el cambio no toca n
 
 ## 3. Prohibición expresa: propuestas no aprobadas
 
-**Está prohibido implementar, total o parcialmente, cualquier regla marcada en el Blueprint como `PROPUESTA NO APROBADA` o `PROPUESTA TÉCNICA NO APROBADA`, y cualquier ADR cuyo estado no sea `aprobada`.**
+**Está prohibido implementar, total o parcialmente, cualquier regla marcada en el Blueprint como `PROPUESTA NO APROBADA` o `PROPUESTA TÉCNICA NO APROBADA`, y cualquier ADR cuyo estado sea `propuesta`. Una ADR `aprobada para validación controlada` sólo habilita el alcance expresamente resuelto en local/staging; no habilita producción ni decisiones todavía pendientes.**
 
 Esto incluye, según lo marcado en el Blueprint (ver Blueprint §15 y las secciones citadas abajo):
 
@@ -106,7 +106,7 @@ Esto incluye, según lo marcado en el Blueprint (ver Blueprint §15 y las seccio
 - Prohibición de descuentos / esquema de precio de lista vs aplicado (sección 7.5).
 - Retiro de efectivo que supera el saldo registrado sin bloqueo (sección 7.6).
 - Vencimientos por partida de ingreso / tabla `partidas_ingreso` (secciones 2, 4, 8).
-- **ADR-001**: wrappers `SECURITY DEFINER` + esquema privado (`docs/decisions/001-rpc-privilegiadas.md`).
+- **ADR-001, P2–P17:** decisiones técnicas todavía pendientes para completar la validación controlada (`docs/decisions/001-rpc-privilegiadas.md`). P18 sigue como decisión futura separada. P1/P19/P20 están resueltas y no integran esta prohibición.
 
 "Implementar" incluye: código de aplicación, migraciones SQL, funciones RPC, políticas RLS, tipos, pruebas que asuman la regla como vigente y cambios de UI que la reflejen.
 
