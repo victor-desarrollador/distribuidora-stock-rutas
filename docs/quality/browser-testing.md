@@ -126,7 +126,7 @@ Son los que hay que verificar en cada cambio relevante (alineados con Blueprint 
 8. **Rendición y cierre**, incluido un caso con diferencia; jornada cerrada inmutable.
 9. **Responsive:** los recorridos 1–8 en móvil y en escritorio.
 
-> **Alcance actual.** El sistema con base de datos y RPC **todavía no existe** (`INVENTARIO_ETAPA_0.md` §1). ADR-001 v1.3 está **APROBADA PARA VALIDACIÓN CONTROLADA**, pero P2–P17 siguen pendientes y este bloque no implementa backend. Por eso hoy estos recorridos sólo pueden explorarse contra el **prototipo** con datos de demostración; eso **no** verifica las reglas de stock y dinero del Blueprint.
+> **Alcance actual.** El sistema con base de datos y RPC **todavía no existe** (`INVENTARIO_ETAPA_0.md` §1). ADR-001 v1.5 está **APROBADA PARA VALIDACIÓN CONTROLADA**, pero P8–P17 siguen pendientes y este bloque no implementa backend. Por eso hoy estos recorridos sólo pueden explorarse contra el **prototipo** con datos de demostración; eso **no** verifica las reglas de stock y dinero del Blueprint.
 
 ---
 

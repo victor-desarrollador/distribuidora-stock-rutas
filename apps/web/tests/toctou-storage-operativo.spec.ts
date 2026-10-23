@@ -67,7 +67,6 @@ const jornadaAbierta = {
 async function prepararStorage(page: Page, jornadas = [jornadaAbierta]) {
   await page.addInitScript(
     ({ storage, datos }) => {
-      localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
       localStorage.setItem(storage.productos, JSON.stringify(datos.productos));
       localStorage.setItem(storage.camiones, JSON.stringify(datos.camiones));
       localStorage.setItem(storage.clientes, JSON.stringify(datos.clientes));

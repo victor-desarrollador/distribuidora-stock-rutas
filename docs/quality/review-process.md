@@ -29,7 +29,7 @@ Cada eslabón es una compuerta: no se avanza al siguiente sin cerrar el anterior
 
 ### 2.1 Definición / requisitos
 - Leer `BLUEPRINT.md` completo, `AGENTS.md`, `CLAUDE.md`, las ADR **aprobadas** y las últimas entradas de `docs/progress-log.md` (AGENTS.md §1).
-- **Versión documental actual de ADR-001:** ADR-001 — Puerta de entrada SQL para operaciones privilegiadas, **versión 1.3**, estado **`APROBADA PARA VALIDACIÓN CONTROLADA`**. P1 (Topología D), P19 (gobernanza en dos etapas) y P20 (migraciones sólo local/staging) están resueltas. P2–P17 siguen pendientes y P18 es una decisión futura separada. El estado intermedio no autoriza producción (`docs/decisions/001-rpc-privilegiadas.md` §15 y §18; `docs/decisions/README.md`).
+- **Versión documental actual de ADR-001:** ADR-001 — Puerta de entrada SQL para operaciones privilegiadas, **versión 1.5**, estado **`APROBADA PARA VALIDACIÓN CONTROLADA`**. P1 (Topología D), P19 (gobernanza en dos etapas), P20 (migraciones sólo local/staging), P5–P7 (perfil 1:1, una empresa, un rol) y P2–P4 (esquemas, `propietario_rpc`, ownership/RLS) están resueltas. P8–P17 siguen pendientes y P18 es una decisión futura separada. El estado intermedio no autoriza producción (`docs/decisions/001-rpc-privilegiadas.md` §15 y §18; `docs/decisions/README.md`).
 - Identificar qué reglas del Blueprint siguen **pendientes de aprobación**.
 - Si la tarea depende de una regla `PROPUESTA NO APROBADA` / `PROPUESTA TÉCNICA NO APROBADA` o de una ADR en estado `propuesta`: **detener esa parte, informar el bloqueo y pedir aprobación expresa** (AGENTS.md §3; `CLAUDE.md`, Procedimiento 5). No elegir «la opción más razonable» por cuenta propia.
 

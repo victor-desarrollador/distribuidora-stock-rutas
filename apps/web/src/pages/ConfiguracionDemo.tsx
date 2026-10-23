@@ -97,7 +97,7 @@ export default function ConfiguracionDemo() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  if (usuario?.rol !== "administrador") {
+  if (usuario?.rol !== "dueno") {
     return <Navigate to="/" replace />;
   }
 

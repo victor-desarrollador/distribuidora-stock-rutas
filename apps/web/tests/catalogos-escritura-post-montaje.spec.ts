@@ -47,7 +47,6 @@ async function iniciar(
   semillas: Record<string, string | null>
 ) {
   await page.addInitScript((datos) => {
-    localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
     for (const [clave, valor] of Object.entries(datos.semillas)) {
       if (valor !== null) localStorage.setItem(clave, valor);
     }
@@ -187,7 +186,6 @@ test("Productos: si setItem lanza, el estado React no cambia ni se informa éxit
 }) => {
   await page.addInitScript(
     ({ clave, producto }) => {
-      localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
       localStorage.setItem(clave, JSON.stringify([producto]));
       const originalSetItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {

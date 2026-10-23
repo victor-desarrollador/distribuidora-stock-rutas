@@ -70,7 +70,6 @@ const jornadaPreviaDe = (cantidad: number) => ({
 async function prepararStorage(page: Page, cantidadPrevia: number) {
   await page.addInitScript(
     ({ clavesStorage, productoIJ, camionesIJ, jornadaIJ }) => {
-      localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
       localStorage.setItem(
         clavesStorage.productos,
         JSON.stringify([productoIJ])

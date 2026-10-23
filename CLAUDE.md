@@ -35,11 +35,12 @@ Claude `/security-review` es **opcional/pendiente**: la obligación es la revisi
 ## Decisiones y alcance
 
 - No conviertas **ADR-001** en `aprobada` productivamente ni cambies su estado: está **APROBADA PARA VALIDACIÓN CONTROLADA**.
-- No resuelvas por cuenta propia los puntos **P2–P17** de ADR-001. P18 sigue como decisión futura separada; P1/P19/P20 ya fueron resueltas por decisión humana.
+- No resuelvas por cuenta propia los puntos **P8–P17** de ADR-001. P18 sigue como decisión futura separada; P1/P19/P20, P2–P4 y P5–P7 ya fueron resueltas por decisión humana.
 - **No introduzcas reglas funcionales nuevas**: si una regla del Blueprint parece incorrecta, se propone una decisión en `docs/decisions/` con estado `propuesta` (AGENTS.md §6.5).
 - Recordá el propósito de Fase 1: controlar qué mercadería sale en cada camión, qué se vende, qué vuelve y las diferencias de mercadería y dinero por camión, jornada y vendedor. Los roles vigentes son dueño, encargado y vendedor/piloto; no inventes otros.
 - No sobrearquitectes: no agregues SaaS genérico, workspaces, organizaciones gestionables, suscripciones, planes, invitaciones, selector multiempresa, múltiples membresías, microservicios, event bus ni infraestructura adicional sin una necesidad del Blueprint/PRD y una decisión humana explícita. `empresa_id` no convierte el producto en una plataforma SaaS.
-- En P5–P7, no asumas una tabla separada de membresías ni una relación usuario ↔ empresa/rol concreta. Sólo está aprobado que empresa y rol se obtienen desde tablas protegidas; la estructura exacta sigue pendiente de aprobación humana.
+- P5–P7 (decisión humana del 22/10/2026, ADR-001 §18): un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario. No agregues tabla de membresías, tabla `roles`, múltiples empresas por usuario ni selector de empresa.
+- P2–P4 (decisión humana del 23/10/2026, ADR-001 §7 y §18; `AGENTS.md` §4.4): `public` expuesto y `privado` no expuesto; rol `propietario_rpc` sólo para funciones privilegiadas privadas; tablas del owner de migraciones con RLS obligatoria y sin `FORCE` global. No crees `privado` ni `propietario_rpc` hasta que exista el primer objeto que los necesite, y no agregues `FORCE ROW LEVEL SECURITY` sin una justificación y una prueba específicas.
 
 ## Permisos y acciones
 

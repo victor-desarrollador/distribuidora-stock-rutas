@@ -120,7 +120,6 @@ async function prepararStorage(page: Page, estado: EstadoInicial) {
 
   await page.addInitScript(
     ({ clavesStorage, info }) => {
-      localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
       localStorage.setItem(
         clavesStorage.productos,
         JSON.stringify([info.producto])

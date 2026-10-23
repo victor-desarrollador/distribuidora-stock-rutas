@@ -1,58 +1,60 @@
 
-import { useState } from "react";
-import {
-  Truck,
-  ShieldCheck,
-  LogIn,
-} from "lucide-react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useState, type FormEvent } from "react";
+import { Truck, LogIn } from "lucide-react";
+import { Navigate } from "react-router-dom";
 
 import { useAuth } from "../auth/useAuth";
-import {
-  usuariosDemo,
-  type RolUsuario,
-} from "../auth/usuariosDemo";
-
-function inicioPorRol(rol: RolUsuario) {
-  if (rol === "vendedor") return "/autoventa";
-  if (rol === "deposito") return "/jornadas";
-  return "/";
-}
+import { inicioPorRol } from "../auth/roles";
+import { PantallaCargandoSesion } from "../components/EstadoAcceso";
 
 export default function Login() {
-  const { usuario, iniciarSesion } = useAuth();
-  const navigate = useNavigate();
+  const { sesion, iniciarSesion } = useAuth();
 
-  const [usuarioId, setUsuarioId] = useState(
-    usuariosDemo[0].id
-  );
+  const [usuario, setUsuario] = useState("");
+  const [password, setPassword] = useState("");
+  const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState("");
 
-  if (usuario) {
+  if (sesion.estado === "autenticado") {
     return (
       <Navigate
-        to={inicioPorRol(usuario.rol)}
+        to={inicioPorRol(sesion.perfil.rol)}
         replace
       />
     );
   }
 
-  function ingresar() {
+  // Cuenta válida en Auth pero sin autorización: la pantalla de bloqueo vive
+  // dentro de las rutas privadas.
+  if (sesion.estado === "bloqueado") {
+    return <Navigate to="/" replace />;
+  }
+
+  if (sesion.estado === "cargando" && !enviando) {
+    return <PantallaCargandoSesion />;
+  }
+
+  async function ingresar(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (enviando) return;
+
     setError("");
+    setEnviando(true);
 
-    const elegido = usuariosDemo.find(
-      (u) => u.id === usuarioId
-    );
+    const resultado = await iniciarSesion(usuario, password);
 
-    if (!elegido || !iniciarSesion(usuarioId)) {
-      setError("No se pudo iniciar la sesión de prueba.");
-      return;
+    // Nunca se conserva la contraseña más allá del intento.
+    setPassword("");
+
+    if (!resultado.ok) {
+      setError(resultado.mensaje);
     }
 
-    navigate(inicioPorRol(elegido.rol), {
-      replace: true,
-    });
+    setEnviando(false);
   }
+
+  const errorConfiguracion =
+    sesion.estado === "error" ? sesion.mensaje : "";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
@@ -71,48 +73,57 @@ export default function Login() {
           Stock, reparto y autoventa
         </p>
 
-        <div className="mt-6 flex items-center gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-          <ShieldCheck size={20} className="shrink-0" />
-          Acceso de demostración. No es un sistema
-          de autenticación seguro.
-        </div>
+        <form onSubmit={ingresar} className="mt-6 space-y-4" noValidate>
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-slate-700">
+              Usuario
+            </span>
 
-        <label className="mt-6 block space-y-2">
-          <span className="text-sm font-semibold text-slate-700">
-            Usuario de prueba
-          </span>
+            <input
+              name="usuario"
+              type="text"
+              value={usuario}
+              onChange={(e) => setUsuario(e.target.value)}
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              required
+              className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3"
+            />
+          </label>
 
-          <select
-            value={usuarioId}
-            onChange={(e) => setUsuarioId(e.target.value)}
-            className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3"
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-slate-700">
+              Contraseña
+            </span>
+
+            <input
+              name="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+              className="min-h-14 w-full rounded-xl border border-slate-300 bg-white p-3"
+            />
+          </label>
+
+          {(error || errorConfiguracion) && (
+            <p role="alert" className="text-sm text-red-700">
+              {error || errorConfiguracion}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={enviando || Boolean(errorConfiguracion)}
+            className="flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           >
-            {usuariosDemo.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {error && (
-          <p role="alert" className="mt-4 text-sm text-red-700">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={ingresar}
-          className="mt-6 flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700"
-        >
-          <LogIn size={21} />
-          Ingresar al sistema
-        </button>
-
-        <p className="mt-5 text-center text-xs text-slate-500">
-          Etapa 13 · Simulación de roles y permisos
-        </p>
+            <LogIn size={21} />
+            {enviando ? "Ingresando…" : "Ingresar al sistema"}
+          </button>
+        </form>
       </div>
     </div>
   );

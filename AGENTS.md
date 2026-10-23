@@ -147,7 +147,7 @@ Esto incluye, según lo marcado en el Blueprint (ver Blueprint §15 y las seccio
 - Prohibición de descuentos / esquema de precio de lista vs aplicado (sección 7.5).
 - Retiro de efectivo que supera el saldo registrado sin bloqueo (sección 7.6).
 - Vencimientos por partida de ingreso / tabla `partidas_ingreso` (secciones 2, 4, 8).
-- **ADR-001, P2–P17:** decisiones técnicas todavía pendientes para completar la validación controlada (`docs/decisions/001-rpc-privilegiadas.md`). P18 sigue como decisión futura separada. P1/P19/P20 están resueltas y no integran esta prohibición.
+- **ADR-001, P8–P17:** decisiones técnicas todavía pendientes para completar la validación controlada (`docs/decisions/001-rpc-privilegiadas.md`). P18 sigue como decisión futura separada. P1/P19/P20, P2–P4 y P5–P7 están resueltas y no integran esta prohibición.
 
 "Implementar" incluye: código de aplicación, migraciones SQL, funciones RPC, políticas RLS, tipos, pruebas que asuman la regla como vigente y cambios de UI que la reflejen.
 
@@ -175,12 +175,20 @@ No introducir conceptos de arquitectura que no respondan a una necesidad concret
 
 La existencia de `empresa_id` **no autoriza** convertir el producto en una plataforma SaaS. Su finalidad aprobada en Fase 1 es cumplir el RLS y el aislamiento por `empresa_id` exigidos por `BLUEPRINT.md` §7.3, no crear funcionalidades de plataforma, selector de empresa ni múltiples empresas por usuario.
 
-### 4.3 P5–P7: decisiones todavía abiertas
+### 4.3 P5–P7: resueltas por decisión humana (22/10/2026)
 
 - El Blueprint exige obtener empresa y rol desde tablas protegidas, nunca desde `user_metadata` ni desde datos modificables por el usuario.
-- La estructura exacta de perfiles, membresías, relación usuario ↔ empresa y roles continúa pendiente de aprobación humana en ADR-001 P5–P7.
-- Una tabla separada de membresías **no es un requisito del Blueprint** y no debe asumirse automáticamente.
-- No resolver ni implementar P5–P7 hasta que exista una decisión humana aprobada con el contexto real de la distribuidora.
+- Decisión humana registrada en ADR-001 §18: cada usuario tiene **un único perfil** en `perfiles`, 1:1 con `auth.users`, con **una sola empresa** y **un único rol** (`dueno`, `encargado` o `vendedor_piloto`). Sin perfil o con perfil inactivo, acceso denegado.
+- **No hay tabla de membresías ni tabla `roles`.** No se introducen múltiples empresas por usuario, selector de empresa ni membresías múltiples sin una nueva decisión humana.
+
+### 4.4 P2–P4: resueltas por decisión humana (23/10/2026)
+
+Registradas en ADR-001 §7 y §18:
+
+- **P2:** `public` es el esquema expuesto para las tablas que la aplicación necesita; `privado` será el esquema no expuesto para las futuras implementaciones privilegiadas.
+- **P3:** el rol técnico `propietario_rpc` (`NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`) es propietario sólo de las funciones privilegiadas privadas necesarias, nunca de tablas de negocio.
+- **P4:** las tablas de negocio quedan bajo el owner de migraciones/Supabase; toda tabla expuesta lleva RLS obligatoria; no se impone `FORCE ROW LEVEL SECURITY` global (cualquier uso futuro se justifica y se prueba específicamente); las funciones `SECURITY DEFINER` viven en `privado`, no son propietarias de tablas y validan explícitamente `auth.uid()`, empresa, rol, permisos, estado e integridad.
+- **No se crean objetos vacíos por anticipado:** el esquema `privado` y el rol `propietario_rpc` se crean recién con el primer objeto que los necesite.
 
 ## 5. Reglas obligatorias
 
@@ -206,7 +214,7 @@ La existencia de `empresa_id` **no autoriza** convertir el producto en una plata
 1. **Una rama por tarea.** Nunca commitear directo a `main`. El merge requiere aprobación humana.
 2. Mantener la estructura `apps/web/`.
 3. Hacer cambios pequeños y verificables.
-4. Toda migración nueva va en `supabase/migrations/`; nunca cambios manuales en la base. (Supabase todavía no está incorporado; no crearlo sin una tarea que lo pida.)
+4. Toda migración nueva va en `supabase/migrations/`; nunca cambios manuales en la base. (Supabase local vive en `supabase/`; las migraciones sólo se aplican en local/staging.)
 5. Si una regla del Blueprint parece incorrecta, **no cambiarla en el código**: proponer una decisión en `docs/decisions/` con estado `propuesta`.
 6. No borrar módulos existentes ni los datos de demostración (`apps/web/src/data/`, pantalla `ConfiguracionDemo`) salvo que una tarea lo pida explícitamente.
 7. Agregar pruebas para las reglas nuevas. Nada se da por terminado sin prueba (Blueprint, principio 5): test automatizado o verificación manual documentada.

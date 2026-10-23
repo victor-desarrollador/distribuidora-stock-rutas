@@ -3,7 +3,7 @@
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
 **Fecha:** 22/10/2026
 **Versión:** 0.2
-**Estado:** documento de arquitectura. Deriva de `BLUEPRINT.md` y `docs/PRD.md`. **No autoriza por sí solo implementación**; ADR-001 v1.3 habilita validación controlada local/staging únicamente después de resolver las decisiones técnicas necesarias.
+**Estado:** documento de arquitectura. Deriva de `BLUEPRINT.md` y `docs/PRD.md`. **No autoriza por sí solo implementación**; ADR-001 v1.5 habilita validación controlada local/staging únicamente después de resolver las decisiones técnicas necesarias.
 
 ---
 
@@ -11,7 +11,7 @@
 
 Este documento consolida el análisis de arquitectura de base de datos para la Fase 1, a partir de las decisiones **aprobadas conceptualmente** en el Blueprint §7.9, §8 y §9. Su objetivo es servir de insumo para el **diseño SQL/RPC** posterior (que requiere aprobación humana y pruebas de seguridad antes de generar migraciones).
 
-> **Regla obligatoria:** ADR-001 está aprobada para validación controlada con Topología D. Las migraciones dependientes de esa ADR se permiten sólo en local/staging y una vez resueltas las P2–P17 necesarias; producción sigue bloqueada hasta pruebas, auditoría independiente y aceptación humana final (Blueprint §10; AGENTS.md §3).
+> **Regla obligatoria:** ADR-001 está aprobada para validación controlada con Topología D. Las migraciones dependientes de esa ADR se permiten sólo en local/staging y una vez resueltas las P8–P17 necesarias (P2–P7 ya resueltas); producción sigue bloqueada hasta pruebas, auditoría independiente y aceptación humana final (Blueprint §10; AGENTS.md §3).
 
 ---
 
@@ -276,7 +276,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 ## 7. Seguridad — Topología D aprobada para validación controlada
 
-> **Recordatorio:** ADR-001 está **APROBADA PARA VALIDACIÓN CONTROLADA**. P1/P19/P20 están resueltas; P2–P17 siguen pendientes y P18 es una decisión futura separada. No hay autorización productiva.
+> **Recordatorio:** ADR-001 está **APROBADA PARA VALIDACIÓN CONTROLADA**. P1/P19/P20, P2–P4 y P5–P7 están resueltas; P8–P17 siguen pendientes y P18 es una decisión futura separada. No hay autorización productiva.
 
 1. **Fachada expuesta `SECURITY INVOKER`** como entrada desde la Data API para escrituras críticas (stock, dinero, jornada, retiros, cierre).
 2. **Implementación `SECURITY DEFINER` en esquema privado/no expuesto**, frontera real de seguridad, con `SET search_path = ''` y referencias totalmente calificadas.
@@ -313,7 +313,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 ## 9. Riesgos y observaciones
 
-1. **ADR-001 no aprobada para producción**: la Topología D y la gobernanza están resueltas, pero P2–P17 bloquean las partes correspondientes de una validación completa; producción sigue bloqueada.
+1. **ADR-001 no aprobada para producción**: la Topología D y la gobernanza están resueltas, pero P8–P17 bloquean las partes correspondientes de una validación completa; producción sigue bloqueada.
 2. **`movimientos_stock` sin `saldo_actual`**: requiere consultas de suma frecuentes; evaluar vistas/materializadas en fase de optimización (no requisito Fase 1).
 3. **Multiempresa con una sola empresa real**: RLS debe implementarse desde el día 1 aunque solo haya un `empresa_id`; probar aislamiento con datos de prueba multi-empresa.
 4. **`idempotency_key` en `operaciones`**: centraliza protección pero exige que **toda** escritura crítica pase por creación de operación. Verificar que no quede ruta directa (ej. `INSERT` directo en `movimientos_stock` desde RPC sin operación).
@@ -327,7 +327,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 1. **Diseño SQL detallado** de las entidades APROBADAS CONCEPTUALMENTE (columnas exactas, tipos, constraints, FKs, índices).
 2. **Definición de RPC** por operación crítica (firmas, validaciones, transacciones, manejo de errores).
-3. Resolver las P2–P17 necesarias para el alcance de validación autorizado.
+3. Resolver las P8–P17 necesarias para el alcance de validación autorizado.
 4. **Migraciones versionadas** en `supabase/migrations/` (una por cambio lógico), exclusivamente local/staging.
 5. **Tests pgTAP** sobre las RPC (stock, dinero, jornada, seguridad).
 6. **Revisión de seguridad** independiente (superficies §2.4 de AGENTS.md).

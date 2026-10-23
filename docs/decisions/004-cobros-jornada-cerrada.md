@@ -33,4 +33,4 @@ Ninguna alternativa está aprobada.
 - No se modifica código ni se agregan pruebas que asuman una alternativa como regla vigente.
 - No se modifica el Blueprint hasta que haya aprobación humana.
 - Una decisión futura deberá precisar el efecto sobre jornadas, rendiciones, cuentas corrientes, auditoría y backend antes de implementarse.
-- ADR-004 continúa **PROPUESTA — NO APROBADA**. No modifica ADR-001, cuyo estado vigente es **APROBADA PARA VALIDACIÓN CONTROLADA**, ni amplía su autorización local/staging: P2–P17 siguen pendientes y producción continúa bloqueada.
+- ADR-004 continúa **PROPUESTA — NO APROBADA**. No modifica ADR-001, cuyo estado vigente es **APROBADA PARA VALIDACIÓN CONTROLADA**, ni amplía su autorización local/staging: P8–P17 siguen pendientes (P2–P7 ya resueltas) y producción continúa bloqueada.

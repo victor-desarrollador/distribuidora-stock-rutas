@@ -28,7 +28,6 @@ const jornadaAbierta = {
 async function preparar(page: Page, corrupta?: "ventas" | "cobros") {
   await page.addInitScript(
     ({ claveJornadas, jornada, claveCorrupta }) => {
-      localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
       localStorage.setItem(claveJornadas, JSON.stringify([jornada]));
       if (claveCorrupta) localStorage.setItem(claveCorrupta, "{ledger dañado");
     },

@@ -1,22 +1,31 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { useState, type ReactNode } from "react";
-
-import {
-  CLAVE_SESION,
-  usuariosDemo,
-  type UsuarioDemo,
-} from "./auth/usuariosDemo";
 import { AuthContext } from "./auth/AuthContextValue";
+import {
+  crearControladorSesion,
+  iniciarSesion as iniciarSesionConPuerto,
+  type ControladorSesion,
+  type EstadoSesion,
+  type PuertoAuth,
+  type ResultadoInicioSesion,
+} from "./auth/sesion";
+import { obtenerPuertoAuth } from "./lib/supabase";
 
-function recuperarSesion(): UsuarioDemo | null {
+type Inicializacion =
+  | { puerto: PuertoAuth; error: null }
+  | { puerto: null; error: string };
+
+function inicializar(): Inicializacion {
   try {
-    const id = localStorage.getItem(CLAVE_SESION);
-
-    return (
-      usuariosDemo.find((u) => u.id === id) ?? null
-    );
-  } catch {
-    return null;
+    return { puerto: obtenerPuertoAuth(), error: null };
+  } catch (e) {
+    return {
+      puerto: null,
+      error:
+        e instanceof Error
+          ? e.message
+          : "No se pudo inicializar la autenticación.",
+    };
   }
 }
 
@@ -25,43 +34,64 @@ export function AuthProvider({
 }: {
   children: ReactNode;
 }) {
-  const [usuario, setUsuario] =
-    useState<UsuarioDemo | null>(recuperarSesion);
+  const [{ puerto, error }] = useState(inicializar);
 
-  function iniciarSesion(usuarioId: string): boolean {
-    const encontrado = usuariosDemo.find(
-      (u) => u.id === usuarioId
-    );
+  const [sesion, setSesion] = useState<EstadoSesion>(() =>
+    error
+      ? { estado: "error", mensaje: error }
+      : { estado: "cargando" }
+  );
 
-    if (!encontrado) return false;
+  const controlador = useRef<ControladorSesion | null>(null);
 
-    try {
-      localStorage.setItem(
-        CLAVE_SESION,
-        encontrado.id
-      );
-      setUsuario(encontrado);
-      return true;
-    } catch {
-      return false;
+  // La sesión se restaura desde Supabase (que valida el token) y el perfil
+  // se vuelve a leer del servidor en cada evento de Auth: nada de
+  // autorización se toma de localStorage ni del JWT. El controlador se crea
+  // por suscripción para que un desmontaje (p. ej. StrictMode) no deje uno
+  // detenido en uso.
+  useEffect(() => {
+    if (!puerto) return;
+
+    const actual = crearControladorSesion(puerto, setSesion);
+    controlador.current = actual;
+
+    const desuscribir = puerto.alCambiarUsuario(actual.notificarUsuario);
+
+    return () => {
+      actual.detener();
+      desuscribir();
+      if (controlador.current === actual) controlador.current = null;
+    };
+  }, [puerto]);
+
+  async function iniciarSesion(
+    usuario: string,
+    password: string
+  ): Promise<ResultadoInicioSesion> {
+    if (!puerto) {
+      return { ok: false, mensaje: error ?? "Autenticación no disponible." };
     }
+
+    return iniciarSesionConPuerto(puerto, usuario, password);
   }
 
-  function cerrarSesion() {
-    try {
-      localStorage.removeItem(CLAVE_SESION);
-    } catch {
-      // La sesión visible también se cierra
-      // si localStorage no está disponible.
-    }
+  async function cerrarSesion() {
+    if (!puerto) return;
 
-    setUsuario(null);
+    // Se invalida antes de esperar a Supabase: ninguna lectura de perfil en
+    // curso puede volver a dejar la sesión autorizada.
+    if (controlador.current) controlador.current.invalidar();
+    else setSesion({ estado: "no_autenticado" });
+
+    await puerto.cerrarSesion();
   }
 
   return (
     <AuthContext.Provider
       value={{
-        usuario,
+        sesion,
+        usuario:
+          sesion.estado === "autenticado" ? sesion.perfil : null,
         iniciarSesion,
         cerrarSesion,
       }}

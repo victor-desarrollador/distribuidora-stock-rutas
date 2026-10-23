@@ -1,11 +1,20 @@
 import { createContext } from "react";
 
-import type { UsuarioDemo } from "./usuariosDemo";
+import type {
+  EstadoSesion,
+  Perfil,
+  ResultadoInicioSesion,
+} from "./sesion";
 
 export interface AuthContextType {
-  usuario: UsuarioDemo | null;
-  iniciarSesion: (usuarioId: string) => boolean;
-  cerrarSesion: () => void;
+  sesion: EstadoSesion;
+  // Perfil protegido del usuario; sólo existe con sesión autorizada.
+  usuario: Perfil | null;
+  iniciarSesion: (
+    usuario: string,
+    password: string
+  ) => Promise<ResultadoInicioSesion>;
+  cerrarSesion: () => Promise<void>;
 }
 
 export const AuthContext = createContext<
