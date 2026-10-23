@@ -1,4 +1,34 @@
 ---
+## 22/10/2026 — Refuerzo de fuentes de verdad y contexto de negocio
+
+**Rama:** `chore/reforzar-fuentes-proyecto` · **Estado:** bloque exclusivamente documental implementado; sin código, SQL, migraciones, Supabase, backend ni deploy.
+
+### Qué se hizo
+
+- Se explicitó la jerarquía documental: Blueprint → ADR aprobadas → PRD → AGENTS → CLAUDE → inventario.
+- Se incorporó la lectura obligatoria previa para tareas funcionales, arquitectónicas o de backend, con verificación de versión documental y `HEAD`.
+- Se definió el preámbulo obligatorio de cada tarea: objetivo de negocio, fuentes aplicables, estado actual, fuera de alcance, decisiones pendientes y plan corto.
+- Se reforzó el objetivo operativo de Fase 1 y los tres roles vigentes.
+- Se agregó una prohibición explícita de sobrearquitectura y se aclaró que `empresa_id` no autoriza construir una plataforma SaaS.
+- Se dejó asentado que ADR-001 P5–P7 siguen pendientes, que empresa y rol deben provenir de tablas protegidas y que una tabla separada de membresías no es un requisito aprobado.
+
+### Archivos
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/progress-log.md`
+
+### Verificación
+
+- Verificación documental solicitada: `git diff --check`, `git diff --stat`, `git diff --name-only`, `git status --short` y búsqueda focalizada con `rg`.
+- Revisión manual: el Blueprint conserva máxima autoridad; el PRD aporta contexto subordinado; P5–P7 continúan sin resolver; ADR-001 no fue modificada.
+
+### Riesgos pendientes
+
+1. ADR-001 P5–P7 continúan pendientes de aprobación humana.
+2. Este bloque no autoriza ni inicia ninguna implementación funcional o de backend.
+
+---
 ## 22/10/2026 — Corrección documental post-auditoría · Bloque G / ADR-001
 
 **Rama:** `chore/adr-001-gobernanza` · **Base obligatoria:** `c1190851de68e18b56edf10f56c701f9addb20c3` · **Estado:** H-1/H-2 corregidos; pendiente de nuevo commit y auditoría independiente del nuevo hash. Sin push, merge, deploy, backend, SQL ni migraciones.

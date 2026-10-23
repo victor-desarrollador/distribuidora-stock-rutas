@@ -2,14 +2,55 @@
 
 Aplica a **Claude Code, OpenCode, Codex** y cualquier otro agente o persona que trabaje en este repositorio.
 
-## 1. Documentación obligatoria
+## 1. Fuentes de verdad y documentación obligatoria
 
-Antes de modificar código:
-1. Leer `BLUEPRINT.md` completo. Es la fuente de referencia: si el código lo contradice, manda el Blueprint hasta que una decisión aprobada lo cambie.
-2. Leer este archivo.
-3. Revisar las decisiones en `docs/decisions/` (estado de cada ADR en `docs/decisions/README.md`) y las últimas entradas de `docs/progress-log.md`.
-4. Consultar el código existente.
-5. Identificar qué reglas siguen pendientes de aprobación.
+Los agentes no diseñan el sistema desde conocimiento genérico. Antes de proponer arquitectura o requisitos deben comprender el negocio real, las reglas aprobadas, las decisiones pendientes y el estado observado del repositorio.
+
+### 1.1 Jerarquía documental
+
+En caso de conflicto, rige esta precedencia:
+
+1. **`BLUEPRINT.md`:** fuente de verdad principal del proyecto.
+2. **ADR aprobadas:** modifican o precisan el Blueprint dentro del alcance expresamente aprobado. Una ADR `aprobada para validación controlada` sólo tiene la autoridad limitada que declara su estado.
+3. **`docs/PRD.md`:** contexto de producto y negocio (usuarios, operación, objetivos y necesidades). No puede contradecir ni reemplazar al Blueprint ni a las ADR aprobadas; si hay conflicto, prevalecen éstos.
+4. **`AGENTS.md`:** reglas de proceso, seguridad, auditoría y autorización.
+5. **`CLAUDE.md`:** reglas adicionales específicas para Claude.
+6. **`INVENTARIO_ETAPA_0.md`:** estado observado del código/prototipo. Sirve como evidencia del presente y no define el diseño futuro.
+
+El código existente tampoco crea una regla de negocio por sí mismo. Si contradice al Blueprint o a una ADR aprobada, prevalece la documentación de mayor autoridad hasta que una decisión humana aprobada la cambie.
+
+### 1.2 Lectura obligatoria antes de programar
+
+Antes de cualquier tarea funcional, arquitectónica o de backend, leer:
+
+1. `BLUEPRINT.md` completo.
+2. `docs/PRD.md`.
+3. Este archivo completo.
+4. `docs/decisions/README.md` y las ADR aprobadas relevantes; revisar también las ADR propuestas necesarias para identificar qué no está autorizado.
+5. Las últimas entradas de `docs/progress-log.md`.
+6. El código existente afectado por la tarea.
+
+Además:
+
+- Claude debe leer `CLAUDE.md`.
+- Leer `INVENTARIO_ETAPA_0.md` cuando la tarea dependa del código o del prototipo existente.
+- Identificar expresamente qué reglas y decisiones siguen pendientes de aprobación.
+- En una microcorrección trivial no hace falta releer documentos completos si ya se leyeron en la misma sesión y no cambiaron, pero se debe verificar que sus versiones y el `HEAD` aplicable sigan siendo los mismos.
+
+### 1.3 Preámbulo obligatorio de cada tarea
+
+Antes de modificar código, SQL, migraciones o arquitectura, informar:
+
+A. Objetivo de negocio entendido.
+B. Secciones concretas de `BLUEPRINT.md` aplicables.
+C. ADR aprobadas aplicables.
+D. Contexto relevante de `docs/PRD.md`.
+E. Estado actual relevante del código y de `INVENTARIO_ETAPA_0.md`.
+F. Fuera de alcance.
+G. Decisiones pendientes.
+H. Plan corto: archivos, migraciones si están autorizadas, RPC, frontend y tests; marcar «no aplica» donde corresponda.
+
+Si una decisión necesaria no está aprobada, **detener la implementación**. No completar huecos por criterio propio. El agente se comporta como un desarrollador junior guiado por la documentación: lee, identifica reglas, propone, espera autorización cuando corresponde, implementa, prueba y reporta.
 
 ## 2. Flujo de trabajo entre agentes
 
@@ -121,6 +162,25 @@ Tampoco se implementa nada de la sección 5 del Blueprint (fuera de alcance / Fa
 - Backend previsto: Supabase Auth y PostgreSQL.
 - Deploy previsto: Vercel.
 - Operaciones críticas de stock y dinero: transacciones PostgreSQL con autorización comprobada.
+
+### 4.1 Contexto rector del producto
+
+Fase 1 es el sistema operativo de una distribuidora de lácteos y fiambres. Su objetivo es saber qué mercadería sale en cada camión, qué se vendió, qué volvió y qué diferencias de mercadería y dinero existen por camión, jornada y vendedor.
+
+Los únicos roles funcionales vigentes son **dueño**, **encargado** y **vendedor/piloto**. No inventar roles funcionales adicionales.
+
+### 4.2 No sobrearquitectura
+
+No introducir conceptos de arquitectura que no respondan a una necesidad concreta del Blueprint o del PRD. Salvo decisión humana explícita, quedan fuera de alcance: SaaS genérico, workspaces, organizaciones gestionables, suscripciones, planes, invitaciones, selector multiempresa, múltiples membresías por usuario, microservicios, event bus e infraestructura adicional.
+
+La existencia de `empresa_id` **no autoriza** convertir el producto en una plataforma SaaS. Su finalidad aprobada en Fase 1 es el aislamiento de los datos de negocio de la distribuidora y la preparación del filtrado multiempresa exigido por el Blueprint, no crear funcionalidades de plataforma.
+
+### 4.3 P5–P7: decisiones todavía abiertas
+
+- El Blueprint exige obtener empresa y rol desde tablas protegidas, nunca desde `user_metadata` ni desde datos modificables por el usuario.
+- La estructura exacta de perfiles, membresías, relación usuario ↔ empresa y roles continúa pendiente de aprobación humana en ADR-001 P5–P7.
+- Una tabla separada de membresías **no es un requisito del Blueprint** y no debe asumirse automáticamente.
+- No resolver ni implementar P5–P7 hasta que exista una decisión humana aprobada con el contexto real de la distribuidora.
 
 ## 5. Reglas obligatorias
 
