@@ -26,7 +26,7 @@
 -- Validación exclusivamente local/staging. Prohibido aplicar en producción.
 
 -- ---------------------------------------------------------------------------
--- perfiles: clave compuesta para FK multiempresa (ADR-001 §8, DE-8)
+-- perfiles: clave compuesta para FK con aislamiento por empresa_id (ADR-001 §8, DE-8)
 -- ---------------------------------------------------------------------------
 alter table public.perfiles
   add constraint perfiles_empresa_usuario_unico unique (empresa_id, usuario_id);
