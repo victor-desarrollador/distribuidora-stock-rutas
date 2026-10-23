@@ -6,8 +6,9 @@
 ### Qué se hizo
 
 - Se explicitó la jerarquía documental: Blueprint → ADR aprobadas → PRD → AGENTS → CLAUDE → inventario.
-- Se incorporó la lectura obligatoria previa para tareas funcionales, arquitectónicas o de backend, con verificación de versión documental y `HEAD`.
-- Se definió el preámbulo obligatorio de cada tarea: objetivo de negocio, fuentes aplicables, estado actual, fuera de alcance, decisiones pendientes y plan corto.
+- Se incorporó la lectura obligatoria previa para cambios de comportamiento, UI, frontend, backend, arquitectura, datos o seguridad, con verificación de versión documental y `HEAD`.
+- Se estableció que `CLAUDE.md` es lectura obligatoria general para todos los agentes, aunque contenga instrucciones especialmente relevantes para Claude.
+- Se definió el preámbulo obligatorio de cada tarea: objetivo de negocio, fuentes aplicables, estado actual, fuera de alcance, decisiones pendientes y plan corto. Los tests deben identificar los casos aplicables de Blueprint §12, los tests existentes a actualizar, los casos negativos y los comandos de verificación.
 - Se reforzó el objetivo operativo de Fase 1 y los tres roles vigentes.
 - Se agregó una prohibición explícita de sobrearquitectura y se aclaró que `empresa_id` no autoriza construir una plataforma SaaS.
 - Se dejó asentado que ADR-001 P5–P7 siguen pendientes, que empresa y rol deben provenir de tablas protegidas y que una tabla separada de membresías no es un requisito aprobado.
@@ -21,12 +22,17 @@
 ### Verificación
 
 - Verificación documental solicitada: `git diff --check`, `git diff --stat`, `git diff --name-only`, `git status --short` y búsqueda focalizada con `rg`.
-- Revisión manual: el Blueprint conserva máxima autoridad; el PRD aporta contexto subordinado; P5–P7 continúan sin resolver; ADR-001 no fue modificada.
+- `git diff --check HEAD^ HEAD` → exit 0 sobre el commit `f95d5acb9fc19dc6d0e5cc24437043c76074c179`.
+- `rg` solicitado sobre `AGENTS.md`, `CLAUDE.md` y `docs/progress-log.md` → exit 0.
+- Alcance exclusivamente documental; no se ejecutaron tests de aplicación porque no hubo cambios de comportamiento ni de código.
+- Revisión manual: el Blueprint conserva máxima autoridad; el PRD aporta contexto subordinado; el requisito se expresa como RLS y aislamiento por `empresa_id`, sin selector ni plataforma SaaS; P5–P7 continúan sin resolver; ADR-001 no fue modificada.
+- Sin push, merge ni deploy.
 
 ### Riesgos pendientes
 
 1. ADR-001 P5–P7 continúan pendientes de aprobación humana.
-2. Este bloque no autoriza ni inicia ninguna implementación funcional o de backend.
+2. Este bloque no autoriza ni inicia ninguna implementación funcional, de frontend o de backend.
+3. El nuevo commit de corrección requiere una nueva auditoría independiente; no se afirma que haya sido auditado.
 
 ---
 ## 22/10/2026 — Corrección documental post-auditoría · Bloque G / ADR-001

@@ -14,26 +14,26 @@ En caso de conflicto, rige esta precedencia:
 2. **ADR aprobadas:** modifican o precisan el Blueprint dentro del alcance expresamente aprobado. Una ADR `aprobada para validación controlada` sólo tiene la autoridad limitada que declara su estado.
 3. **`docs/PRD.md`:** contexto de producto y negocio (usuarios, operación, objetivos y necesidades). No puede contradecir ni reemplazar al Blueprint ni a las ADR aprobadas; si hay conflicto, prevalecen éstos.
 4. **`AGENTS.md`:** reglas de proceso, seguridad, auditoría y autorización.
-5. **`CLAUDE.md`:** reglas adicionales específicas para Claude.
+5. **`CLAUDE.md`:** reglas operativas adicionales, especialmente relevantes para Claude; su lectura es obligatoria para todos los agentes para mantener un contexto común.
 6. **`INVENTARIO_ETAPA_0.md`:** estado observado del código/prototipo. Sirve como evidencia del presente y no define el diseño futuro.
 
 El código existente tampoco crea una regla de negocio por sí mismo. Si contradice al Blueprint o a una ADR aprobada, prevalece la documentación de mayor autoridad hasta que una decisión humana aprobada la cambie.
 
 ### 1.2 Lectura obligatoria antes de programar
 
-Antes de cualquier tarea funcional, arquitectónica o de backend, leer:
+Antes de cualquier cambio de comportamiento, UI, frontend, backend, arquitectura, datos o seguridad, todos los agentes deben leer:
 
 1. `BLUEPRINT.md` completo.
 2. `docs/PRD.md`.
 3. Este archivo completo.
-4. `docs/decisions/README.md` y las ADR aprobadas relevantes; revisar también las ADR propuestas necesarias para identificar qué no está autorizado.
-5. Las últimas entradas de `docs/progress-log.md`.
-6. El código existente afectado por la tarea.
+4. `CLAUDE.md` completo. Contiene instrucciones especialmente relevantes para Claude, pero su lectura es obligatoria para todos los agentes para evitar divergencias.
+5. `docs/decisions/README.md` y las ADR aprobadas relevantes; revisar también las ADR propuestas necesarias para identificar qué no está autorizado.
+6. Las últimas entradas de `docs/progress-log.md`.
+7. El código existente afectado por la tarea.
 
 Además:
 
-- Claude debe leer `CLAUDE.md`.
-- Leer `INVENTARIO_ETAPA_0.md` cuando la tarea dependa del código o del prototipo existente.
+- Leer `INVENTARIO_ETAPA_0.md` cuando sea necesario comprender el código existente, los flujos actuales, los datos demo, sus limitaciones o sus diferencias con el sistema objetivo.
 - Identificar expresamente qué reglas y decisiones siguen pendientes de aprobación.
 - En una microcorrección trivial no hace falta releer documentos completos si ya se leyeron en la misma sesión y no cambiaron, pero se debe verificar que sus versiones y el `HEAD` aplicable sigan siendo los mismos.
 
@@ -48,7 +48,7 @@ D. Contexto relevante de `docs/PRD.md`.
 E. Estado actual relevante del código y de `INVENTARIO_ETAPA_0.md`.
 F. Fuera de alcance.
 G. Decisiones pendientes.
-H. Plan corto: archivos, migraciones si están autorizadas, RPC, frontend y tests; marcar «no aplica» donde corresponda.
+H. Plan corto: archivos, migraciones si están autorizadas, RPC y frontend; marcar «no aplica» donde corresponda. Para tests, identificar explícitamente qué casos exige `BLUEPRINT.md` §12, qué tests existentes se actualizarán, qué casos negativos corresponden y qué comandos de verificación se ejecutarán; marcar «no aplica» con motivo cuando la tarea no afecte comportamiento.
 
 Si una decisión necesaria no está aprobada, **detener la implementación**. No completar huecos por criterio propio. El agente se comporta como un desarrollador junior guiado por la documentación: lee, identifica reglas, propone, espera autorización cuando corresponde, implementa, prueba y reporta.
 
@@ -173,7 +173,7 @@ Los únicos roles funcionales vigentes son **dueño**, **encargado** y **vendedo
 
 No introducir conceptos de arquitectura que no respondan a una necesidad concreta del Blueprint o del PRD. Salvo decisión humana explícita, quedan fuera de alcance: SaaS genérico, workspaces, organizaciones gestionables, suscripciones, planes, invitaciones, selector multiempresa, múltiples membresías por usuario, microservicios, event bus e infraestructura adicional.
 
-La existencia de `empresa_id` **no autoriza** convertir el producto en una plataforma SaaS. Su finalidad aprobada en Fase 1 es el aislamiento de los datos de negocio de la distribuidora y la preparación del filtrado multiempresa exigido por el Blueprint, no crear funcionalidades de plataforma.
+La existencia de `empresa_id` **no autoriza** convertir el producto en una plataforma SaaS. Su finalidad aprobada en Fase 1 es cumplir el RLS y el aislamiento por `empresa_id` exigidos por `BLUEPRINT.md` §7.3, no crear funcionalidades de plataforma, selector de empresa ni múltiples empresas por usuario.
 
 ### 4.3 P5–P7: decisiones todavía abiertas
 

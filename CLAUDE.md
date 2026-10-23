@@ -2,7 +2,7 @@
 
 @AGENTS.md
 
-Lo anterior (`AGENTS.md`) es obligatorio. Antes de una tarea funcional, arquitectónica o de backend, leé también `BLUEPRINT.md`, `docs/PRD.md`, `docs/decisions/README.md`, las ADR aprobadas relevantes y las últimas entradas de `docs/progress-log.md`. Leé `INVENTARIO_ETAPA_0.md` cuando la tarea dependa del código existente. No trabajes con un resumen de memoria: verificá las versiones documentales y el `HEAD` aplicable.
+Este archivo forma parte de la lectura obligatoria general para todos los agentes, aunque contiene instrucciones especialmente relevantes para Claude. Antes de cualquier cambio de comportamiento, UI, frontend, backend, arquitectura, datos o seguridad, leé `BLUEPRINT.md`, `docs/PRD.md`, `AGENTS.md`, este `CLAUDE.md`, `docs/decisions/README.md`, las ADR aprobadas relevantes y las últimas entradas de `docs/progress-log.md`. Leé `INVENTARIO_ETAPA_0.md` cuando sea necesario comprender el código existente, los flujos actuales, los datos demo, sus limitaciones o sus diferencias con el sistema objetivo. No trabajes con un resumen de memoria: verificá las versiones documentales y el `HEAD` aplicable.
 
 ## Tu función
 
@@ -12,7 +12,7 @@ Implementador principal del sistema. **Claude sigue siendo implementador, no aud
 
 1. Aplicá la jerarquía documental de `AGENTS.md` §1.1: Blueprint → ADR aprobadas → PRD → AGENTS → CLAUDE → inventario. El PRD aporta contexto, pero no reemplaza ni contradice al Blueprint o a una ADR aprobada.
 2. Inspeccioná los archivos afectados.
-3. Antes de modificar código, SQL, migraciones o arquitectura, presentá el preámbulo completo de `AGENTS.md` §1.3: objetivo de negocio, secciones del Blueprint, ADR aprobadas, contexto del PRD, estado actual, fuera de alcance, decisiones pendientes y plan corto.
+3. Antes de modificar código, SQL, migraciones o arquitectura, presentá el preámbulo completo de `AGENTS.md` §1.3: objetivo de negocio, secciones del Blueprint, ADR aprobadas, contexto del PRD, estado actual, fuera de alcance, decisiones pendientes y plan corto. Detallá qué pruebas exige `BLUEPRINT.md` §12, qué tests existentes se actualizarán, qué casos negativos corresponden y qué comandos de verificación se ejecutarán; si algo no aplica, indicá el motivo.
 4. Explicá los riesgos y proponé un plan breve sin inventar requisitos ni arquitectura.
 5. Identificá decisiones pendientes. Si la tarea toca alguna regla marcada `PROPUESTA NO APROBADA` / `PROPUESTA TÉCNICA NO APROBADA` o una ADR en estado `propuesta`, detenete y preguntá con `AskUserQuestion` antes de hacer cualquier cambio. No asumas aprobación porque el usuario pidió "seguir".
 6. Creá la rama de la tarea antes del primer cambio.
