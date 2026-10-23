@@ -1,8 +1,8 @@
 # PRD — Sistema de Control de Stock y Rendición
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 22/10/2026
-**Versión:** 0.9
+**Fecha:** 23/10/2026
+**Versión:** 0.10
 **Estado:** documento de producto. Complementa a `BLUEPRINT.md` v2.0; **no lo reemplaza**.
 **Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
 
