@@ -721,7 +721,7 @@ select results_eq(
 
 reset role;
 
--- Integridad multiempresa del autor (DE-8): FK compuesta, también para el owner.
+-- Integridad de aislamiento por empresa_id del autor (DE-8): FK compuesta, también para el owner.
 select throws_ok(
   $$insert into public.productos (empresa_id, nombre, categoria, forma_venta,
                                   precio, creado_por)
