@@ -148,7 +148,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 | RNF-03 | **Lógica en la base.** La lógica que mueve stock o dinero vive en RPC de la base; el frontend no inserta movimientos directamente. | Blueprint §6 |
 | RNF-04 | **Idempotencia.** Clave única por operación (ventas, retiros, cargas, cierres y compras futuras) y protección frente a concurrencia/reintentos. | Blueprint §7.5, §10 |
 | RNF-05 | **Tiempo.** Timestamp del servidor en UTC y zona horaria operativa explícita; distinguir hora declarada del hecho de la hora efectiva de registro. | Blueprint §10 |
-| RNF-06 | **Seguridad.** Supabase Auth con cuentas individuales; roles y membresía desde tablas protegidas (no `user_metadata`); RLS y autorización real en servidor. | Blueprint §10 |
+| RNF-06 | **Seguridad.** Supabase Auth con cuentas individuales; empresa y rol desde el perfil (tabla protegida, no `user_metadata`); RLS y autorización real en servidor. | Blueprint §10 |
 | RNF-07 | **Secretos.** Nunca en el frontend ni en el repositorio; entornos local/staging/producción separados. | Blueprint §10; AGENTS.md §5 |
 | RNF-08 | **Probabilidad de prueba.** «Nada se da por terminado sin prueba»: test automatizado o verificación manual documentada. | Blueprint §3.5, §12 |
 | RNF-09 | **Responsive.** Interfaz utilizable en escritorio (depósito/administración) y en Android (vendedor en ruta). | Blueprint §2, §4 |
@@ -201,7 +201,7 @@ Reglas:
 
 ## 11. Seguridad y autorización
 
-- **Autenticación:** Supabase Auth con cuentas individuales. Membresía, empresa y roles se leen de tablas protegidas, no de `user_metadata` modificable por el usuario (Blueprint §10).
+- **Autenticación:** Supabase Auth con cuentas individuales. Empresa y rol se leen del perfil (tabla protegida), no de `user_metadata` modificable por el usuario (Blueprint §10).
 - **RLS en todas las tablas expuestas** por la API, restringiendo por empresa, rol y estado. Los controles visuales nunca son la única defensa (Blueprint §10).
 - **`authenticated` y `anon` no reciben INSERT/UPDATE/DELETE directos** sobre libros de movimientos de stock/caja ni sobre registros confirmados; la rectificación es por asientos compensatorios (Blueprint §10).
 - **Escrituras críticas por RPC en la base** con autorización comprobada en el servidor (Blueprint §6, primera viñeta sobre la lógica en RPC; Blueprint §10, viñetas de RLS, escrituras directas e idempotencia).
@@ -213,11 +213,12 @@ Reglas:
 
 ---
 
-## 12. Multiempresa
+## 12. Empresa única y aislamiento por `empresa_id`
 
-- **Todas las tablas de negocio llevan `empresa_id`** y las políticas RLS filtran por él (Blueprint §7.3, §8).
-- Hoy existe **una sola empresa**. No se construye registro de empresas, suscripciones ni panel de administración de plataforma (Blueprint §7.3).
-- El diseño debe dejar preparado el filtrado por `empresa_id` para poder probar el aislamiento entre empresas sin construir la funcionalidad completa de alta de empresas (Blueprint §7.3, §12).
+- El producto es para **una sola empresa operativa**; cada usuario pertenece a una única empresa. No es multiempresa, multi-tenant ni SaaS (Blueprint §7.3).
+- **Las tablas de negocio llevan `empresa_id`** como clave técnica de pertenencia, frontera de aislamiento, soporte de RLS e integridad referencial; las políticas RLS filtran por él (Blueprint §7.3, §8). Su presencia no implica funcionalidad multiempresa.
+- Ninguna capacidad SaaS o multiempresa está en alcance: no hay selector de empresa, membresías, workspaces, administración ni alta de empresas, invitaciones, planes ni suscripciones.
+- Los tests prueban el aislamiento por `empresa_id` mediante una empresa ficticia, que es sólo un fixture adversarial y no una funcionalidad (Blueprint §7.3, §12).
 
 ---
 
@@ -280,7 +281,7 @@ Un módulo se considera terminado cuando cumple las **pruebas obligatorias** de 
 - **Jornada:** no hay dos jornadas por camión y fecha (aunque una esté cerrada); el vendedor no registra el conteo de regreso; las notas de papel pendientes bloquean el conteo formal; no se cierra sin conteo; una jornada cerrada rechaza toda modificación.
 - **Rendición:** pago mixto suma el total; `a_cuenta` no suma al efectivo esperado; retiro confirmado por ambos descuenta caja exactamente una vez; dos solicitudes del mismo retiro producen una sola operación; gastos no autorizados no reducen la caja; devoluciones no se duplican; al cerrar, el stock del camión queda en 0.
 - **Ventas en papel:** número duplicado en cualquier jornada de la misma empresa/serie se rechaza; un salto de numeración genera aviso.
-- **Seguridad:** la fachada expuesta `SECURITY INVOKER` y la implementación privada `SECURITY DEFINER` rechazan `anon`, usuario sin membresía, usuario de otra empresa y vendedor intentando cerrar jornada o retirar; sin escrituras directas en el ledger; un usuario sin rol no ve datos; ningún rol hace UPDATE/DELETE en movimientos; usuario de otra `empresa_id` no ve ni opera; transferencia declarada no figura verificada hasta intervención habilitada; vendedor crea cliente pero no edita existente; sólo dueño/encargado inician un retiro y sólo ambos participantes lo confirman.
+- **Seguridad:** la fachada expuesta `SECURITY INVOKER` y la implementación privada `SECURITY DEFINER` rechazan `anon`, usuario sin perfil activo, usuario/perfil con `empresa_id` distinto y vendedor intentando cerrar jornada o retirar; sin escrituras directas en el ledger; un usuario sin rol no ve datos; ningún rol hace UPDATE/DELETE en movimientos; usuario de otra `empresa_id` no ve ni opera; transferencia declarada no figura verificada hasta intervención habilitada; vendedor crea cliente pero no edita existente; sólo dueño/encargado inician un retiro y sólo ambos participantes lo confirman.
 
 > **Nota (P1 resuelta).** Los criterios de Seguridad prueban la Topología D aprobada para validación controlada. No resuelven P8–P17 ni autorizan producción (ver §11 y §22; ADR-001 §4 y §5).
 

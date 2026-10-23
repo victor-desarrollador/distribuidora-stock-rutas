@@ -12,7 +12,7 @@ Es **obligatoria** una revisión de seguridad cuando el cambio toca alguna de es
 
 - configuración de **Supabase**;
 - **autenticación** (Auth, sesiones, cuentas);
-- **`empresa_id`** o cualquier filtrado multiempresa;
+- **`empresa_id`** o cualquier aislamiento por `empresa_id`;
 - **roles** y permisos;
 - **RLS** (políticas, `authenticated`, `anon`);
 - **RPC** / funciones SQL;
@@ -49,7 +49,7 @@ Las pruebas de base y permisos **se escribirán** con **pgTAP** en `supabase/tes
 |---|---|
 | **`anon`** intenta ejecutar la operación / leer datos | Rechazo. |
 | Usuario con **rol incorrecto** intenta una operación de otro rol (p. ej. vendedor cerrando jornada o haciendo un retiro) | Rechazo. |
-| Usuario de **otra empresa** (`empresa_id` distinto) intenta leer u operar | Rechazo (aislamiento multiempresa). |
+| Usuario de **otra empresa** (`empresa_id` distinto) intenta leer u operar | Rechazo (aislamiento por `empresa_id`). |
 | **Intento directo de DML prohibido** (`INSERT`/`UPDATE`/`DELETE`) sobre libros de movimientos de stock o caja, o sobre registros confirmados, por `authenticated` o `anon` | Rechazo. |
 | Invocación directa de una **función privada privilegiada** desde la Data API | Rechazo. |
 | `UPDATE`/`DELETE` sobre `movimientos_stock` por cualquier rol | Rechazo. |
@@ -63,7 +63,7 @@ Además, pruebas positivas: la operación autorizada **sí** funciona para el ro
 ## 4. Reglas no negociables (Blueprint §10)
 
 - `authenticated` y `anon` **no reciben INSERT/UPDATE/DELETE directos** sobre libros de movimientos de stock/caja ni sobre registros confirmados; los registros son inmutables y se rectifican con asientos compensatorios.
-- Los **roles y la membresía** se leen de tablas protegidas, **no** de `user_metadata` modificable por el usuario.
+- La **empresa y el rol** se leen del perfil (tabla protegida), **no** de `user_metadata` modificable por el usuario.
 - **RLS en todas las tablas expuestas.** Los controles visuales nunca son la única defensa.
 - **`SECURITY DEFINER` ejecuta con privilegios del propietario y puede eludir RLS.** La implementación privada de Topología D debe tener propietario de mínimo privilegio, `search_path = ''`, referencias totalmente calificadas, grants revisados y pruebas reales desde `anon`, `authenticated` ajeno y roles válidos. No se ubica en un esquema expuesto.
 - **`SECURITY INVOKER`** para la fachada expuesta y para lecturas/ediciones ordinarias, con grants y RLS apropiados.
