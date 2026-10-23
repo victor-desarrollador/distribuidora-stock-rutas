@@ -1,4 +1,34 @@
 ---
+## 23/10/2026 — Sincronización documental post-Auth
+
+**Rama:** `chore/sincronizar-documentacion-post-auth` · **Base:** `main` en `e5ce8aedd0b5d4dcb424a431187e9bd937e07fe6` · **Estado:** implementado sin commit; pendiente de revisión humana. Sin push, merge, deploy ni migraciones remotas. Sólo Markdown.
+
+### Contexto
+
+- **PR #6** (`fix/auth-backend-auditoria`) mergeado en `main` con el merge commit `e5ce8aedd0b5d4dcb424a431187e9bd937e07fe6` (padres `e75560b` y `a76b52d`). Incorpora el bloque Auth (`d7c3664`) y su corrección post-auditoría (`a76b52d`).
+
+### Cambios
+
+- `docs/PRD.md`: encabezado **Versión** 0.9 → 0.10, alineado con la fila 0.10 del historial ya existente. Sin cambios de requisitos.
+- `BLUEPRINT.md` §10 y §15 (referencias operativas): «P2–P17 siguen pendientes» pasa a «P2–P7 están resueltas por decisión humana (ADR-001 §18); P8–P17 siguen pendientes». Cierra el riesgo 1 de la entrada «Corrección post-auditoría de Auth backend base». La fila 2.0 del historial del Blueprint queda intacta (describe correctamente el estado de ese momento).
+- Sin cambios en el estado de ADR-001 (**APROBADA PARA VALIDACIÓN CONTROLADA**) ni en decisiones: P8–P17 siguen pendientes y P18 es una decisión futura separada.
+
+### No modificado (registro histórico)
+
+- `supabase/migrations/20261022120000_auth_base_empresas_perfiles.sql`: su comentario sobre P2–P4 pendientes refleja el estado al crearse la migración.
+- Historiales/changelogs: fila 2.0 de `BLUEPRINT.md`, fila 0.9 de `docs/PRD.md`, filas v1.3–v1.5 y nota P1 (§5) de ADR-001, entradas anteriores de este archivo y la evidencia histórica de `INVENTARIO_ETAPA_0.md` (cuya errata E-13 ya refleja P2–P7 resueltas).
+
+### Verificación
+
+- `git diff --check` → exit 0.
+- No se ejecutan Supabase local, pgTAP, Playwright ni build: el cambio sólo toca Markdown.
+
+### Riesgos y pendientes
+
+1. El campo **Fecha** del encabezado de `docs/PRD.md` sigue en 22/10/2026 mientras la fila 0.10 del historial dice 23/10/2026; no se cambió por estar fuera del alcance autorizado (sólo versión).
+2. **Producción y migraciones remotas siguen bloqueadas** hasta pruebas, auditoría independiente y aceptación humana final (ADR-001; `AGENTS.md` §5).
+
+---
 ## 23/10/2026 — Corrección post-auditoría de Auth backend base (`d7c3664`)
 
 **Rama:** `fix/auth-backend-auditoria` · **Base:** `d7c3664266c6c57e074661fef4beb23771fdd661` (commit auditado y rechazado; no se modifica ni se reescribe) · **Estado:** implementado sin commit; pendiente de revisión humana, security review y auditoría independiente del nuevo hash. Sin push, merge, deploy ni migraciones remotas. Validación de base **sólo local**.
