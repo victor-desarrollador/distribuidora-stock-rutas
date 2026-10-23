@@ -94,4 +94,4 @@ Lo demás de ADR-002 (cantidad canónica, presentación comercial, decimales, ce
 - Exigir precio `> 0`.
 - Precio de lista contra precio aplicado y descuentos del vendedor (`PROPUESTA NO APROBADA`, `BLUEPRINT.md` §7.5).
 - Autoventa (pantalla de registro de ventas): sin cambios en esta decisión.
-- Cualquier ADR que continúe en estado `propuesta`. Esta decisión no modifica ADR-001, cuyo estado vigente es **APROBADA PARA VALIDACIÓN CONTROLADA**: P1 resolvió la Topología D, P19 el proceso en dos aprobaciones y P20 las migraciones de validación sólo local/staging; P2–P17 siguen pendientes, P18 es una decisión futura separada y producción continúa bloqueada.
+- Cualquier ADR que continúe en estado `propuesta`. Esta decisión no modifica ADR-001, cuyo estado vigente es **APROBADA PARA VALIDACIÓN CONTROLADA**: P1 resolvió la Topología D, P19 el proceso en dos aprobaciones y P20 las migraciones de validación sólo local/staging (luego se resolvieron también P5–P7 y P2–P4); P8–P17 siguen pendientes, P18 es una decisión futura separada y producción continúa bloqueada.

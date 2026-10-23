@@ -47,8 +47,9 @@ export interface PuertoAuth {
     password: string
   ): Promise<{ error: ErrorInicioSesion | null }>;
   cerrarSesion(): Promise<void>;
-  // Notifica el id del usuario autenticado (o null) al suscribirse y cada vez
-  // que cambia. Devuelve la función para desuscribirse.
+  // Notifica el id del usuario autenticado (o null) al suscribirse y en cada
+  // evento de Auth, aunque el id no cambie. El cierre de sesión (null) se
+  // notifica de inmediato. Devuelve la función para desuscribirse.
   alCambiarUsuario(callback: (usuarioId: string | null) => void): () => void;
   // Lecturas sujetas a RLS. Devuelven null si no hay fila visible y lanzan
   // ante errores de red o de base.
@@ -73,7 +74,7 @@ export async function iniciarSesion(
     return {
       ok: false,
       mensaje:
-        "Usuario inválido: usá de 3 a 32 letras, números, punto, guion o guion bajo.",
+        "Usuario inválido: usá de 3 a 32 letras, números, punto, guion o guion bajo; debe empezar y terminar con letra o número, sin puntos seguidos.",
     };
   }
 
@@ -196,6 +197,66 @@ export async function resolverEstadoSesion(
   } catch {
     return { estado: "error", mensaje: MENSAJE_ERROR_PERFIL };
   }
+}
+
+export interface ControladorSesion {
+  // Evento de Auth con el usuario vigente (o null). Con usuario, siempre
+  // vuelve a leer el perfil, aunque el id no haya cambiado.
+  notificarUsuario(usuarioId: string | null): void;
+  // Descarta de inmediato el estado autorizado y toda lectura en curso.
+  invalidar(): void;
+  detener(): void;
+}
+
+// Coordina eventos de Auth y lecturas de perfil. Cada evento abre una nueva
+// generación: sólo el resultado de la generación vigente se publica, de modo
+// que una respuesta vieja (de otro usuario o previa al logout) nunca
+// sobrescribe el estado actual.
+//
+// Cambio de usuario: se publica `cargando` antes de leer, para no mostrar el
+// perfil anterior. Mismo usuario: se conserva el estado mientras se
+// revalida y luego se reemplaza por el resultado (rol, empresa o `activo`
+// actualizados; error => fail-closed).
+export function crearControladorSesion(
+  puerto: PuertoAuth,
+  publicar: (estado: EstadoSesion) => void
+): ControladorSesion {
+  let generacion = 0;
+  let usuarioVigente: string | null = null;
+  let detenido = false;
+
+  function invalidar() {
+    if (detenido) return;
+
+    generacion++;
+    usuarioVigente = null;
+    publicar({ estado: "no_autenticado" });
+  }
+
+  function notificarUsuario(usuarioId: string | null) {
+    if (detenido) return;
+    if (!usuarioId) return invalidar();
+
+    const propia = ++generacion;
+
+    if (usuarioId !== usuarioVigente) {
+      usuarioVigente = usuarioId;
+      publicar({ estado: "cargando" });
+    }
+
+    void resolverEstadoSesion(puerto, usuarioId).then((estado) => {
+      if (!detenido && propia === generacion) publicar(estado);
+    });
+  }
+
+  return {
+    notificarUsuario,
+    invalidar,
+    detener() {
+      detenido = true;
+      generacion++;
+    },
+  };
 }
 
 export type DecisionAcceso =

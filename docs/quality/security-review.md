@@ -2,7 +2,7 @@
 
 **Fecha:** 22/10/2026
 **Ámbito:** cambios que tocan autenticación, autorización, datos por empresa, RPC, RLS, dinero o stock.
-**Fuente:** `BLUEPRINT.md` §6 y §10, `AGENTS.md` §5, `CLAUDE.md`, ADR-001 v1.3 (**APROBADA PARA VALIDACIÓN CONTROLADA**). Este documento no amplía esa aprobación: P2–P17 siguen pendientes, P18 es una decisión futura separada y producción continúa bloqueada.
+**Fuente:** `BLUEPRINT.md` §6 y §10, `AGENTS.md` §5, `CLAUDE.md`, ADR-001 v1.5 (**APROBADA PARA VALIDACIÓN CONTROLADA**). Este documento no amplía esa aprobación: P2–P7 están resueltas, P8–P17 siguen pendientes, P18 es una decisión futura separada y producción continúa bloqueada.
 
 ---
 
@@ -43,7 +43,7 @@ Si el cambio no toca ninguna de estas superficies, la revisión de seguridad no 
 
 ## 3. Verificación de permisos negativos (pgTAP)
 
-Las pruebas de base y permisos **se escribirán** con **pgTAP** en `supabase/tests/` y se ejecutarán con `supabase test db` exclusivamente en local/staging, una vez resueltas las P2–P17 necesarias para el alcance de validación (ADR-001 §16; Blueprint §12). Deben probar, como mínimo, que **fallan** los accesos no autorizados:
+Las pruebas de base y permisos **se escribirán** con **pgTAP** en `supabase/tests/` y se ejecutarán con `supabase test db` exclusivamente en local/staging, una vez resueltas las P8–P17 necesarias para el alcance de validación (ADR-001 §16; Blueprint §12). Deben probar, como mínimo, que **fallan** los accesos no autorizados:
 
 | Caso negativo | Resultado esperado |
 |---|---|
@@ -56,7 +56,7 @@ Las pruebas de base y permisos **se escribirán** con **pgTAP** en `supabase/tes
 
 Además, pruebas positivas: la operación autorizada **sí** funciona para el rol habilitado, con los controles de idempotencia y concurrencia.
 
-> **Bloqueo vigente:** ADR-001 v1.3 resolvió P1 con Topología D y P19/P20 con validación en dos etapas y migraciones sólo local/staging. Las pruebas e implementaciones que dependan de P2–P17 continúan bloqueadas hasta resolverlas; P18 no es requisito previo. Nada de esto autoriza producción, que exige evidencia, auditoría independiente y aceptación humana final.
+> **Bloqueo vigente:** ADR-001 v1.5 resolvió P1 con Topología D, P19/P20 con validación en dos etapas y migraciones sólo local/staging, P5–P7 (perfil 1:1, una empresa, un rol) y P2–P4 (`public`/`privado`, `propietario_rpc`, RLS obligatoria sin `FORCE` global). Las pruebas e implementaciones que dependan de P8–P17 continúan bloqueadas hasta resolverlas; P18 no es requisito previo. Nada de esto autoriza producción, que exige evidencia, auditoría independiente y aceptación humana final.
 
 ---
 
@@ -67,7 +67,7 @@ Además, pruebas positivas: la operación autorizada **sí** funciona para el ro
 - **RLS en todas las tablas expuestas.** Los controles visuales nunca son la única defensa.
 - **`SECURITY DEFINER` ejecuta con privilegios del propietario y puede eludir RLS.** La implementación privada de Topología D debe tener propietario de mínimo privilegio, `search_path = ''`, referencias totalmente calificadas, grants revisados y pruebas reales desde `anon`, `authenticated` ajeno y roles válidos. No se ubica en un esquema expuesto.
 - **`SECURITY INVOKER`** para la fachada expuesta y para lecturas/ediciones ordinarias, con grants y RLS apropiados.
-- Las **escrituras críticas de stock y dinero** siguen la cadena Data API → fachada expuesta `SECURITY INVOKER` → implementación privada `SECURITY DEFINER` → validaciones completas → transacción. La implementación privada es la frontera real de seguridad (ADR-001 v1.3; Blueprint §10).
+- Las **escrituras críticas de stock y dinero** siguen la cadena Data API → fachada expuesta `SECURITY INVOKER` → implementación privada `SECURITY DEFINER` → validaciones completas → transacción. La implementación privada es la frontera real de seguridad (ADR-001 v1.5; Blueprint §10).
 - **No usar credenciales administrativas en el navegador** (AGENTS.md §5).
 - **Idempotencia y transacciones atómicas** para cargas, ventas, retiros y cierres; protección contra concurrencia/bloqueos (Blueprint §10).
 

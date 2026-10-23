@@ -147,7 +147,7 @@ Esto incluye, según lo marcado en el Blueprint (ver Blueprint §15 y las seccio
 - Prohibición de descuentos / esquema de precio de lista vs aplicado (sección 7.5).
 - Retiro de efectivo que supera el saldo registrado sin bloqueo (sección 7.6).
 - Vencimientos por partida de ingreso / tabla `partidas_ingreso` (secciones 2, 4, 8).
-- **ADR-001, P2–P4 y P8–P17:** decisiones técnicas todavía pendientes para completar la validación controlada (`docs/decisions/001-rpc-privilegiadas.md`). P18 sigue como decisión futura separada. P1/P19/P20 y P5–P7 están resueltas y no integran esta prohibición.
+- **ADR-001, P8–P17:** decisiones técnicas todavía pendientes para completar la validación controlada (`docs/decisions/001-rpc-privilegiadas.md`). P18 sigue como decisión futura separada. P1/P19/P20, P2–P4 y P5–P7 están resueltas y no integran esta prohibición.
 
 "Implementar" incluye: código de aplicación, migraciones SQL, funciones RPC, políticas RLS, tipos, pruebas que asuman la regla como vigente y cambios de UI que la reflejen.
 
@@ -180,6 +180,15 @@ La existencia de `empresa_id` **no autoriza** convertir el producto en una plata
 - El Blueprint exige obtener empresa y rol desde tablas protegidas, nunca desde `user_metadata` ni desde datos modificables por el usuario.
 - Decisión humana registrada en ADR-001 §18: cada usuario tiene **un único perfil** en `perfiles`, 1:1 con `auth.users`, con **una sola empresa** y **un único rol** (`dueno`, `encargado` o `vendedor_piloto`). Sin perfil o con perfil inactivo, acceso denegado.
 - **No hay tabla de membresías ni tabla `roles`.** No se introducen múltiples empresas por usuario, selector de empresa ni membresías múltiples sin una nueva decisión humana.
+
+### 4.4 P2–P4: resueltas por decisión humana (23/10/2026)
+
+Registradas en ADR-001 §7 y §18:
+
+- **P2:** `public` es el esquema expuesto para las tablas que la aplicación necesita; `privado` será el esquema no expuesto para las futuras implementaciones privilegiadas.
+- **P3:** el rol técnico `propietario_rpc` (`NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`) es propietario sólo de las funciones privilegiadas privadas necesarias, nunca de tablas de negocio.
+- **P4:** las tablas de negocio quedan bajo el owner de migraciones/Supabase; toda tabla expuesta lleva RLS obligatoria; no se impone `FORCE ROW LEVEL SECURITY` global (cualquier uso futuro se justifica y se prueba específicamente); las funciones `SECURITY DEFINER` viven en `privado`, no son propietarias de tablas y validan explícitamente `auth.uid()`, empresa, rol, permisos, estado e integridad.
+- **No se crean objetos vacíos por anticipado:** el esquema `privado` y el rol `propietario_rpc` se crean recién con el primer objeto que los necesite.
 
 ## 5. Reglas obligatorias
 

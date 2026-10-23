@@ -8,12 +8,12 @@ Una decisión por archivo: `NNN-titulo.md`. Ver `BLUEPRINT.md`, sección 13.
 
 | N.º | Título | Versión | Estado |
 |---|---|---|---|
-| [001](001-rpc-privilegiadas.md) | Puerta de entrada SQL para operaciones privilegiadas | 1.4 | APROBADA PARA VALIDACIÓN CONTROLADA |
+| [001](001-rpc-privilegiadas.md) | Puerta de entrada SQL para operaciones privilegiadas | 1.5 | APROBADA PARA VALIDACIÓN CONTROLADA |
 | [002](002-precios-independientes-pieza-media.md) | Precios comerciales independientes de pieza y media pieza | 1.0 | SUPERADA por ADR-003 (precio de media pieza y `localStorage` v3); histórica |
 | [003](003-precio-derivado-media-pieza.md) | Precio derivado de media pieza | 1.0 | APROBADA |
 | [004](004-cobros-jornada-cerrada.md) | Cobros asociados a jornadas cerradas | 1.0 | PROPUESTA — NO APROBADA |
 
-ADR-001 (v1.4) tiene resueltos P1 (Topología D), P19 (gobernanza en dos etapas), P20 (migraciones dependientes de ADR-001 sólo en local/staging) y P5–P7 (un perfil 1:1, una sola empresa y un único rol por usuario; decisión humana del 22/10/2026). P2–P4 y P8–P17 siguen **PENDIENTES DE APROBACIÓN HUMANA** y P18 continúa como decisión futura separada. Su estado intermedio no equivale a aprobación productiva.
+ADR-001 (v1.5) tiene resueltos P1 (Topología D), P19 (gobernanza en dos etapas), P20 (migraciones dependientes de ADR-001 sólo en local/staging), P5–P7 (un perfil 1:1, una sola empresa y un único rol por usuario; decisión humana del 22/10/2026) y P2–P4 (`public` expuesto y `privado` no expuesto; rol técnico `propietario_rpc`; tablas del owner de migraciones con RLS obligatoria y sin `FORCE` global; decisión humana del 23/10/2026). P8–P17 siguen **PENDIENTES DE APROBACIÓN HUMANA** y P18 continúa como decisión futura separada. Su estado intermedio no equivale a aprobación productiva; producción sigue bloqueada.
 
 ## Estados
 

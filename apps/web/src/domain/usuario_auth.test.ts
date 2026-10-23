@@ -33,8 +33,31 @@ describe("normalizar_usuario", () => {
     [".juan", "empieza con punto"],
     ["-juan", "empieza con guion"],
     ["juan;drop", "punto y coma"],
+    ["abc.", "termina con punto"],
+    [".aabc", "empieza con punto (otro caso)"],
+    ["a..b", "puntos consecutivos"],
+    ["juan..perez", "puntos consecutivos internos"],
+    ["juan-", "termina con guion"],
+    ["juan_", "termina con guion bajo"],
+    ["_juan", "empieza con guion bajo"],
+    ["Abc.", "termina con punto tras normalizar"],
   ])("rechaza %j (%s)", (entrada) => {
     expect(normalizar_usuario(entrada)).toBeNull();
+  });
+
+  it.each([
+    ["juan.perez"],
+    ["a.b"],
+    ["a_b-c.d"],
+    ["a-b"],
+    ["a__b"],
+    ["dueno.prueba"],
+    ["encargado.prueba"],
+    ["vendedor.prueba"],
+    ["inactivo.prueba"],
+    ["sinperfil.prueba"],
+  ])("acepta %j", (entrada) => {
+    expect(normalizar_usuario(entrada)).toBe(entrada);
   });
 
   it("acepta los límites de longitud", () => {
@@ -54,5 +77,7 @@ describe("identificador_auth_interno", () => {
   it("falla cerrado si recibe un usuario no normalizado", () => {
     expect(() => identificador_auth_interno("Juan")).toThrow();
     expect(() => identificador_auth_interno("juan@evil.com")).toThrow();
+    expect(() => identificador_auth_interno("abc.")).toThrow();
+    expect(() => identificador_auth_interno("a..b")).toThrow();
   });
 });

@@ -123,19 +123,68 @@ describe("crearPuertoSupabase", () => {
     });
   });
 
-  it("restaura la sesión inicial y notifica el usuario una sola vez", async () => {
+  it("notifica cada evento de Auth aunque el usuario no cambie", async () => {
     vi.useFakeTimers();
     const f = clienteFalso({});
     const puerto = crearPuertoSupabase(f.cliente);
     const cb = vi.fn();
 
     puerto.alCambiarUsuario(cb);
-    f.emitir("INITIAL_SESSION", SESION_CON_METADATA_FALSA);
-    f.emitir("TOKEN_REFRESHED", SESION_CON_METADATA_FALSA);
+    for (const evento of ["INITIAL_SESSION", "TOKEN_REFRESHED", "USER_UPDATED", "SIGNED_IN"]) {
+      f.emitir(evento, SESION_CON_METADATA_FALSA);
+      await vi.runAllTimersAsync();
+    }
     f.emitir("SIGNED_OUT", null);
+
+    expect(cb.mock.calls).toEqual([["u-1"], ["u-1"], ["u-1"], ["u-1"], [null]]);
+    vi.useRealTimers();
+  });
+
+  it("SIGNED_OUT se notifica en el acto y cancela el aviso pendiente del usuario", async () => {
+    vi.useFakeTimers();
+    const f = clienteFalso({});
+    const puerto = crearPuertoSupabase(f.cliente);
+    const cb = vi.fn();
+
+    puerto.alCambiarUsuario(cb);
+    f.emitir("SIGNED_IN", SESION_CON_METADATA_FALSA);
+    f.emitir("SIGNED_OUT", null);
+
+    // Sin correr timers: la invalidación ya ocurrió.
+    expect(cb.mock.calls).toEqual([[null]]);
+
+    await vi.runAllTimersAsync();
+    expect(cb.mock.calls).toEqual([[null]]);
+    vi.useRealTimers();
+  });
+
+  it("un cambio de usuario antes de entregar el aviso anterior sólo entrega el último", async () => {
+    vi.useFakeTimers();
+    const f = clienteFalso({});
+    const puerto = crearPuertoSupabase(f.cliente);
+    const cb = vi.fn();
+
+    puerto.alCambiarUsuario(cb);
+    f.emitir("SIGNED_IN", SESION_CON_METADATA_FALSA);
+    f.emitir("SIGNED_IN", { user: { id: "u-2" } });
     await vi.runAllTimersAsync();
 
-    expect(cb.mock.calls).toEqual([["u-1"], [null]]);
+    expect(cb.mock.calls).toEqual([["u-2"]]);
+    vi.useRealTimers();
+  });
+
+  it("desuscribirse cancela el aviso pendiente", async () => {
+    vi.useFakeTimers();
+    const f = clienteFalso({});
+    const puerto = crearPuertoSupabase(f.cliente);
+    const cb = vi.fn();
+
+    const desuscribir = puerto.alCambiarUsuario(cb);
+    f.emitir("SIGNED_IN", SESION_CON_METADATA_FALSA);
+    desuscribir();
+    await vi.runAllTimersAsync();
+
+    expect(cb).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

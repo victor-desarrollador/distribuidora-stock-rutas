@@ -50,6 +50,21 @@ test('usuario inexistente recibe el mismo mensaje genérico', async ({ page }) =
   await expect(page.getByRole('alert')).toHaveText('Usuario o contraseña incorrectos.')
 })
 
+for (const usuario of ['abc.', 'a..b', '.aabc']) {
+  test(`usuario con formato inválido "${usuario}" no llega a Auth`, async ({ page }) => {
+    const pedidosAuth: string[] = []
+    page.on('request', (req) => {
+      if (req.url().includes('/auth/v1/token')) pedidosAuth.push(req.url())
+    })
+
+    await ingresar(page, usuario)
+
+    await expect(page.getByRole('alert')).toContainText('Usuario inválido')
+    await expect(page).toHaveURL('/login')
+    expect(pedidosAuth).toEqual([])
+  })
+}
+
 test('ruta protegida sin sesión redirige a login', async ({ page }) => {
   await page.goto('/rendicion')
 

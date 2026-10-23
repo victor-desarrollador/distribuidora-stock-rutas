@@ -1,10 +1,10 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 22/10/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 23/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.4 (registro de la decisión humana P5–P7)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4)
 
-> **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20, y el 22/10/2026 P5, P6 y P7 (§18). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P2–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P2–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
+> **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; y el 23/10/2026, P2, P3 y P4 (§18). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
 ---
 
@@ -20,6 +20,7 @@
 | v1.2, ronda 3 | Claude Code | Esta versión: aplica las 4 correcciones (secciones 4, 5, 15, 17, 18, 19 y 21). Pendiente de nueva revisión independiente y de aprobación humana. |
 | v1.3 | Codex | Alinea la decisión humana: P1 = Topología D, P19 = gobernanza en dos etapas y P20 = migraciones de validación sólo local/staging. Estado intermedio, sin aprobación productiva; P2–P17 pendientes y P18 separada. |
 | v1.4 | Claude Code | Registra la decisión humana del 22/10/2026 sobre P5, P6 y P7 (un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario; sin membresías). El estado de la ADR no cambia; P2–P4 y P8–P17 siguen pendientes. |
+| v1.5 | Claude Code | Registra la decisión humana del 23/10/2026 sobre P2, P3 y P4 (esquemas `public`/`privado`, rol técnico `propietario_rpc`, ownership de tablas y RLS sin `FORCE` global), que cierra el hallazgo BLOCKER-01 de la auditoría de `d7c3664`. El estado de la ADR no cambia; P8–P17 siguen pendientes y P18 separada. |
 
 ---
 
@@ -27,7 +28,7 @@
 
 El sistema nuevo **está previsto** sobre Supabase (Auth, PostgreSQL, RLS, RPC) con frontend React (`BLUEPRINT.md` §6). Hoy el repositorio contiene un prototipo frontend sin backend que persiste en `localStorage` (`INVENTARIO_ETAPA_0.md` §1); **todavía no existe** integración con Supabase ni con su Data API.
 
-Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST). Los usuarios `authenticated` no deberán poder escribir directamente en los libros de movimientos de stock y dinero (`BLUEPRINT.md` §3, §6, §10). Un enfoque `SECURITY INVOKER` puro sobre esas tablas exigiría conceder escritura directa a `authenticated`, lo que abriría rutas capaces de saltar las reglas de negocio y la auditoría. Esta ADR define la topología de la puerta de entrada para validación controlada; sus detalles P2–P17 siguen pendientes.
+Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST). Los usuarios `authenticated` no deberán poder escribir directamente en los libros de movimientos de stock y dinero (`BLUEPRINT.md` §3, §6, §10). Un enfoque `SECURITY INVOKER` puro sobre esas tablas exigiría conceder escritura directa a `authenticated`, lo que abriría rutas capaces de saltar las reglas de negocio y la auditoría. Esta ADR define la topología de la puerta de entrada para validación controlada; P2–P7 están resueltas (§18) y P8–P17 siguen pendientes.
 
 ---
 
@@ -37,7 +38,7 @@ Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST).
 - `AGENTS.md` traslada esas reglas a instrucciones operativas para agentes; no las relaja. `INVENTARIO_ETAPA_0.md` está subordinado a ambos (su propia nota de precedencia).
 - Una ADR en estado `APROBADA PARA VALIDACIÓN CONTROLADA`, como esta, modifica el Blueprint únicamente dentro de las decisiones resueltas y habilita sólo validación local/staging; no habilita producción ni completa decisiones pendientes.
 
-**Alcance resuelto (P20).** Antes de la aprobación para validación controlada no podían generarse migraciones dependientes de ADR-001. Con el estado actual se permiten las migraciones necesarias para probar la ADR exclusivamente en local/staging. Producción permanece bloqueada hasta completar las pruebas requeridas, la auditoría independiente y la aceptación humana final. Esta autorización no alcanza a decisiones P2–P17 todavía pendientes ni a otras migraciones fuera del alcance de validación.
+**Alcance resuelto (P20).** Antes de la aprobación para validación controlada no podían generarse migraciones dependientes de ADR-001. Con el estado actual se permiten las migraciones necesarias para probar la ADR exclusivamente en local/staging. Producción permanece bloqueada hasta completar las pruebas requeridas, la auditoría independiente y la aceptación humana final. Esta autorización no alcanza a decisiones P8–P17 todavía pendientes ni a otras migraciones fuera del alcance de validación.
 
 ---
 
@@ -165,16 +166,24 @@ Hechos documentados (PostgreSQL 18, *CREATE ROLE* y *ALTER FUNCTION*):
 - Los atributos por defecto de un rol nuevo son `NOLOGIN`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE` y `NOBYPASSRLS`. Solo un superusuario o un rol con `BYPASSRLS` puede otorgar `BYPASSRLS`.
 - Para cambiar el propietario de una función hay que poder hacer `SET ROLE` al nuevo propietario, y ese rol necesita `CREATE` sobre el esquema de la función.
 
-Requisito aprobado: propietario de **privilegio mínimo** (§10:278). Perfil candidato del rol técnico (nombre provisorio `rpc_owner`): `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`, distinto de `postgres` y de `service_role`. **PENDIENTE DE APROBACIÓN HUMANA (P3).**
+Requisito aprobado: propietario de **privilegio mínimo** (§10:278). **RESUELTO POR DECISIÓN HUMANA (P3, 23/10/2026):** el rol técnico se llama `propietario_rpc` (antes nombre provisorio `rpc_owner`) y tiene `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`, distinto de `postgres` y de `service_role`. Es propietario **únicamente** de las funciones privilegiadas privadas que realmente se necesiten y **nunca** de tablas de negocio. **No se crea en SQL** hasta que exista el primer objeto que dependa de él.
 
-**Decisión arquitectónica PENDIENTE DE APROBACIÓN HUMANA (P4).** Hay que elegir una de estas combinaciones, que no se pueden mezclar libremente:
+**RESUELTO POR DECISIÓN HUMANA (P4, 23/10/2026):**
+
+- Las tablas de negocio permanecen bajo el **owner de migraciones/Supabase**; `propietario_rpc` no es propietario de tablas (pregunta 1: no).
+- Toda tabla expuesta tiene **RLS obligatoria**.
+- **No se impone `FORCE ROW LEVEL SECURITY` globalmente** en esta etapa (pregunta 2: no). Cualquier uso futuro de `FORCE` debe justificarse y probarse específicamente para esa tabla.
+- Las futuras funciones `SECURITY DEFINER` viven en el esquema privado/no expuesto (P2), no son propietarias de tablas y **validan explícitamente** `auth.uid()`, empresa, rol, permisos, estado y la integridad aplicable (§9) antes de escribir: esas validaciones internas son la frontera de seguridad (pregunta 4), en línea con la Topología D.
+- Como `propietario_rpc` es `NOBYPASSRLS` y no es propietario de las tablas, RLS se le aplica (pregunta 3): las políticas que necesite para operar se diseñan y prueban junto con la primera función privilegiada.
+
+Texto original de las opciones, conservado como registro:
 
 1. **¿`rpc_owner` puede ser propietario de tablas de negocio?** Si lo es, elude RLS sobre ellas como propietario, salvo que se aplique `FORCE`.
 2. **¿Se aplica `FORCE ROW LEVEL SECURITY`?** Solo tiene efecto sobre un propietario sin `BYPASSRLS`; sobre `postgres` (que según Supabase elude RLS) no protege.
 3. **¿RLS como defensa en profundidad para el rol técnico?** Si `rpc_owner` no es propietario y es `NOBYPASSRLS`, RLS se le aplica y necesita políticas propias que vuelvan a acotar por empresa.
 4. **¿O la función privilegiada elude RLS deliberadamente** y depende de validaciones internas completas, aceptando que RLS no la protege?
 
-Relaciones de propiedad a definir junto con P4: propietario de los esquemas (expuesto y privado), propietario de las funciones privilegiadas, propietario de las tablas de negocio y rol creador de las migraciones (sección 12).
+Relaciones de propiedad: tablas de negocio y esquemas, del rol que ejecuta las migraciones (§12.6 y §17.2 siguen exigiendo confirmar ese rol en cada entorno); funciones privilegiadas privadas, de `propietario_rpc` (P3).
 
 ---
 
@@ -316,8 +325,8 @@ Las pruebas necesitan un esquema; el esquema necesita migraciones; y las migraci
 
 | Decisión | Por qué la necesita la validación |
 |---|---|
-| P2, P3, P4 | Esquemas, rol propietario, ownership y RLS: sin ellos no se puede crear ningún objeto |
-| P5, P6, P7 | Modelo de membresía y roles para los datos de prueba (T2–T6) |
+| P2, P3, P4 | Esquemas, rol propietario, ownership y RLS: sin ellos no se puede crear ningún objeto. **Resueltas el 23/10/2026 (§18).** |
+| P5, P6, P7 | Modelo de membresía y roles para los datos de prueba (T2–T6). **Resueltas el 22/10/2026 (§18).** |
 | P8, P9 | Separación de funciones (T13) |
 | P10 | Catálogo de operaciones a ensayar (puede acotarse a un subconjunto representativo) |
 | P11 | Grants de `service_role` y roles internos (T16, sección 17.3) |
@@ -329,7 +338,7 @@ Las pruebas necesitan un esquema; el esquema necesita migraciones; y las migraci
 
 Si el dueño acota la validación a un subconjunto de operaciones, solo hacen falta las decisiones que ese subconjunto requiera. **P18 no es requisito previo:** es una decisión futura separada (sección 14). Esa aprobación **no** autoriza producción.
 
-**Paso 2 — Implementación exclusivamente local o en staging.** Una vez resueltas las P2–P17 necesarias para el alcance elegido, se permiten migraciones, roles, schemas y grants sólo en entornos aislados (§10). Nada de `supabase db push`, `supabase migration up` ni comandos contra producción (`AGENTS.md` §5).
+**Paso 2 — Implementación exclusivamente local o en staging.** Una vez resueltas las P2–P17 necesarias (P2–P7 ya lo están; quedan P8–P17) para el alcance elegido, se permiten migraciones, roles, schemas y grants sólo en entornos aislados (§10). Nada de `supabase db push`, `supabase migration up` ni comandos contra producción (`AGENTS.md` §5).
 
 **Paso 3 — Pruebas.** Toda la matriz de la sección 16 y las verificaciones de la sección 17, con evidencia citada y auditoría independiente (`AGENTS.md` §2).
 
@@ -341,7 +350,7 @@ Si el dueño acota la validación a un subconjunto de operaciones, solo hacen fa
 
 ## 16. Matriz de pruebas obligatorias
 
-Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabase test db` en un entorno aislado, más pruebas HTTP contra la Data API local y un arnés concurrente. Su implementación depende de resolver las decisiones P2–P17 necesarias de la sección 15, paso 1.
+Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabase test db` en un entorno aislado, más pruebas HTTP contra la Data API local y un arnés concurrente. Su implementación depende de resolver las decisiones P8–P17 necesarias de la sección 15, paso 1 (P2–P7 ya están resueltas).
 
 | # | Caso | Resultado esperado |
 |---|---|---|
@@ -407,7 +416,7 @@ Aserciones de catálogo que se repiten siempre:
 - sin `EXECUTE` para `PUBLIC` ni `anon`, y `EXECUTE` de `authenticated` solo en las firmas aprobadas;
 - sin sobrecargas en las funciones expuestas;
 - sin DML directo de `anon` ni `authenticated` sobre los libros;
-- RLS habilitada (y forzada, si P4 lo decide) en todas las tablas de negocio.
+- RLS habilitada en todas las tablas expuestas; `FORCE` sólo donde una decisión específica lo justifique y lo pruebe (P4).
 
 ---
 
@@ -415,9 +424,6 @@ Aserciones de catálogo que se repiten siempre:
 
 | # | Decisión | Sección |
 |---|---|---|
-| P2 | Nombre de los esquemas expuesto y privado | 5 |
-| P3 | Rol propietario técnico y sus atributos | 7 |
-| P4 | Ownership de tablas, `FORCE RLS`, RLS como defensa en profundidad o elusión deliberada | 7 |
 | P8 | Definición de "participación real en la jornada" | 9 |
 | P9 | Huecos de separación de funciones (aprobación por quien contó, receptor = iniciador, verificación de transferencias) | 9 |
 | P10 | Catálogo de operaciones y permisos por RPC | 9 |
@@ -430,7 +436,7 @@ Aserciones de catálogo que se repiten siempre:
 | P17 | Mecanismo de auditoría de operaciones exitosas | 14 |
 | P18 | Registro de intentos rechazados (**decisión futura separada**) | 14 |
 
-**P2–P4 y P8–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.**
+**P8–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.**
 
 | # | Decisión resuelta | Resultado | Sección |
 |---|---|---|---|
@@ -440,6 +446,9 @@ Aserciones de catálogo que se repiten siempre:
 | P5 | Resolución de la membresía activa | Variante de la opción (a) sin tabla de membresías: cada usuario tiene **un único perfil** en `perfiles`, 1:1 con `auth.users`, que fija su empresa. Sin perfil o con perfil inactivo, acceso denegado. La empresa nunca la indica el cliente (decisión humana, 22/10/2026) | 8 |
 | P6 | Usuarios con varias empresas | **No.** En Fase 1 un usuario pertenece a una sola empresa; sin selector de empresa ni múltiples empresas por usuario (decisión humana, 22/10/2026) | 8 |
 | P7 | Uno o varios roles | **Un único rol por perfil:** `dueno`, `encargado` o `vendedor_piloto`. Sin tabla `roles` (decisión humana, 22/10/2026) | 8 |
+| P2 | Esquemas expuesto y privado | **`public`** es el esquema expuesto para las tablas que la aplicación necesita; **`privado`** será el esquema no expuesto para las futuras implementaciones privilegiadas. `privado` no se crea hasta que exista la primera implementación que viva allí (decisión humana, 23/10/2026) | 5 |
+| P3 | Rol propietario técnico | **`propietario_rpc`**: `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`; propietario sólo de las funciones privilegiadas privadas necesarias, nunca de tablas de negocio. Se crea junto con el primer objeto que dependa de él (decisión humana, 23/10/2026) | 7 |
+| P4 | Ownership, `FORCE RLS` y frontera de seguridad | Tablas de negocio del owner de migraciones/Supabase; RLS obligatoria en toda tabla expuesta; **sin `FORCE ROW LEVEL SECURITY` global** (todo uso futuro, justificado y probado); funciones `SECURITY DEFINER` en `privado`, sin ser propietarias de tablas y con validación explícita de `auth.uid()`, empresa, rol, permisos, estado e integridad (decisión humana, 23/10/2026) | 7 |
 
 ---
 
@@ -450,7 +459,7 @@ La alineación documental aplica estos cambios:
 - **D:** Blueprint §10 define la fachada expuesta `SECURITY INVOKER`, la implementación privada/no expuesta `SECURITY DEFINER` y la implementación privada como frontera real de seguridad; §12 prueba esa cadena; §15 registra el estado intermedio.
 - **A, B y C:** A queda descartada, B reservada para lógica externa y C no elegida.
 - **Gobernanza:** `docs/decisions/README.md` incorpora `APROBADA PARA VALIDACIÓN CONTROLADA`; las migraciones dependientes de ADR-001 quedan habilitadas sólo local/staging.
-- **Modelo de datos y decisiones técnicas:** P2–P4 y P8–P17 siguen pendientes; P18 permanece separada. P5–P7 fijan un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario, sin membresías. `auditoria`, `idempotency_key` y restricciones no quedan aprobadas por P1/P19/P20.
+- **Modelo de datos y decisiones técnicas:** P8–P17 siguen pendientes; P18 permanece separada. P2–P4 fijan los esquemas `public`/`privado`, el rol `propietario_rpc` y el ownership/RLS sin `FORCE` global. P5–P7 fijan un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario, sin membresías. `auditoria`, `idempotency_key` y restricciones no quedan aprobadas por P1/P19/P20.
 - **Producción:** continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final.
 
 ---

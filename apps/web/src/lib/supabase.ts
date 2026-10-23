@@ -93,22 +93,32 @@ export function crearPuertoSupabase(cliente: SupabaseClient): PuertoAuth {
     },
 
     alCambiarUsuario(callback) {
-      let ultimo: string | null | undefined;
+      let diferido: ReturnType<typeof setTimeout> | undefined;
 
+      // Cada evento (SIGNED_IN, TOKEN_REFRESHED, USER_UPDATED, ...) se
+      // notifica aunque el usuario sea el mismo, para volver a leer el
+      // perfil: rol, empresa o `activo` pueden haber cambiado. Un evento
+      // nuevo cancela el aviso anterior todavía no entregado.
       const { data } = cliente.auth.onAuthStateChange(
         (_evento: AuthChangeEvent, sesion: Session | null) => {
           const usuarioId = sesion?.user.id ?? null;
 
-          if (usuarioId === ultimo) return;
-          ultimo = usuarioId;
+          clearTimeout(diferido);
+
+          // Sin sesión: se invalida en el acto, sin ventana en la que un
+          // aviso viejo pueda volver a autenticar.
+          if (!usuarioId) return callback(null);
 
           // Supabase recomienda no llamar a otros métodos del cliente dentro
           // del callback: se difiere la lectura del perfil.
-          setTimeout(() => callback(usuarioId), 0);
+          diferido = setTimeout(() => callback(usuarioId), 0);
         }
       );
 
-      return () => data.subscription.unsubscribe();
+      return () => {
+        clearTimeout(diferido);
+        data.subscription.unsubscribe();
+      };
     },
 
     async leerPerfil(usuarioId) {

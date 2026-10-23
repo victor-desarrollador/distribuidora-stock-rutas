@@ -8,7 +8,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(37);
+select plan(55);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -34,7 +34,14 @@ insert into auth.users (id, aud, role, email, raw_user_meta_data) values
   -- N1: cuenta Auth sin perfil, con metadata falsa
   ('cccccccc-0000-4000-8000-000000000001', 'authenticated', 'authenticated',
    'test.n1@usuarios.distribuidora.invalid',
-   '{"rol":"dueno","empresa_id":"aaaaaaaa-0000-4000-8000-000000000000"}');
+   '{"rol":"dueno","empresa_id":"aaaaaaaa-0000-4000-8000-000000000000"}'),
+  -- D1–D3: cuentas Auth para los casos positivos del formato de usuario
+  ('dddddddd-0000-4000-8000-000000000001', 'authenticated', 'authenticated',
+   'abc@usuarios.distribuidora.invalid', '{}'),
+  ('dddddddd-0000-4000-8000-000000000002', 'authenticated', 'authenticated',
+   'a_b-c.d@usuarios.distribuidora.invalid', '{}'),
+  ('dddddddd-0000-4000-8000-000000000003', 'authenticated', 'authenticated',
+   'limite32@usuarios.distribuidora.invalid', '{}');
 
 insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol, activo) values
   ('aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000000',
@@ -134,9 +141,73 @@ select throws_ok(
             'bbbbbbbb-0000-4000-8000-000000000000', 'test.otro', 'X', 'dueno')$$,
   '23505', null, 'un usuario no puede tener un segundo perfil (otra empresa)');
 
+-- Formato de usuario (LOW-02): 3–32 caracteres, empieza y termina con a-z/0-9,
+-- interiores a-z 0-9 . _ -, sin puntos consecutivos. Mismo contrato que
+-- apps/web/src/domain/usuario_auth.ts.
+select throws_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('cccccccc-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', 'abc.', 'X', 'dueno')$$,
+  '23514', null, 'usuario que termina con punto es rechazado');
+
+select throws_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('cccccccc-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', '.aabc', 'X', 'dueno')$$,
+  '23514', null, 'usuario que empieza con punto es rechazado');
+
+select throws_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('cccccccc-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', 'a..b', 'X', 'dueno')$$,
+  '23514', null, 'usuario con puntos consecutivos es rechazado');
+
+select throws_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('cccccccc-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', 'juan-', 'X', 'dueno')$$,
+  '23514', null, 'usuario que termina con guion es rechazado');
+
+select throws_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('cccccccc-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', 'ab', 'X', 'dueno')$$,
+  '23514', null, 'usuario de menos de 3 caracteres es rechazado');
+
+select throws_ok(
+  format($$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('cccccccc-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', %L, 'X', 'dueno')$$,
+         repeat('a', 33)),
+  '23514', null, 'usuario de más de 32 caracteres es rechazado');
+
+select lives_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('dddddddd-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', 'abc', 'D1', 'vendedor_piloto')$$,
+  'usuario de 3 caracteres es aceptado');
+
+select lives_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('dddddddd-0000-4000-8000-000000000002',
+            'aaaaaaaa-0000-4000-8000-000000000000', 'a_b-c.d', 'D2', 'vendedor_piloto')$$,
+  'usuario con punto, guion y guion bajo interiores es aceptado');
+
+select lives_ok(
+  format($$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('dddddddd-0000-4000-8000-000000000003',
+            'aaaaaaaa-0000-4000-8000-000000000000', %L, 'D3', 'vendedor_piloto')$$,
+         repeat('a', 32)),
+  'usuario de 32 caracteres es aceptado');
+
 -- ---------------------------------------------------------------------------
 -- 1–2. anon
 -- ---------------------------------------------------------------------------
+-- Huella del contenido completo de ambas tablas antes de los intentos de anon.
+create temp table huella_antes_anon as
+  select (select md5(string_agg(e::text, '|' order by e.id)) from public.empresas e) as empresas,
+         (select md5(string_agg(p::text, '|' order by p.usuario_id)) from public.perfiles p) as perfiles;
+
 select pg_temp.como_anon();
 
 select throws_ok('select * from public.empresas', '42501', null,
@@ -144,7 +215,50 @@ select throws_ok('select * from public.empresas', '42501', null,
 select throws_ok('select * from public.perfiles', '42501', null,
   '2. anon no puede leer perfiles');
 
+-- Escrituras efectivas de anon (LOW-03). UPDATE y DELETE van sin WHERE: si
+-- alguien concediera esos privilegios a anon, la sentencia no fallaría (RLS
+-- filtraría 0 filas) y estas pruebas lo detectarían. Un INSERT concedido
+-- seguiría fallando por RLS con el mismo 42501: lo detecta la prueba de
+-- catálogo de más abajo.
+select throws_ok(
+  $$insert into public.empresas (nombre) values ('Empresa anon')$$,
+  '42501', null, 'anon no puede insertar empresas');
+select throws_ok(
+  $$update public.empresas set activo = false$$,
+  '42501', null, 'anon no puede modificar empresas');
+select throws_ok(
+  $$delete from public.empresas$$,
+  '42501', null, 'anon no puede borrar empresas');
+select throws_ok(
+  $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
+    values ('cccccccc-0000-4000-8000-000000000001',
+            'aaaaaaaa-0000-4000-8000-000000000000', 'anon.x', 'X', 'dueno')$$,
+  '42501', null, 'anon no puede insertar perfiles');
+select throws_ok(
+  $$update public.perfiles set rol = 'dueno'$$,
+  '42501', null, 'anon no puede modificar perfiles');
+select throws_ok(
+  $$delete from public.perfiles$$,
+  '42501', null, 'anon no puede borrar perfiles');
+
 reset role;
+
+-- Catálogo: anon no tiene ningún privilegio de tabla (incluye lo heredado de
+-- PUBLIC).
+select ok(
+  not has_table_privilege('anon', 'public.empresas',
+    'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'),
+  'anon no tiene ningún privilegio sobre empresas');
+select ok(
+  not has_table_privilege('anon', 'public.perfiles',
+    'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'),
+  'anon no tiene ningún privilegio sobre perfiles');
+
+select results_eq(
+  $$select (select md5(string_agg(e::text, '|' order by e.id)) from public.empresas e),
+           (select md5(string_agg(p::text, '|' order by p.usuario_id)) from public.perfiles p)$$,
+  'select empresas, perfiles from huella_antes_anon',
+  'los intentos de anon no crearon, modificaron ni borraron filas');
 
 -- authenticated sin sub (auth.uid() nulo) no ve nada
 select set_config('request.jwt.claims', '{"role":"authenticated"}', true);

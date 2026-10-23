@@ -14,6 +14,10 @@
 --   vendedor.prueba   vendedor_piloto  activo
 --   inactivo.prueba   vendedor_piloto  INACTIVO
 --   sinperfil.prueba  (cuenta Auth sin perfil)
+--
+-- Todos cumplen el contrato de `perfiles_usuario_formato` (3–32 caracteres,
+-- empieza y termina con a-z/0-9, interiores a-z 0-9 . _ -, sin puntos
+-- consecutivos), el mismo que apps/web/src/domain/usuario_auth.ts.
 
 insert into public.empresas (id, nombre)
 values ('00000000-0000-4000-8000-0000000000e1', 'Distribuidora (local)');

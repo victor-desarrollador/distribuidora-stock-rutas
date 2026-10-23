@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ROLES_GESTION, ROLES_SOLO_DUENO, ROLES_TODOS } from "./roles";
+
 import {
   MENSAJE_CREDENCIALES,
   MENSAJE_ERROR_PERFIL,
+  crearControladorSesion,
   decidirAcceso,
   iniciarSesion,
   parsearPerfil,
@@ -261,5 +264,255 @@ describe("decidirAcceso", () => {
     expect(
       decidirAcceso(autenticado("vendedor_piloto"), ["dueno", "encargado"])
     ).toBe("rol_no_permitido");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MEDIUM-01: perfil obsoleto y respuestas asincrónicas viejas
+// ---------------------------------------------------------------------------
+
+function diferido<T>() {
+  let resolver!: (valor: T) => void;
+  const promesa = new Promise<T>((r) => {
+    resolver = r;
+  });
+  return { promesa, resolver };
+}
+
+// Deja correr todas las promesas pendientes ya resueltas.
+const drenar = () => new Promise((r) => setTimeout(r, 0));
+
+const EMPRESA_B = { id: "emp-2", nombre: "Otra", activo: true };
+
+// Base simulada y mutable: cada lectura devuelve el valor vigente en ese
+// momento, como haría el servidor.
+function baseMutable() {
+  const base = {
+    perfiles: new Map<string, Record<string, unknown>>([
+      ["u-1", filaPerfil({ rol: "dueno" })],
+      ["u-2", filaPerfil({ usuario_id: "u-2", usuario: "ana", nombre: "Ana", rol: "encargado" })],
+    ]),
+    empresas: new Map<string, unknown>([
+      ["emp-1", EMPRESA],
+      ["emp-2", EMPRESA_B],
+    ]),
+  };
+
+  const puerto = puertoFalso({
+    leerPerfil: vi.fn(async (id: string) => base.perfiles.get(id) ?? null),
+    leerEmpresa: vi.fn(async (id: string) => base.empresas.get(id) ?? null),
+  });
+
+  return { base, puerto };
+}
+
+function observar(puerto: PuertoAuth) {
+  const publicados: EstadoSesion[] = [];
+  const controlador = crearControladorSesion(puerto, (e) => publicados.push(e));
+
+  return {
+    controlador,
+    publicados,
+    ultimo: () => publicados[publicados.length - 1],
+  };
+}
+
+function cambiarPerfil(
+  base: ReturnType<typeof baseMutable>["base"],
+  id: string,
+  cambios: Record<string, unknown>
+) {
+  base.perfiles.set(id, { ...base.perfiles.get(id), ...cambios });
+}
+
+describe("crearControladorSesion", () => {
+  it("1. activo=true -> activo=false con el mismo usuario: acceso bloqueado", async () => {
+    const { base, puerto } = baseMutable();
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+    expect(decidirAcceso(o.ultimo(), ROLES_TODOS)).toBe("permitido");
+
+    cambiarPerfil(base, "u-1", { activo: false });
+    o.controlador.notificarUsuario("u-1"); // p. ej. TOKEN_REFRESHED
+    await drenar();
+
+    expect(o.ultimo()).toEqual({ estado: "bloqueado", motivo: "perfil_inactivo" });
+    expect(decidirAcceso(o.ultimo(), ROLES_TODOS)).toBe("bloqueado");
+  });
+
+  it("2. dueno -> vendedor_piloto con el mismo usuario: rutas y permisos se actualizan", async () => {
+    const { base, puerto } = baseMutable();
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+    expect(decidirAcceso(o.ultimo(), ROLES_SOLO_DUENO)).toBe("permitido");
+    expect(decidirAcceso(o.ultimo(), ROLES_GESTION)).toBe("permitido");
+
+    cambiarPerfil(base, "u-1", { rol: "vendedor_piloto" });
+    o.controlador.notificarUsuario("u-1"); // p. ej. USER_UPDATED
+    await drenar();
+
+    const ultimo = o.ultimo();
+    expect(ultimo.estado === "autenticado" && ultimo.perfil.rol).toBe("vendedor_piloto");
+    expect(decidirAcceso(ultimo, ROLES_SOLO_DUENO)).toBe("rol_no_permitido");
+    expect(decidirAcceso(ultimo, ROLES_GESTION)).toBe("rol_no_permitido");
+    expect(decidirAcceso(ultimo, ROLES_TODOS)).toBe("permitido");
+  });
+
+  it("3. empresa A -> empresa B con el mismo usuario: el estado no conserva A", async () => {
+    const { base, puerto } = baseMutable();
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+    const antes = o.ultimo();
+    expect(antes.estado === "autenticado" && antes.empresa.id).toBe("emp-1");
+
+    cambiarPerfil(base, "u-1", { empresa_id: "emp-2" });
+    o.controlador.notificarUsuario("u-1"); // p. ej. SIGNED_IN con el mismo usuario
+    await drenar();
+
+    const despues = o.ultimo();
+    expect(despues.estado).toBe("autenticado");
+    expect(despues.estado === "autenticado" && despues.perfil.empresaId).toBe("emp-2");
+    expect(despues.estado === "autenticado" && despues.empresa).toEqual(EMPRESA_B);
+    expect(JSON.stringify(despues)).not.toContain("emp-1");
+  });
+
+  it.each([
+    ["invalidar() (cerrarSesion)", (c: ReturnType<typeof crearControladorSesion>) => c.invalidar()],
+    ["evento SIGNED_OUT (null)", (c: ReturnType<typeof crearControladorSesion>) => c.notificarUsuario(null)],
+  ])(
+    "4. logout por %s con leerPerfil pendiente: la respuesta vieja no vuelve a autenticar",
+    async (_nombre, cerrar) => {
+      const pendiente = diferido<unknown>();
+      const puerto = puertoFalso({ leerPerfil: vi.fn(() => pendiente.promesa) });
+      const o = observar(puerto);
+
+      o.controlador.notificarUsuario("u-1");
+      cerrar(o.controlador);
+      expect(o.ultimo()).toEqual({ estado: "no_autenticado" });
+
+      pendiente.resolver(filaPerfil());
+      await drenar();
+
+      expect(o.ultimo()).toEqual({ estado: "no_autenticado" });
+      expect(o.publicados.some((e) => e.estado === "autenticado")).toBe(false);
+    }
+  );
+
+  it("5. leerPerfil(A) pendiente -> cambio a B -> A responde después: queda B", async () => {
+    const perfilA = diferido<unknown>();
+    const { base } = baseMutable();
+    const puerto = puertoFalso({
+      leerPerfil: vi.fn((id: string) =>
+        id === "u-1" ? perfilA.promesa : Promise.resolve(base.perfiles.get(id) ?? null)
+      ),
+      leerEmpresa: vi.fn(async (id: string) => base.empresas.get(id) ?? null),
+    });
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    o.controlador.notificarUsuario("u-2");
+    await drenar();
+    const conB = o.ultimo();
+    expect(conB.estado === "autenticado" && conB.perfil.usuarioId).toBe("u-2");
+
+    perfilA.resolver(filaPerfil({ rol: "dueno" }));
+    await drenar();
+
+    const final = o.ultimo();
+    expect(final.estado === "autenticado" && final.perfil.usuarioId).toBe("u-2");
+    expect(
+      o.publicados.some((e) => e.estado === "autenticado" && e.perfil.usuarioId === "u-1")
+    ).toBe(false);
+  });
+
+  it("5b. A responde antes que B: tampoco se publica A, se espera a B", async () => {
+    const perfilA = diferido<unknown>();
+    const perfilB = diferido<unknown>();
+    const puerto = puertoFalso({
+      leerPerfil: vi.fn((id: string) => (id === "u-1" ? perfilA.promesa : perfilB.promesa)),
+    });
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    o.controlador.notificarUsuario("u-2");
+    perfilA.resolver(filaPerfil());
+    await drenar();
+    expect(o.ultimo()).toEqual({ estado: "cargando" });
+
+    perfilB.resolver(filaPerfil({ usuario_id: "u-2", usuario: "ana" }));
+    await drenar();
+    const final = o.ultimo();
+    expect(final.estado === "autenticado" && final.perfil.usuarioId).toBe("u-2");
+  });
+
+  it("6. eventos repetidos del mismo usuario releen el perfil cada vez", async () => {
+    const { base, puerto } = baseMutable();
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+    cambiarPerfil(base, "u-1", { nombre: "Juan v2" });
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+    cambiarPerfil(base, "u-1", { nombre: "Juan v3" });
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+
+    expect(puerto.leerPerfil).toHaveBeenCalledTimes(3);
+    const final = o.ultimo();
+    expect(final.estado === "autenticado" && final.perfil.nombre).toBe("Juan v3");
+    // La revalidación del mismo usuario no vuelve a `cargando`.
+    expect(o.publicados.filter((e) => e.estado === "cargando")).toHaveLength(1);
+  });
+
+  it("6b. dos revalidaciones del mismo usuario fuera de orden: gana la más nueva", async () => {
+    const vieja = diferido<unknown>();
+    const nueva = diferido<unknown>();
+    const respuestas = [vieja.promesa, nueva.promesa];
+    const puerto = puertoFalso({ leerPerfil: vi.fn(() => respuestas.shift()!) });
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    o.controlador.notificarUsuario("u-1");
+    nueva.resolver(filaPerfil({ activo: false }));
+    await drenar();
+    vieja.resolver(filaPerfil({ activo: true }));
+    await drenar();
+
+    expect(o.ultimo()).toEqual({ estado: "bloqueado", motivo: "perfil_inactivo" });
+  });
+
+  it("fail-closed: si la revalidación falla, se pierde el acceso autorizado", async () => {
+    const { puerto } = baseMutable();
+    const o = observar(puerto);
+
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+    expect(o.ultimo().estado).toBe("autenticado");
+
+    vi.mocked(puerto.leerPerfil).mockRejectedValueOnce(new Error("red"));
+    o.controlador.notificarUsuario("u-1");
+    await drenar();
+
+    expect(o.ultimo()).toEqual({ estado: "error", mensaje: MENSAJE_ERROR_PERFIL });
+    expect(decidirAcceso(o.ultimo(), ROLES_TODOS)).toBe("bloqueado");
+  });
+
+  it("detener() descarta las lecturas en curso", async () => {
+    const pendiente = diferido<unknown>();
+    const o = observar(puertoFalso({ leerPerfil: vi.fn(() => pendiente.promesa) }));
+
+    o.controlador.notificarUsuario("u-1");
+    o.controlador.detener();
+    pendiente.resolver(filaPerfil());
+    await drenar();
+
+    expect(o.publicados).toEqual([{ estado: "cargando" }]);
   });
 });
