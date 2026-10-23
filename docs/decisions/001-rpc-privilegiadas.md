@@ -21,7 +21,7 @@
 | v1.3 | Codex | Alinea la decisión humana: P1 = Topología D, P19 = gobernanza en dos etapas y P20 = migraciones de validación sólo local/staging. Estado intermedio, sin aprobación productiva; P2–P17 pendientes y P18 separada. |
 | v1.4 | Claude Code | Registra la decisión humana del 22/10/2026 sobre P5, P6 y P7 (un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario; sin membresías). El estado de la ADR no cambia; P2–P4 y P8–P17 siguen pendientes. |
 | v1.5 | Claude Code | Registra la decisión humana del 23/10/2026 sobre P2, P3 y P4 (esquemas `public`/`privado`, rol técnico `propietario_rpc`, ownership de tablas y RLS sin `FORCE` global), que cierra el hallazgo BLOCKER-01 de la auditoría de `d7c3664`. El estado de la ADR no cambia; P8–P17 siguen pendientes y P18 separada. |
-| v1.5 (corrección terminológica) | Claude Code | Corrección terminológica: el producto es de empresa única; `empresa_id` es una frontera técnica de aislamiento y no una capacidad multiempresa. Renombra el encabezado de §8 a «Invariante de aislamiento por `empresa_id`» y alinea las referencias normativas de membresía (§3.1, §8, §9, T2, T3 y la nota sobre inicio de sesión anónimo) al modelo aprobado de perfil 1:1, una empresa y un rol; sin cambio de comportamiento. Las garantías, T4/T5/T15 y el estado de la ADR (**APROBADA PARA VALIDACIÓN CONTROLADA**) no cambian. |
+| v1.5 (corrección terminológica) | Claude Code | Corrección terminológica: el producto es de empresa única; `empresa_id` es una frontera técnica de aislamiento y no una capacidad multiempresa. Renombra el encabezado de §8 a «Invariante de aislamiento por `empresa_id`» y alinea las referencias normativas de membresía (§3.1, §3.2, §8, §9, T2, T3 y la nota sobre inicio de sesión anónimo) al modelo aprobado de perfil 1:1, una empresa y un rol; sin cambio de comportamiento. Las garantías, T4/T5/T15 y el estado de la ADR (**APROBADA PARA VALIDACIÓN CONTROLADA**) no cambian. |
 
 ---
 
@@ -67,7 +67,7 @@ Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST).
 
 - la tabla concreta `auditoria` y sus columnas (§8:249);
 - las columnas concretas `ventas.idempotency_key` y `retiros_efectivo.idempotency_key` (§8:242-243);
-- la forma de guardar roles y membresía (`perfiles`, §8:227);
+- la forma SQL exacta de `perfiles` y del rol (§8:227), respetando el perfil 1:1 con `auth.users`, una empresa y un rol por usuario, sin tabla de membresías (P5–P7, §18);
 - `saldos_stock` como tabla mantenida por las RPC (§8:234) y las "restricciones clave" (§8:251-256), salvo las que también son reglas de negocio aprobadas (por ejemplo, una jornada por `empresa_id`, `camion_id` y `fecha`, §7.5:156).
 
 Esta ADR usa esos nombres solo como referencia. Su forma final queda **PENDIENTE DE APROBACIÓN HUMANA** junto con el modelo de datos.
