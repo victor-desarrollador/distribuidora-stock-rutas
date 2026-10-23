@@ -112,7 +112,7 @@ La revisión de seguridad es obligatoria cuando el cambio toca alguna de estas s
 
 - Supabase;
 - autenticación (auth);
-- `empresa_id` o cualquier filtrado multiempresa;
+- `empresa_id` o cualquier aislamiento por `empresa_id`;
 - roles y permisos;
 - RLS;
 - RPC / funciones SQL;

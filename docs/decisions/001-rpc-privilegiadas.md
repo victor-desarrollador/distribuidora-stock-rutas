@@ -23,6 +23,7 @@
 | v1.5 | Claude Code | Registra la decisión humana del 23/10/2026 sobre P2, P3 y P4 (esquemas `public`/`privado`, rol técnico `propietario_rpc`, ownership de tablas y RLS sin `FORCE` global), que cierra el hallazgo BLOCKER-01 de la auditoría de `d7c3664`. El estado de la ADR no cambia; P8–P17 siguen pendientes y P18 separada. |
 | v1.5 + anexo | Claude Code | Agrega §18.1: decisiones humanas del 23/10/2026 **acotadas al slice productos** (P10/P11/P12/P13/P14/P15/P16/P17-productos, DE-2, DE-3, DE-11, DE-15 y el helper `privado.usuario_actual()`). No resuelve P10–P17 globalmente, no cambia el estado de la ADR ni autoriza producción. |
 | v1.5 + anexo (complemento P11-productos) | Claude Code | Amplía P11-productos en §18.1: `service_role` tampoco escribe directamente `public.productos` (hallazgo H-01 de The Architect). Acotado al slice productos; P11 global sigue pendiente. El estado de la ADR no cambia y no autoriza producción. |
+| v1.5 (corrección terminológica) | Claude Code | Corrección terminológica: el producto es de empresa única; `empresa_id` es una frontera técnica de aislamiento y no una capacidad multiempresa. Renombra el encabezado de §8 a «Invariante de aislamiento por `empresa_id`» y alinea las referencias normativas de membresía (§3.1, §3.2, §8, §9, T2, T3 y la nota sobre inicio de sesión anónimo) al modelo aprobado de perfil 1:1, una empresa y un rol; sin cambio de comportamiento. Las garantías, T4/T5/T15 y el estado de la ADR (**APROBADA PARA VALIDACIÓN CONTROLADA**) no cambian. |
 
 ---
 
@@ -53,7 +54,7 @@ Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST).
 3. Los libros de movimientos son solo de inserción; `authenticated` y `anon` no reciben INSERT, UPDATE ni DELETE directos sobre libros ni registros confirmados; las rectificaciones son asientos compensatorios (§6:99, §10:276).
 4. RLS en todas las tablas expuestas por la API, filtrando por empresa, rol y estado; los controles visuales nunca son la única defensa (§10:275).
 5. Todas las tablas de negocio llevan `empresa_id` y las políticas RLS filtran por él; hoy existe una sola empresa (§7.3:127).
-6. Membresía, empresa y roles se leen de **tablas protegidas**, nunca de `user_metadata` (§10:274).
+6. Empresa y rol se leen de **tablas protegidas** (el perfil), nunca de `user_metadata` (§10:274).
 7. Roles confirmados: dueño, encargado y vendedor/piloto, con los permisos y prohibiciones de §9.
 8. Separación de responsabilidades: quien cuenta el regreso no es el vendedor de la jornada, sin autobypass (§3:45, §7.5:164, §9:268).
 9. **Trazabilidad y auditabilidad** como propiedad general: cada cambio de stock registra quién, cuándo, por qué, cuánto, desde dónde y hacia dónde; el sistema registra quién hizo cada paso; los registros son inmutables (§1:20, §3:44-45, §10:276, §10:282).
@@ -68,7 +69,7 @@ Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST).
 
 - la tabla concreta `auditoria` y sus columnas (§8:249);
 - las columnas concretas `ventas.idempotency_key` y `retiros_efectivo.idempotency_key` (§8:242-243);
-- la forma de guardar roles y membresía (`perfiles`, §8:227);
+- la forma SQL exacta de `perfiles` y del rol (§8:227), respetando el perfil 1:1 con `auth.users`, una empresa y un rol por usuario, sin tabla de membresías (P5–P7, §18);
 - `saldos_stock` como tabla mantenida por las RPC (§8:234) y las "restricciones clave" (§8:251-256), salvo las que también son reglas de negocio aprobadas (por ejemplo, una jornada por `empresa_id`, `camion_id` y `fecha`, §7.5:156).
 
 Esta ADR usa esos nombres solo como referencia. Su forma final queda **PENDIENTE DE APROBACIÓN HUMANA** junto con el modelo de datos.
@@ -189,14 +190,14 @@ Relaciones de propiedad: tablas de negocio y esquemas, del rol que ejecuta las m
 
 ---
 
-## 8. Invariante multiempresa
+## 8. Invariante de aislamiento por `empresa_id`
 
 Requisito de diseño propuesto, que se deriva de §7.3 y §10:277 y queda sujeto a la aprobación de esta ADR:
 
 1. **Ninguna relación entre objetos de negocio puede cruzar empresas.** Toda referencia, sea FK o referencia lógica (por ejemplo, de una venta a su jornada, de un movimiento a sus ubicaciones o de un pago a su venta), debe unir objetos con la misma `empresa_id`. "Filtrar por empresa" en consultas y RLS **no alcanza**.
 2. El invariante debe garantizarse con **restricciones de integridad verificables** en la base, no solo con código de funciones ni con RLS. Esto es relevante porque PostgreSQL aplica las restricciones de integridad aunque eluda RLS. El mecanismo concreto (por ejemplo, claves compuestas que incluyan `empresa_id`) se define en el diseño del esquema; **todavía no se escribe DDL**.
 3. Las unicidades de negocio deben estar acotadas por empresa (por ejemplo, la numeración de notas de papel por empresa y serie, §7.5:159). Así se evita que una restricción global filtre la existencia de datos de otra empresa (PostgreSQL advierte sobre estos *covert channels*).
-4. `empresa_id` nunca se toma solo de lo que envía el cliente. Se deriva de la membresía activa del actor y, si la operación recibe un id de objeto, también de ese objeto, y ambas deben coincidir.
+4. `empresa_id` nunca se toma solo de lo que envía el cliente. Se deriva del perfil activo del actor y, si la operación recibe un id de objeto, también de ese objeto, y ambas deben coincidir.
 5. Un objeto de otra empresa se trata **igual que uno inexistente** (sección 13).
 6. **Pruebas obligatorias:** la batería debe incluir datos de **al menos dos empresas** e intentar cada relación con IDs mezclados (venta de A sobre jornada de B, movimiento de A con ubicación de B, pago de A sobre venta de B, etc.), tanto por las RPC como por escritura directa. Todas deben fallar. Esto no construye un registro de empresas (§7.3): las dos empresas son datos de prueba.
 
@@ -217,7 +218,7 @@ Cadena mínima de validaciones (requisitos de §10:274-277 y §9):
 
 1. `auth.uid()` no nulo. Supabase documenta que es nulo en solicitudes sin sesión.
 2. Perfil activo.
-3. Membresía activa en la empresa resuelta (P5).
+3. Empresa del actor resuelta desde su perfil (P5).
 4. Rol vigente leído de tablas protegidas, nunca de `user_metadata`.
 5. Permiso específico de la operación según §9.
 6. Estado válido del objeto (por ejemplo, el estado de la jornada, §7.5:154).
@@ -357,8 +358,8 @@ Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabas
 | # | Caso | Resultado esperado |
 |---|---|---|
 | T1 | `anon` llama a cada RPC expuesta | Rechazo; sin efectos |
-| T2 | `authenticated` sin membresía | Rechazo; sin efectos ni datos visibles |
-| T3 | Perfil inactivo / membresía inactiva | Rechazo |
+| T2 | `authenticated` sin perfil | Rechazo; sin efectos ni datos visibles |
+| T3 | Perfil inactivo | Rechazo |
 | T4 | Usuario de otra empresa sobre objetos ajenos | Igual que inexistente; sin efectos |
 | T5 | IDs mezclados entre dos empresas, por cada relación (sección 8) | Falla por restricción de integridad, por RPC y por escritura directa |
 | T6 | Cada rol de negocio (dueño, encargado, vendedor/piloto) en cada operación | Solo lo que permite §9 |
@@ -393,7 +394,7 @@ Está documentado y **no es una incógnita del entorno**. Se prueba para detecta
 **Comportamiento documentado por Supabase que igualmente debe probarse como regresión en nuestro entorno.** No es una incógnita sobre el proveedor. Se prueba en local y staging porque el proyecto tiene que verificar sus propios grants, políticas, propietarios y configuración:
 
 - **`auth.uid()` dentro de funciones `SECURITY DEFINER`.** Supabase lo documenta en sus ejemplos de *Row Level Security* (`private.has_good_role()` y `private.user_list_ids()`, que usan `(select auth.uid())` dentro de funciones `security definer`). Se prueba que, con nuestros propietarios, grants y `search_path = ''`, cada función privilegiada identifique al llamador y rechace cuando `auth.uid()` es nulo.
-- **Usuarios de inicio de sesión anónimo.** Supabase documenta que el usuario anónimo usa el rol de PostgreSQL `authenticated`, igual que un usuario permanente, y que su JWT lleva el claim `is_anonymous` (*Anonymous Sign-Ins*). Por lo tanto, `authenticated` no equivale a "usuario con cuenta". Si el inicio anónimo está habilitado, se prueba que ese usuario quede rechazado por falta de membresía (T2) y que ningún grant ni política le dé acceso solo por tener el rol `authenticated`.
+- **Usuarios de inicio de sesión anónimo.** Supabase documenta que el usuario anónimo usa el rol de PostgreSQL `authenticated`, igual que un usuario permanente, y que su JWT lleva el claim `is_anonymous` (*Anonymous Sign-Ins*). Por lo tanto, `authenticated` no equivale a "usuario con cuenta". Si el inicio anónimo está habilitado, se prueba que ese usuario quede rechazado por falta de perfil (T2) y que ningún grant ni política le dé acceso solo por tener el rol `authenticated`.
 
 **Dependiente de la configuración del proyecto** (se prueba en local y staging):
 

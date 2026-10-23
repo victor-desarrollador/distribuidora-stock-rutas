@@ -137,15 +137,15 @@ Backend:   Supabase — Auth · PostgreSQL · RLS · RPC (funciones SQL) · Stor
 La estructura exacta de `ubicaciones` (columnas, si una fila de cuarentena/depósito es por empresa, cómo se referencia el camión sin duplicar identidad) queda pendiente de diseño SQL/RPC. **APROBADA CONCEPTUALMENTE.**
 
 
-### 7.3 Multiempresa y entidad `empresas`
+### 7.3 Empresa única y aislamiento por `empresa_id`
 
-**Fase 1 tiene entidad `empresas`** (APROBADA CONCEPTUALMENTE). Aunque inicialmente exista una sola empresa cargada, el modelo debe tener `empresas` desde el inicio:
+**Decisión humana (23/10/2026): el producto es para UNA SOLA EMPRESA OPERATIVA.** No es multiempresa, multi-tenant ni SaaS. **Fase 1 tiene entidad `empresas`** (APROBADA CONCEPTUALMENTE) como soporte técnico de esa única empresa operativa:
 
-- todas las tablas de negocio llevan `empresa_id` con FK a `empresas`;
+- todas las tablas de negocio llevan `empresa_id` con FK a `empresas`, como clave técnica de pertenencia, frontera de aislamiento, soporte de RLS e integridad referencial (defensa en profundidad);
 - las políticas RLS filtran por `empresa_id`;
 - **empresa y rol se obtienen desde tablas protegidas**, nunca desde `user_metadata` ni desde datos modificables por el usuario.
 
-No se construye registro público de empresas, suscripciones ni panel de administración de plataforma en Fase 1. La forma exacta de dividir `perfiles` / membresías / rol / relación usuario ↔ empresa queda pendiente de diseño SQL-RLS.
+Cada usuario pertenece a una única empresa: un perfil 1:1 con `auth.users`, con una empresa y un rol (decisión humana P5–P7, ADR-001 §18). No existen selector de empresa, membresías, workspaces, administración de empresas, registro ni onboarding de empresas, invitaciones, planes ni suscripciones, y no debe diseñarse ninguna funcionalidad SaaS. La presencia de `empresa_id` no autoriza ni implica funcionalidad multiempresa. Una segunda empresa en los tests es únicamente un fixture adversarial para comprobar el aislamiento por `empresa_id`.
 
 ### 7.4 Movimientos de stock
 
@@ -329,7 +329,7 @@ La estrategia concreta de bloqueo, isolation level o advisory locks se decide en
 |---|---|---|
 | `empresas` | [APROBADA CONCEPTUALMENTE] | nombre; entidad dueña; `empresa_id` en todas las tablas de negocio |
 | `perfiles` | [APROBADA CONCEPTUALMENTE] | usuario (auth), nombre, activo; empresa y rol leídos de tablas protegidas |
-| `roles` / membresías | [PROPUESTA TÉCNICA] | forma exacta de dividir perfiles/membresías/rol/usuario↔empresa: pendiente de diseño SQL-RLS. Roles funcionales (dueño, encargado, vendedor/piloto) **aprobados**; **tabla `roles` NO aprobada** |
+| `roles` | [PROPUESTA TÉCNICA] | sin tabla de membresías: un perfil 1:1 con `auth.users`, una empresa y un rol por usuario (decisión humana P5–P7, ADR-001 §18). Roles funcionales (dueño, encargado, vendedor/piloto) **aprobados**; **tabla `roles` NO aprobada** |
 | `productos` | [APROBADA CONCEPTUALMENTE] | codigo, nombre, categoria, forma_venta (`unidad`/`pieza`), precio_pieza_o_unidad (el precio de media pieza **no** se guarda en el producto: se deriva; ADR-003), stock_minimo, activo. *Tipos y restricciones SQL definitivos: pendientes* |
 | `camiones` | [APROBADA CONCEPTUALMENTE] | patente, nombre, activo |
 | `clientes` | [APROBADA CONCEPTUALMENTE] | nombre, comercio, direccion, telefono, activo, creado_por, validado_por, estado_validacion; contraparte comercial, **no** ubicación de stock |
@@ -368,7 +368,7 @@ Restricciones clave:
 
 ## 9. Roles y permisos confirmados
 
-**Roles funcionales APROBADOS:** dueño, encargado, vendedor/piloto. **La tabla `roles` como entidad NO está aprobada** (PROPUESTA TÉCNICA); su forma y la división `perfiles` / membresías / rol / relación usuario ↔ empresa quedan para diseño SQL-RLS. Regla aprobada: **empresa y rol se obtienen desde tablas protegidas**, nunca desde `user_metadata`.
+**Roles funcionales APROBADOS:** dueño, encargado, vendedor/piloto. **La tabla `roles` como entidad NO está aprobada** (PROPUESTA TÉCNICA); no existe tabla de membresías: cada usuario tiene un único perfil 1:1 con `auth.users`, con una empresa y un rol (decisión humana P5–P7, ADR-001 §18). Regla aprobada: **empresa y rol se obtienen desde tablas protegidas**, nunca desde `user_metadata`.
 
 | Rol | Puede | No puede |
 |---|---|---|
@@ -382,11 +382,11 @@ No se crean roles independientes de depósito o administración en Fase 1; esas 
 
 ## 10. Seguridad y auditoría
 
-- Supabase Auth con cuentas individuales; membresía, empresa y roles se leen de tablas protegidas, no de `user_metadata` modificable por usuario.
+- Supabase Auth con cuentas individuales; empresa y rol se leen del perfil (tabla protegida), no de `user_metadata` modificable por usuario.
 - RLS en todas las tablas expuestas por la API, restringiendo consultas/escrituras simples por empresa, rol y estado. Nunca confiar en controles visuales como única defensa.
 - `authenticated` y `anon` **no reciben INSERT, UPDATE ni DELETE directos** sobre libros de movimientos de stock/caja o registros confirmados; registros inmutables y rectificación por asientos compensatorios.
 - **Auditoría (Fase 1):** **no se crea una tabla genérica `auditoria`**. La trazabilidad surge de `operaciones`, los ledgers (`movimientos_stock`), los documentos, el actor, los timestamps, los motivos, la jornada y las relaciones. Si más adelante se requiere auditoría técnica transversal (cambios de datos maestros, intentos bloqueados), se diseña explícitamente con su propia aprobación.
-- **ADR-001 — APROBADA PARA VALIDACIÓN CONTROLADA (Topología D):** cada operación privilegiada se expone a la Data API mediante una fachada `SECURITY INVOKER`, que delega en una implementación `SECURITY DEFINER` ubicada en un esquema privado/no expuesto. La implementación privada constituye la frontera real de seguridad y debe hacer las validaciones completas antes de escribir: `auth.uid()`, membresía vigente, `empresa_id` obtenida/verificada del servidor, rol, estado, cantidades y permisos sobre cada objeto. La cadena conceptual es: Data API → fachada expuesta `SECURITY INVOKER` → implementación privada `SECURITY DEFINER` → validaciones completas → transacción de negocio.
+- **ADR-001 — APROBADA PARA VALIDACIÓN CONTROLADA (Topología D):** cada operación privilegiada se expone a la Data API mediante una fachada `SECURITY INVOKER`, que delega en una implementación `SECURITY DEFINER` ubicada en un esquema privado/no expuesto. La implementación privada constituye la frontera real de seguridad y debe hacer las validaciones completas antes de escribir: `auth.uid()`, perfil activo, `empresa_id` obtenida/verificada del servidor, rol, estado, cantidades y permisos sobre cada objeto. La cadena conceptual es: Data API → fachada expuesta `SECURITY INVOKER` → implementación privada `SECURITY DEFINER` → validaciones completas → transacción de negocio.
 - **Importante:** la implementación `SECURITY DEFINER` ejecuta con privilegios del propietario y puede evitar RLS. Debe fijar `SET search_path = ''`, usar referencias totalmente calificadas y un propietario de privilegio mínimo, revisar grants y privilegios por defecto y probar desde `anon`, `authenticated` ajeno y roles válidos. La función privada no se expone por la Data API y no deben existir rutas alternativas con privilegios equivalentes. `anon` y `authenticated` no reciben DML directo sobre los ledgers.
 - `SECURITY INVOKER` también se usa para lecturas y ediciones ordinarias con grants y RLS apropiados; Edge Functions quedan reservadas para lógica externa no conveniente en SQL. **Antes de la aprobación para validación controlada no se generan migraciones dependientes de ADR-001. Con el estado actual se permiten únicamente las migraciones necesarias para validar ADR-001 en local/staging; producción permanece prohibida hasta completar las pruebas requeridas, la auditoría independiente y la aceptación humana final.** P2–P7 están resueltas por decisión humana (ADR-001 §18); P8–P17 siguen pendientes y deben resolverse en el alcance que requiera la validación antes de implementar sus partes; P18 es una decisión futura separada.
 - Idempotencia por clave única y transacciones atómicas para compras futuras, cargas, ventas, retiros y cierres; protección contra concurrencia/bloqueos adecuados.
@@ -452,11 +452,11 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] Salto en la numeración genera aviso.
 
 **Seguridad**
-- [ ] La fachada expuesta `SECURITY INVOKER` y la implementación privada `SECURITY DEFINER` rechazan `anon`, usuario sin membresía, usuario de otra empresa y vendedor intentando cerrar jornada o realizar retiros.
+- [ ] La fachada expuesta `SECURITY INVOKER` y la implementación privada `SECURITY DEFINER` rechazan `anon`, usuario sin perfil activo, usuario/perfil con `empresa_id` distinto y vendedor intentando cerrar jornada o realizar retiros.
 - [ ] Revocación efectiva de escrituras directas en ledger; ninguna ruta alternativa puede escribir sin pasar validaciones y auditoría.
 - [ ] Un usuario sin rol no ve datos.
 - [ ] Ningún rol puede hacer UPDATE/DELETE en movimientos.
-- [ ] Un usuario de otra `empresa_id` no ve datos ni puede ejecutar operaciones (test preparado para multiempresa).
+- [ ] Un usuario/perfil con `empresa_id` distinto no ve datos ni puede ejecutar operaciones (test de aislamiento por `empresa_id` con empresa ficticia).
 - [ ] `authenticated` no puede insertar directamente movimientos ni asientos financieros por Data API.
 - [ ] Una función privada privilegiada no es invocable directamente desde la Data API y el endpoint autorizado rechaza usuarios no habilitados.
 - [ ] Dos solicitudes concurrentes/reintentadas no duplican movimiento, venta o retiro.
