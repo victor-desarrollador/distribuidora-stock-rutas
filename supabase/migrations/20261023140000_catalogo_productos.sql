@@ -119,6 +119,14 @@ comment on column public.productos.stock_minimo is
 -- que necesita.
 revoke all on table public.productos from public, anon, authenticated;
 
+-- `service_role` (BYPASSRLS) recibe por defecto todos los privilegios sobre
+-- las tablas de `public`; con ellos podría insertar un precio con fracción de
+-- centavo (redondeo silencioso) o mutar categoria/forma_venta. Decisión
+-- humana P11-productos (complemento): no participa de la escritura del
+-- catálogo. Conserva SELECT. No resuelve P11 globalmente.
+revoke insert, update, delete, truncate, references, trigger
+  on table public.productos from service_role;
+
 grant select on table public.productos to authenticated;
 grant select on table public.productos to propietario_rpc;
 grant insert (empresa_id, codigo, nombre, categoria, forma_venta, precio,

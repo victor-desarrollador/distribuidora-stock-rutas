@@ -1,4 +1,41 @@
 ---
+## 23/10/2026 — Corrección post-Architect del slice productos (H-01 `service_role`)
+
+**Rama:** `feat/catalogo-productos-supabase` · **Base:** checkpoint local `ecbfe94494a6d18cc7dc4f8f3600319b1959d9bb` (no pusheado) · **Estado:** corrección en commit local propio (sin amend del checkpoint; sin push), pendiente de **security review** (grants, `service_role`, RLS, `SECURITY DEFINER`) y de auditoría independiente del hash que se cree después. Sin push, merge, deploy ni Supabase remoto.
+
+### Hallazgo de The Architect (veredicto APPROVED WITH CORRECTIONS)
+
+- **H-01 (HIGH):** `service_role` conservaba por los privilegios por defecto de Supabase `INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER` sobre `public.productos`, además de `BYPASSRLS`. Con la service key se podía insertar un precio con fracción de centavo (redondeo silencioso a `numeric(14,2)`) o mutar `categoria`/`forma_venta`, salteando la validación de las RPC. La migración revocaba a `public`, `anon` y `authenticated`, pero no a `service_role`, y el pgTAP sólo cubría su `EXECUTE`.
+
+### Corrección aplicada (decisión humana: complemento de P11-productos)
+
+- `supabase/migrations/20261023140000_catalogo_productos.sql`: `revoke insert, update, delete, truncate, references, trigger on table public.productos from service_role`. Conserva `SELECT`. Se editó la migración existente porque el checkpoint no fue pusheado; no se creó otra.
+- Sin cambios en `authenticated` (sólo `SELECT`), `anon`/`PUBLIC`, `propietario_rpc`, Topología D ni `EXECUTE` de `service_role` (ya revocado).
+- **No se tocó** `service_role` sobre `perfiles`, Auth ni la administración de cuentas. **P11 global sigue pendiente.**
+- `docs/decisions/001-rpc-privilegiadas.md`: P11-productos en §18.1 y fila de historial. El estado de ADR-001 no cambia (**APROBADA PARA VALIDACIÓN CONTROLADA**); no autoriza producción.
+
+### Pruebas
+
+- pgTAP (`supabase/tests/productos_catalogo.test.sql`, plan 114 → 125): `service_role` puede `SELECT`; no tiene ninguno de los seis privilegios de escritura (tabla ni columna); no ejecuta ninguna fachada ni implementación de productos. Prueba real: `set local role service_role` y se intenta `INSERT` directo (20.999), `UPDATE` de precio, `UPDATE` de categoría/forma de venta, `DELETE` y `TRUNCATE`; los cinco fallan con `42501` y una huella (cantidad de filas + md5) demuestra que la tabla no cambió.
+- Mutaciones (en la base local, revertidas): conceder `INSERT` → fallan 4 pruebas; conceder `UPDATE (precio)` → fallan 3; conceder `ALL` (el estado anterior) → fallan 8; control sin mutación → 0 fallas.
+- Playwright (`apps/web/tests/productos-catalogo.spec.ts`): 2 pruebas nuevas verifican el aviso de catálogo demo en `/jornadas` y `/movimientos`.
+
+### M-02, M-03 y M-04
+
+- **M-02 (aceptado):** `categoria`, `forma_venta`, `empresa_id` y `creado_por` son inmutables para **todas las rutas operativas** (`authenticated`, `anon`, `service_role` y `propietario_rpc` no tienen `UPDATE` sobre ellas; lo prueba el pgTAP). El owner de migraciones conserva capacidad administrativa por ser owner: no es una ruta de aplicación y **no se protege la tabla contra su propio owner con triggers**. Sin cambio de modelo.
+- **M-03 (verificado):** `AvisoCatalogoDemo` ya se renderiza siempre en `Jornadas.tsx` y `Movimientos.tsx`. No se cambió código; faltaba cobertura y se agregó (Playwright).
+- **M-04 (pendiente de staging):** `pg_graphql` no está habilitado en local, así que no se resuelve acá. **Gate obligatorio de staging:** `privado` no expuesto por GraphQL y `productos` sin mutaciones GraphQL que salteen las RPC. Producción sigue bloqueada hasta verificarlo.
+
+### Cómo se verificó
+
+`npx supabase db reset` OK; `npx supabase test db`: 180/180 PASS (55 de Auth + 125 de productos); `npm run typecheck`, `npm run lint` (exit 0), `npm test` (716), `npx playwright test` (60) y `npm run build` PASS. `supabase db advisors --local`: sólo 2 avisos INFO de rendimiento (FK `productos_creado_por_fk` sin índice; índice `perfiles_empresa_id_idx` sin uso); `supabase db lint --local`: sin errores.
+
+### Riesgos pendientes
+
+- Security review y auditoría independiente del nuevo hash.
+- M-04 (GraphQL) como gate de staging; P11 global; convivencia con el catálogo demo (M-03) sigue bloqueando producción.
+- Sin índice sobre `productos(empresa_id, creado_por)`: irrelevante con el volumen actual, a reevaluar.
+
 ## 23/10/2026 — Catálogo de productos en Supabase (slice productos)
 
 **Rama:** `feat/catalogo-productos-supabase` · **Base:** `main` en `e5ce8aedd0b5d4dcb424a431187e9bd937e07fe6` (no depende del PR #7, todavía abierto) · **Estado:** implementación local completa; checkpoint local autorizado por decisión humana (commit «feat: implementar catalogo de productos en supabase»). Pendiente de **security review** (Supabase, RLS, `empresa_id`, roles, grants, `SECURITY DEFINER`) y auditoría independiente de ese hash. Sin push, merge, deploy ni migraciones remotas. Validación de base **sólo local**.

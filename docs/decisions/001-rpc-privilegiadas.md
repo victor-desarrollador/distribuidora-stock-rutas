@@ -22,6 +22,7 @@
 | v1.4 | Claude Code | Registra la decisión humana del 22/10/2026 sobre P5, P6 y P7 (un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario; sin membresías). El estado de la ADR no cambia; P2–P4 y P8–P17 siguen pendientes. |
 | v1.5 | Claude Code | Registra la decisión humana del 23/10/2026 sobre P2, P3 y P4 (esquemas `public`/`privado`, rol técnico `propietario_rpc`, ownership de tablas y RLS sin `FORCE` global), que cierra el hallazgo BLOCKER-01 de la auditoría de `d7c3664`. El estado de la ADR no cambia; P8–P17 siguen pendientes y P18 separada. |
 | v1.5 + anexo | Claude Code | Agrega §18.1: decisiones humanas del 23/10/2026 **acotadas al slice productos** (P10/P11/P12/P13/P14/P15/P16/P17-productos, DE-2, DE-3, DE-11, DE-15 y el helper `privado.usuario_actual()`). No resuelve P10–P17 globalmente, no cambia el estado de la ADR ni autoriza producción. |
+| v1.5 + anexo (complemento P11-productos) | Claude Code | Amplía P11-productos en §18.1: `service_role` tampoco escribe directamente `public.productos` (hallazgo H-01 de The Architect). Acotado al slice productos; P11 global sigue pendiente. El estado de la ADR no cambia y no autoriza producción. |
 
 ---
 
@@ -458,7 +459,7 @@ Aserciones de catálogo que se repiten siempre:
 | # | Decisión acotada a productos | Estado global |
 |---|---|---|
 | P10-productos | `dueno` y `encargado` pueden crear, actualizar y cambiar el estado (baja lógica/reactivación) de productos; `vendedor_piloto` sólo lee. RPC: `crear_producto`, `actualizar_producto`, `cambiar_estado_producto`. | P10 global pendiente |
-| P11-productos | `service_role` no recibe `EXECUTE` sobre estas RPC (ni sobre sus fachadas ni sobre sus implementaciones privadas). | P11 global pendiente |
+| P11-productos | `service_role` no recibe `EXECUTE` sobre estas RPC (ni sobre sus fachadas ni sobre sus implementaciones privadas) y **no escribe directamente `public.productos`**: sin `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES` ni `TRIGGER`. Conserva `SELECT`. Complemento del 23/10/2026 tras el hallazgo H-01 de The Architect (por defecto Supabase le concedía todos los privilegios y `BYPASSRLS` habría permitido saltear la validación del precio). No cambia los privilegios de `service_role` sobre `perfiles` ni sobre Auth. | P11 global pendiente |
 | P12/P15-productos | El ABM de productos no usa idempotencia ni `idempotency_key`: no figura entre los comandos críticos de `BLUEPRINT.md` §7.9.6. | P12/P15 globales pendientes |
 | P13-productos | Sin bloqueos explícitos; la actualización de un solo producto se resuelve con «gana la última escritura». | P13 global pendiente |
 | P14-productos | Sin sobrecargas de estas funciones, ni en `public` ni en `privado`. | P14 global pendiente |

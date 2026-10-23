@@ -8,7 +8,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(114);
+select plan(125);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -246,6 +246,30 @@ select is(
        or has_function_privilege('service_role', f.firma, 'execute')),
   0,
   'anon y service_role no pueden ejecutar ninguna RPC de productos');
+
+-- P11-productos (complemento): service_role no participa de la escritura.
+select ok(
+  has_table_privilege('service_role', 'public.productos', 'select'),
+  'service_role puede leer productos');
+
+select ok(
+  not has_table_privilege('service_role', 'public.productos',
+        'insert, update, delete, truncate, references, trigger'),
+  'service_role no tiene INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER sobre productos');
+
+select ok(
+  not has_any_column_privilege('service_role', 'public.productos',
+        'insert, update, references'),
+  'service_role no tiene INSERT/UPDATE/REFERENCES por columna sobre productos');
+
+select is(
+  (select count(*)::int from pg_proc p
+    where p.pronamespace in ('privado'::regnamespace, 'public'::regnamespace)
+      and p.proname in ('crear_producto', 'actualizar_producto',
+                        'cambiar_estado_producto')
+      and has_function_privilege('service_role', p.oid, 'execute')),
+  0,
+  'service_role no ejecuta ninguna fachada ni implementación de productos');
 
 select is(
   (select count(*)::int from firmas f
@@ -736,6 +760,50 @@ select throws_ok(
     values ('aaaaaaaa-0000-4000-8000-000000000000', ' X', 'lacteos', 'unidad', 1,
             'aaaaaaaa-0000-4000-8000-000000000001')$$,
   '23514', null, 'la tabla rechaza nombres sin normalizar');
+
+-- service_role (BYPASSRLS) tampoco escribe: los intentos fallan por privilegio
+-- y no modifican la tabla. TRUNCATE falla antes de tocar nada y todo el test
+-- corre dentro de una transacción que se revierte.
+create temp table huella_service_role as
+  select count(*)::int as filas,
+         md5(string_agg(p::text, '|' order by p.id)) as productos
+    from public.productos p;
+grant select on huella_service_role to public;
+
+grant usage on schema extensions to service_role;
+set local role service_role;
+
+select ok(
+  (select count(*) from public.productos) > 0,
+  'service_role lee productos de todas las empresas');
+select throws_ok(
+  $$insert into public.productos (empresa_id, nombre, categoria, forma_venta,
+                                  precio, creado_por)
+    values ('aaaaaaaa-0000-4000-8000-000000000000', 'Directo SR', 'lacteos',
+            'unidad', 20.999, 'aaaaaaaa-0000-4000-8000-000000000001')$$,
+  '42501', null, 'service_role no puede insertar directo (20.999 no se redondea)');
+select throws_ok(
+  $$update public.productos set precio = 20.999
+     where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
+  '42501', null, 'service_role no puede actualizar el precio');
+select throws_ok(
+  $$update public.productos set categoria = 'fiambres', forma_venta = 'pieza'
+     where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
+  '42501', null, 'service_role no puede cambiar categoría ni forma de venta');
+select throws_ok(
+  $$delete from public.productos where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
+  '42501', null, 'service_role no puede borrar');
+select throws_ok(
+  $$truncate table public.productos$$,
+  '42501', null, 'service_role no puede truncar');
+
+reset role;
+
+select results_eq(
+  $$select count(*)::int, md5(string_agg(p::text, '|' order by p.id))
+      from public.productos p$$,
+  $$select filas, productos from huella_service_role$$,
+  'los intentos de service_role no modificaron la tabla');
 
 -- Caracterización (por qué existe la RPC): una escritura directa en la
 -- columna numeric(14,2) redondea en silencio. Sólo el owner puede hacerla.

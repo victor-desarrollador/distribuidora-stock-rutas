@@ -196,6 +196,22 @@ test.describe("UI del catálogo (dueño)", () => {
   });
 });
 
+test.describe("Convivencia temporal con el catálogo demo (DE-12)", () => {
+  // Jornadas y Movimientos siguen con los productos de prueba del navegador:
+  // el aviso evita creer que un cambio en /productos los afecta.
+  for (const ruta of ["/jornadas", "/movimientos"]) {
+    test(`${ruta} avisa que usa el catálogo de demostración`, async ({
+      page,
+    }) => {
+      await page.goto(ruta);
+
+      await expect(
+        page.getByRole("note").filter({ hasText: "Catálogo de demostración" })
+      ).toContainText("no el catálogo real de la sección Productos");
+    });
+  }
+});
+
 test.describe("UI del catálogo (encargado)", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
