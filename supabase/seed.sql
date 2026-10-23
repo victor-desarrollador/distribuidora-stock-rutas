@@ -71,3 +71,24 @@ values
    'vendedor.prueba', 'Vendedor de prueba', 'vendedor_piloto', true),
   ('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-0000000000e1',
    'inactivo.prueba', 'Inactivo de prueba', 'vendedor_piloto', false);
+
+-- Catálogo de productos de prueba (sólo local). Sin stock: el stock sólo
+-- sale de movimientos_stock (Blueprint §3.1). Fiambres con precio de pieza
+-- completa; la media se deriva (ADR-003).
+insert into public.productos (
+  id, empresa_id, codigo, nombre, categoria, forma_venta, precio,
+  stock_minimo, activo, creado_por
+)
+values
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000e1',
+   'LAC-001', 'Yogur bebible 1 L', 'lacteos', 'unidad', 2300.00, 20, true,
+   '00000000-0000-4000-8000-000000000001'),
+  ('00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000e1',
+   'LAC-002', 'Leche entera 1 L', 'lacteos', 'unidad', 1600.00, 30, true,
+   '00000000-0000-4000-8000-000000000001'),
+  ('00000000-0000-4000-8000-0000000000a3', '00000000-0000-4000-8000-0000000000e1',
+   'FIA-001', 'Jamón cocido', 'fiambres', 'pieza', 12500.00, 10, true,
+   '00000000-0000-4000-8000-000000000001'),
+  ('00000000-0000-4000-8000-0000000000a4', '00000000-0000-4000-8000-0000000000e1',
+   null, 'Salame milán', 'fiambres', 'pieza', 9800.00, 16, false,
+   '00000000-0000-4000-8000-000000000001');

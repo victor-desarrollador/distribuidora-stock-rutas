@@ -26,6 +26,7 @@ import {
 } from "../data/mockJornadas";
 import type { RetornoDeposito } from "../data/mockRetornos";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import AvisoCatalogoDemo from "../components/AvisoCatalogoDemo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 const moneda = (valor: number) =>
   new Intl.NumberFormat("es-AR", {
@@ -369,6 +370,7 @@ export default function Jornadas() {
         </button>
       </div>
       <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
+      <AvisoCatalogoDemo />
       {/* Estadísticas */}
       <div className="grid gap-4 sm:grid-cols-3">
         {[

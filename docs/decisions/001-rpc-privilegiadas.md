@@ -2,7 +2,7 @@
 
 **Fecha:** 12/10/2026 · **Última revisión documental:** 23/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026)
 
 > **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; y el 23/10/2026, P2, P3 y P4 (§18). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
@@ -21,6 +21,7 @@
 | v1.3 | Codex | Alinea la decisión humana: P1 = Topología D, P19 = gobernanza en dos etapas y P20 = migraciones de validación sólo local/staging. Estado intermedio, sin aprobación productiva; P2–P17 pendientes y P18 separada. |
 | v1.4 | Claude Code | Registra la decisión humana del 22/10/2026 sobre P5, P6 y P7 (un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario; sin membresías). El estado de la ADR no cambia; P2–P4 y P8–P17 siguen pendientes. |
 | v1.5 | Claude Code | Registra la decisión humana del 23/10/2026 sobre P2, P3 y P4 (esquemas `public`/`privado`, rol técnico `propietario_rpc`, ownership de tablas y RLS sin `FORCE` global), que cierra el hallazgo BLOCKER-01 de la auditoría de `d7c3664`. El estado de la ADR no cambia; P8–P17 siguen pendientes y P18 separada. |
+| v1.5 + anexo | Claude Code | Agrega §18.1: decisiones humanas del 23/10/2026 **acotadas al slice productos** (P10/P11/P12/P13/P14/P15/P16/P17-productos, DE-2, DE-3, DE-11, DE-15 y el helper `privado.usuario_actual()`). No resuelve P10–P17 globalmente, no cambia el estado de la ADR ni autoriza producción. |
 
 ---
 
@@ -436,7 +437,7 @@ Aserciones de catálogo que se repiten siempre:
 | P17 | Mecanismo de auditoría de operaciones exitosas | 14 |
 | P18 | Registro de intentos rechazados (**decisión futura separada**) | 14 |
 
-**P8–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.**
+**P8–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.** Para el slice productos rigen las decisiones acotadas de §18.1, que no cambian este estado global.
 
 | # | Decisión resuelta | Resultado | Sección |
 |---|---|---|---|
@@ -449,6 +450,30 @@ Aserciones de catálogo que se repiten siempre:
 | P2 | Esquemas expuesto y privado | **`public`** es el esquema expuesto para las tablas que la aplicación necesita; **`privado`** será el esquema no expuesto para las futuras implementaciones privilegiadas. `privado` no se crea hasta que exista la primera implementación que viva allí (decisión humana, 23/10/2026) | 5 |
 | P3 | Rol propietario técnico | **`propietario_rpc`**: `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`; propietario sólo de las funciones privilegiadas privadas necesarias, nunca de tablas de negocio. Se crea junto con el primer objeto que dependa de él (decisión humana, 23/10/2026) | 7 |
 | P4 | Ownership, `FORCE RLS` y frontera de seguridad | Tablas de negocio del owner de migraciones/Supabase; RLS obligatoria en toda tabla expuesta; **sin `FORCE ROW LEVEL SECURITY` global** (todo uso futuro, justificado y probado); funciones `SECURITY DEFINER` en `privado`, sin ser propietarias de tablas y con validación explícita de `auth.uid()`, empresa, rol, permisos, estado e integridad (decisión humana, 23/10/2026) | 7 |
+
+### 18.1 Decisiones de validación acotadas al slice productos (23/10/2026)
+
+> **Alcance estricto.** Estas decisiones humanas aplican **únicamente** al slice «catálogo de productos» (`public.productos` y sus RPC). **No resuelven P10–P17 globalmente**: para cualquier otra operación siguen pendientes. **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, y **no autorizan producción**. Se registran como ensayo de la Topología D dentro del alcance local/staging que permite P20.
+
+| # | Decisión acotada a productos | Estado global |
+|---|---|---|
+| P10-productos | `dueno` y `encargado` pueden crear, actualizar y cambiar el estado (baja lógica/reactivación) de productos; `vendedor_piloto` sólo lee. RPC: `crear_producto`, `actualizar_producto`, `cambiar_estado_producto`. | P10 global pendiente |
+| P11-productos | `service_role` no recibe `EXECUTE` sobre estas RPC (ni sobre sus fachadas ni sobre sus implementaciones privadas). | P11 global pendiente |
+| P12/P15-productos | El ABM de productos no usa idempotencia ni `idempotency_key`: no figura entre los comandos críticos de `BLUEPRINT.md` §7.9.6. | P12/P15 globales pendientes |
+| P13-productos | Sin bloqueos explícitos; la actualización de un solo producto se resuelve con «gana la última escritura». | P13 global pendiente |
+| P14-productos | Sin sobrecargas de estas funciones, ni en `public` ni en `privado`. | P14 global pendiente |
+| P16-productos | Errores con códigos estables `producto_*` en `message` y SQLSTATE `PTxyz` (PostgREST responde HTTP `xyz`); el frontend nunca expone el detalle SQL/PostgREST crudo. | P16 global pendiente |
+| P17-productos | La trazabilidad del dato maestro se limita a `creado_en` y `creado_por`; cualquier auditoría adicional de datos maestros es una decisión futura (`BLUEPRINT.md` §10). | P17 global pendiente |
+
+**Decisiones de diseño del slice, también aprobadas por decisión humana:**
+
+- **DE-2 — precio exacto.** `productos.precio` se persiste como `numeric(14,2)`. Como toda asignación a esa columna redondea antes de cualquier CHECK, trigger o política, el rechazo de más de 2 decimales se hace sobre un parámetro `numeric` sin escala, **antes** del CAST, dentro de la RPC. Con `SECURITY INVOKER` el usuario conservaría un INSERT/UPDATE directo que saltea esa validación; por eso la escritura usa la **Topología D**: fachada `SECURITY INVOKER` en `public` e implementación `SECURITY DEFINER` en `privado`, propiedad de `propietario_rpc`. `authenticated` sólo tiene `SELECT` sobre `productos`.
+- **DE-11 — empresa derivada en el servidor.** `empresa_id` no es parámetro de ninguna RPC: la implementación privada la deriva del perfil activo del llamador (coherente con §8.4).
+- **DE-15 — control de decimales por valor.** `round(p_precio, 2) = p_precio`, evaluado junto con `p_precio >= 0` y `p_precio < 10^12` en forma fail-closed: `20.990` se acepta y `20.999` se rechaza.
+- **DE-3 — código.** Opcional; se normaliza con trim, un vacío pasa a `NULL` y se conservan mayúsculas y minúsculas; único por empresa.
+- **Identidad dentro de `propietario_rpc`.** Verificado en local: el rol de migraciones no puede conceder `USAGE` sobre el esquema `auth` (propiedad de `supabase_admin`), así que `propietario_rpc` no puede invocar `auth.uid()`. El helper `privado.usuario_actual()` lee el claim `sub` del JWT con la misma expresión que `auth.uid()`. **No usa `user_metadata`** y **no deriva empresa ni rol del JWT**: empresa y rol se siguen leyendo de `perfiles`. Una prueba pgTAP verifica que el helper y `auth.uid()` coincidan.
+
+Implementación y evidencia: `supabase/migrations/20261023140000_catalogo_productos.sql`, `supabase/tests/productos_catalogo.test.sql` y la entrada «Catálogo de productos en Supabase (slice productos)» de `docs/progress-log.md`.
 
 ---
 
