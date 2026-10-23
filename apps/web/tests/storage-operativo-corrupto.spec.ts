@@ -42,7 +42,6 @@ for (const caso of casos) {
     const raw = `{${caso.nombre} dañados`;
     await page.addInitScript(
       ({ clave, rawCorrupto }) => {
-        localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
         localStorage.setItem(clave, rawCorrupto);
 
         const originalSetItem = Storage.prototype.setItem;

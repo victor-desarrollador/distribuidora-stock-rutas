@@ -12,7 +12,15 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 import { AuthProvider } from "./AuthContext";
 import { useAuth } from "./auth/useAuth";
-import type { RolUsuario } from "./auth/usuariosDemo";
+import {
+  ROLES_GESTION,
+  ROLES_SOLO_DUENO,
+  ROLES_TODOS,
+} from "./auth/roles";
+import {
+  PantallaAccesoBloqueado,
+  PantallaCargandoSesion,
+} from "./components/EstadoAcceso";
 
 import Dashboard from "./pages/Dashboard";
 import Productos from "./pages/Productos";
@@ -27,43 +35,35 @@ import CuentasCorrientes from "./pages/CuentasCorrientes";
 import Login from "./pages/Login";
 import ConfiguracionDemo from "./pages/ConfiguracionDemo";
 
-const admin: RolUsuario[] = ["administrador"];
-
-const adminDeposito: RolUsuario[] = [
-  "administrador",
-  "deposito",
-];
-
-const adminVendedor: RolUsuario[] = [
-  "administrador",
-  "vendedor",
-];
-
-const todos: RolUsuario[] = [
-  "administrador",
-  "vendedor",
-  "deposito",
-];
+// Dueño y encargado: lo que tenía el administrador del prototipo.
+// Vendedor/piloto: lo que tenía el vendedor. El rol "depósito" no existe
+// (Blueprint §9).
+const gestion = ROLES_GESTION;
+const todos = ROLES_TODOS;
 
 function Inicio() {
   const { usuario } = useAuth();
 
-  if (usuario?.rol === "vendedor") {
+  if (usuario?.rol === "vendedor_piloto") {
     return <Navigate to="/autoventa" replace />;
-  }
-
-  if (usuario?.rol === "deposito") {
-    return <Navigate to="/jornadas" replace />;
   }
 
   return <Dashboard />;
 }
 
 function RutasPrivadas() {
-  const { usuario } = useAuth();
+  const { sesion } = useAuth();
 
-  if (!usuario) {
+  if (sesion.estado === "cargando") {
+    return <PantallaCargandoSesion />;
+  }
+
+  if (sesion.estado === "no_autenticado") {
     return <Navigate to="/login" replace />;
+  }
+
+  if (sesion.estado !== "autenticado") {
+    return <PantallaAccesoBloqueado />;
   }
 
   return (
@@ -81,7 +81,7 @@ function RutasPrivadas() {
         <Route
           path="/productos"
           element={
-            <ProtectedRoute roles={adminDeposito}>
+            <ProtectedRoute roles={gestion}>
               <Productos />
             </ProtectedRoute>
           }
@@ -90,7 +90,7 @@ function RutasPrivadas() {
         <Route
           path="/clientes"
           element={
-            <ProtectedRoute roles={adminVendedor}>
+            <ProtectedRoute roles={todos}>
               <Clientes />
             </ProtectedRoute>
           }
@@ -99,7 +99,7 @@ function RutasPrivadas() {
         <Route
           path="/camiones"
           element={
-            <ProtectedRoute roles={adminDeposito}>
+            <ProtectedRoute roles={gestion}>
               <Camiones />
             </ProtectedRoute>
           }
@@ -108,7 +108,7 @@ function RutasPrivadas() {
         <Route
           path="/jornadas"
           element={
-            <ProtectedRoute roles={adminDeposito}>
+            <ProtectedRoute roles={gestion}>
               <Jornadas />
             </ProtectedRoute>
           }
@@ -117,7 +117,7 @@ function RutasPrivadas() {
         <Route
           path="/autoventa"
           element={
-            <ProtectedRoute roles={adminVendedor}>
+            <ProtectedRoute roles={todos}>
               <Autoventa />
             </ProtectedRoute>
           }
@@ -140,7 +140,7 @@ function RutasPrivadas() {
         <Route
           path="/rendicion"
           element={
-            <ProtectedRoute roles={admin}>
+            <ProtectedRoute roles={gestion}>
               <Rendicion />
             </ProtectedRoute>
           }
@@ -149,7 +149,7 @@ function RutasPrivadas() {
         <Route
           path="/retornos"
           element={
-            <ProtectedRoute roles={adminDeposito}>
+            <ProtectedRoute roles={gestion}>
               <Retornos />
             </ProtectedRoute>
           }
@@ -158,7 +158,7 @@ function RutasPrivadas() {
         <Route
           path="/cuentas"
           element={
-            <ProtectedRoute roles={adminVendedor}>
+            <ProtectedRoute roles={todos}>
               <CuentasCorrientes />
             </ProtectedRoute>
           }
@@ -176,7 +176,14 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/configuracion-demo" element={<ConfiguracionDemo />} />
+          <Route
+            path="/configuracion-demo"
+            element={
+              <ProtectedRoute roles={ROLES_SOLO_DUENO}>
+                <ConfiguracionDemo />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/*" element={<RutasPrivadas />} />
         </Routes>
       </BrowserRouter>

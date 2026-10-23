@@ -2,9 +2,9 @@
 
 **Fecha:** 12/10/2026 · **Última revisión documental:** 22/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.3 (alineación de P1, P19 y P20)
+**Versión:** 1.4 (registro de la decisión humana P5–P7)
 
-> **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20. Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P2–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P2–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
+> **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20, y el 22/10/2026 P5, P6 y P7 (§18). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P2–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P2–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
 ---
 
@@ -19,6 +19,7 @@
 | Segunda revisión independiente | Codex | **CHANGES REQUIRED** (4 correcciones sobre la ronda 2). |
 | v1.2, ronda 3 | Claude Code | Esta versión: aplica las 4 correcciones (secciones 4, 5, 15, 17, 18, 19 y 21). Pendiente de nueva revisión independiente y de aprobación humana. |
 | v1.3 | Codex | Alinea la decisión humana: P1 = Topología D, P19 = gobernanza en dos etapas y P20 = migraciones de validación sólo local/staging. Estado intermedio, sin aprobación productiva; P2–P17 pendientes y P18 separada. |
+| v1.4 | Claude Code | Registra la decisión humana del 22/10/2026 sobre P5, P6 y P7 (un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario; sin membresías). El estado de la ADR no cambia; P2–P4 y P8–P17 siguen pendientes. |
 
 ---
 
@@ -188,7 +189,7 @@ Requisito de diseño propuesto, que se deriva de §7.3 y §10:277 y queda sujeto
 5. Un objeto de otra empresa se trata **igual que uno inexistente** (sección 13).
 6. **Pruebas obligatorias:** la batería debe incluir datos de **al menos dos empresas** e intentar cada relación con IDs mezclados (venta de A sobre jornada de B, movimiento de A con ubicación de B, pago de A sobre venta de B, etc.), tanto por las RPC como por escritura directa. Todas deben fallar. Esto no construye un registro de empresas (§7.3): las dos empresas son datos de prueba.
 
-**PENDIENTE DE APROBACIÓN HUMANA:**
+**RESUELTO POR DECISIÓN HUMANA (22/10/2026)** — ver §18. Texto original de las opciones, conservado como registro:
 
 - **P5.** Cómo se resuelve la membresía activa:
   - (a) Fase 1 con una sola membresía activa por usuario, rechazando si hay 0 o más de 1;
@@ -417,9 +418,6 @@ Aserciones de catálogo que se repiten siempre:
 | P2 | Nombre de los esquemas expuesto y privado | 5 |
 | P3 | Rol propietario técnico y sus atributos | 7 |
 | P4 | Ownership de tablas, `FORCE RLS`, RLS como defensa en profundidad o elusión deliberada | 7 |
-| P5 | Resolución de la membresía activa | 8 |
-| P6 | Usuarios con varias empresas | 8 |
-| P7 | Uno o varios roles por membresía | 8 |
 | P8 | Definición de "participación real en la jornada" | 9 |
 | P9 | Huecos de separación de funciones (aprobación por quien contó, receptor = iniciador, verificación de transferencias) | 9 |
 | P10 | Catálogo de operaciones y permisos por RPC | 9 |
@@ -432,13 +430,16 @@ Aserciones de catálogo que se repiten siempre:
 | P17 | Mecanismo de auditoría de operaciones exitosas | 14 |
 | P18 | Registro de intentos rechazados (**decisión futura separada**) | 14 |
 
-**P2–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.**
+**P2–P4 y P8–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.**
 
 | # | Decisión resuelta | Resultado | Sección |
 |---|---|---|---|
 | P1 | Topología | **Topología D:** fachada expuesta `SECURITY INVOKER` + implementación privada/no expuesta `SECURITY DEFINER` | 4, 5 |
 | P19 | Gobernanza | Dos etapas: aprobación para validación controlada y aceptación humana final antes de producción | 15 |
 | P20 | Migraciones | Permitidas sólo para validación local/staging; producción bloqueada | 2, 15 |
+| P5 | Resolución de la membresía activa | Variante de la opción (a) sin tabla de membresías: cada usuario tiene **un único perfil** en `perfiles`, 1:1 con `auth.users`, que fija su empresa. Sin perfil o con perfil inactivo, acceso denegado. La empresa nunca la indica el cliente (decisión humana, 22/10/2026) | 8 |
+| P6 | Usuarios con varias empresas | **No.** En Fase 1 un usuario pertenece a una sola empresa; sin selector de empresa ni múltiples empresas por usuario (decisión humana, 22/10/2026) | 8 |
+| P7 | Uno o varios roles | **Un único rol por perfil:** `dueno`, `encargado` o `vendedor_piloto`. Sin tabla `roles` (decisión humana, 22/10/2026) | 8 |
 
 ---
 
@@ -449,7 +450,7 @@ La alineación documental aplica estos cambios:
 - **D:** Blueprint §10 define la fachada expuesta `SECURITY INVOKER`, la implementación privada/no expuesta `SECURITY DEFINER` y la implementación privada como frontera real de seguridad; §12 prueba esa cadena; §15 registra el estado intermedio.
 - **A, B y C:** A queda descartada, B reservada para lógica externa y C no elegida.
 - **Gobernanza:** `docs/decisions/README.md` incorpora `APROBADA PARA VALIDACIÓN CONTROLADA`; las migraciones dependientes de ADR-001 quedan habilitadas sólo local/staging.
-- **Modelo de datos y decisiones técnicas:** P2–P17 siguen pendientes; P18 permanece separada. `auditoria`, `idempotency_key`, membresías y restricciones no quedan aprobadas por P1/P19/P20.
+- **Modelo de datos y decisiones técnicas:** P2–P4 y P8–P17 siguen pendientes; P18 permanece separada. P5–P7 fijan un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario, sin membresías. `auditoria`, `idempotency_key` y restricciones no quedan aprobadas por P1/P19/P20.
 - **Producción:** continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final.
 
 ---

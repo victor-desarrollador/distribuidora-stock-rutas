@@ -5,6 +5,7 @@ import { ShoppingCart } from "lucide-react";
 
 import Sidebar from "./Sidebar";
 import { useAuth } from "../../auth/useAuth";
+import { nombreRol } from "../../auth/roles";
 
 type Props = {
   children: ReactNode;
@@ -13,18 +14,10 @@ type Props = {
 export default function AppLayout({ children }: Props) {
   const { usuario } = useAuth();
 
-  const nombreRol =
-    usuario?.rol === "administrador"
-      ? "Administrador"
-      : usuario?.rol === "vendedor"
-        ? "Vendedor"
-        : usuario?.rol === "deposito"
-          ? "Depósito"
-          : "Sin sesión";
+  const rolVisible = usuario ? nombreRol(usuario.rol) : "Sin sesión";
 
-  const puedeVender =
-    usuario?.rol === "administrador" ||
-    usuario?.rol === "vendedor";
+  // Todos los roles vigentes acceden a Autoventa.
+  const puedeVender = usuario !== null;
 
   return (
     <div className="min-h-screen bg-slate-100 md:flex">
@@ -64,7 +57,7 @@ export default function AppLayout({ children }: Props) {
 
             {/* ROL DEL USUARIO CONECTADO */}
             <span className="rounded-full bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700 sm:text-sm">
-              {nombreRol}
+              {rolVisible}
             </span>
           </div>
         </header>

@@ -1,22 +1,30 @@
+import { useEffect, useState, type ReactNode } from "react";
 
-import { useState, type ReactNode } from "react";
-
-import {
-  CLAVE_SESION,
-  usuariosDemo,
-  type UsuarioDemo,
-} from "./auth/usuariosDemo";
 import { AuthContext } from "./auth/AuthContextValue";
+import {
+  iniciarSesion as iniciarSesionConPuerto,
+  resolverEstadoSesion,
+  type EstadoSesion,
+  type PuertoAuth,
+  type ResultadoInicioSesion,
+} from "./auth/sesion";
+import { obtenerPuertoAuth } from "./lib/supabase";
 
-function recuperarSesion(): UsuarioDemo | null {
+type Inicializacion =
+  | { puerto: PuertoAuth; error: null }
+  | { puerto: null; error: string };
+
+function inicializar(): Inicializacion {
   try {
-    const id = localStorage.getItem(CLAVE_SESION);
-
-    return (
-      usuariosDemo.find((u) => u.id === id) ?? null
-    );
-  } catch {
-    return null;
+    return { puerto: obtenerPuertoAuth(), error: null };
+  } catch (e) {
+    return {
+      puerto: null,
+      error:
+        e instanceof Error
+          ? e.message
+          : "No se pudo inicializar la autenticación.",
+    };
   }
 }
 
@@ -25,43 +33,66 @@ export function AuthProvider({
 }: {
   children: ReactNode;
 }) {
-  const [usuario, setUsuario] =
-    useState<UsuarioDemo | null>(recuperarSesion);
+  const [{ puerto, error }] = useState(inicializar);
 
-  function iniciarSesion(usuarioId: string): boolean {
-    const encontrado = usuariosDemo.find(
-      (u) => u.id === usuarioId
-    );
+  const [sesion, setSesion] = useState<EstadoSesion>(() =>
+    error
+      ? { estado: "error", mensaje: error }
+      : { estado: "cargando" }
+  );
 
-    if (!encontrado) return false;
+  // La sesión se restaura desde Supabase (que valida el token) y el perfil
+  // se vuelve a leer del servidor en cada carga: nada de autorización se
+  // toma de localStorage.
+  useEffect(() => {
+    if (!puerto) return;
 
-    try {
-      localStorage.setItem(
-        CLAVE_SESION,
-        encontrado.id
-      );
-      setUsuario(encontrado);
-      return true;
-    } catch {
-      return false;
+    let vigente = true;
+    let secuencia = 0;
+
+    const desuscribir = puerto.alCambiarUsuario((usuarioId) => {
+      const actual = ++secuencia;
+
+      if (usuarioId) setSesion({ estado: "cargando" });
+
+      void resolverEstadoSesion(puerto, usuarioId).then((estado) => {
+        if (vigente && actual === secuencia) setSesion(estado);
+      });
+    });
+
+    return () => {
+      vigente = false;
+      desuscribir();
+    };
+  }, [puerto]);
+
+  async function iniciarSesion(
+    usuario: string,
+    password: string
+  ): Promise<ResultadoInicioSesion> {
+    if (!puerto) {
+      return { ok: false, mensaje: error ?? "Autenticación no disponible." };
     }
+
+    return iniciarSesionConPuerto(puerto, usuario, password);
   }
 
-  function cerrarSesion() {
-    try {
-      localStorage.removeItem(CLAVE_SESION);
-    } catch {
-      // La sesión visible también se cierra
-      // si localStorage no está disponible.
-    }
+  async function cerrarSesion() {
+    if (!puerto) return;
 
-    setUsuario(null);
+    try {
+      await puerto.cerrarSesion();
+    } finally {
+      setSesion({ estado: "no_autenticado" });
+    }
   }
 
   return (
     <AuthContext.Provider
       value={{
-        usuario,
+        sesion,
+        usuario:
+          sesion.estado === "autenticado" ? sesion.perfil : null,
         iniciarSesion,
         cerrarSesion,
       }}

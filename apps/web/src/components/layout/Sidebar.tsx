@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "../../auth/useAuth";
+import { nombreRol } from "../../auth/roles";
 
 const menu = [
   { nombre: "Inicio", icono: LayoutDashboard, ruta: "/" },
@@ -63,11 +64,15 @@ export default function Sidebar() {
   }, [menuAbierto]);
 
   const menuVisible = menu.filter((item) => {
-    if (usuario?.rol === "administrador") {
+    if (usuario?.rol === "dueno") {
       return true;
     }
 
-    if (usuario?.rol === "vendedor") {
+    if (usuario?.rol === "encargado") {
+      return item.ruta !== "/configuracion-demo";
+    }
+
+    if (usuario?.rol === "vendedor_piloto") {
       return [
         "/clientes",
         "/autoventa",
@@ -76,31 +81,14 @@ export default function Sidebar() {
       ].includes(item.ruta);
     }
 
-    if (usuario?.rol === "deposito") {
-      return [
-        "/productos",
-        "/camiones",
-        "/jornadas",
-        "/movimientos",
-        "/retornos",
-      ].includes(item.ruta);
-    }
-
     return false;
   });
 
-  const nombreRol =
-    usuario?.rol === "administrador"
-      ? "Administrador"
-      : usuario?.rol === "vendedor"
-        ? "Vendedor"
-        : usuario?.rol === "deposito"
-          ? "Encargado de depósito"
-          : "Sin sesión";
+  const rolVisible = usuario ? nombreRol(usuario.rol) : "Sin sesión";
 
   function salir() {
     setMenuAbierto(false);
-    cerrarSesion();
+    void cerrarSesion();
   }
 
   return (
@@ -183,7 +171,7 @@ export default function Sidebar() {
             </p>
 
             <p className="text-xs text-slate-400">
-              {nombreRol}
+              {rolVisible}
             </p>
           </div>
         </div>

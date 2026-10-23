@@ -1,4 +1,108 @@
 ---
+## 22/10/2026 — Auth backend base: Supabase Auth, empresas, perfiles y RLS
+
+**Rama:** `feat/auth-backend-base` · **Base:** `main` en `e75560b6d2a2a49c9fc6029efaa14e8f23292468` · **Estado:** implementado sin commit; pendiente de revisión humana, security review independiente y auditoría independiente. Sin push, merge, deploy ni migraciones remotas. Validación de base **sólo local**.
+
+### Objetivo
+
+Reemplazar la autenticación demo (selector de usuarios + sesión en `localStorage`) por Supabase Auth real con usuario y contraseña, leyendo empresa y rol de la tabla protegida `perfiles`.
+
+### Decisiones usadas
+
+- Decisiones humanas de la tarea: Supabase Auth con cuentas individuales; login visible usuario + contraseña; sin registro público; cuentas creadas administrativamente; `perfiles` 1:1 con `auth.users`; una empresa y un rol por usuario; sin perfil o perfil inactivo ⇒ acceso denegado; nunca `user_metadata`; RLS desde el primer bloque; `service_role` prohibido en frontend.
+- **ADR-001 P5/P6/P7 resueltas por decisión humana (22/10/2026)** y registradas en ADR-001 v1.4 §18, `AGENTS.md` §3/§4.3, `CLAUDE.md` y `docs/decisions/README.md`. El estado de ADR-001 no cambió. P2–P4 y P8–P17 siguen pendientes; P18 separada.
+- Reparto de rutas (decisión humana): dueño y encargado acceden a lo que tenía el administrador del prototipo; vendedor/piloto a lo que tenía el vendedor; `/configuracion-demo` sólo dueño. El rol «depósito» desaparece.
+- No se usó `SECURITY DEFINER`, RPC ni esquemas privados: las políticas RLS se resuelven con `auth.uid()` y una subconsulta sobre `perfiles` sujeta a su propia RLS.
+
+### Estrategia usuario → Auth (detalle técnico de Auth, no email de negocio)
+
+- Supabase Auth autentica con contraseña sólo por email o teléfono (documentación oficial de *Password-based Auth*, `signInWithPassword`); no ofrece login por username.
+- `usuario` visible → `trim()` + minúsculas → debe cumplir `^[a-z0-9][a-z0-9._-]{2,31}$` → identidad interna `<usuario>@usuarios.distribuidora.invalid` (`.invalid` reservado por RFC 2606; no recibe correo).
+- La columna `perfiles.usuario` guarda el valor normalizado con el mismo CHECK y `UNIQUE`, equivalente a unicidad case-insensitive.
+- Las contraseñas sólo existen en Supabase Auth; el formulario descarta la contraseña después de cada intento.
+
+### Creación de cuentas reales (pendiente, documentado)
+
+Sin pantalla de administración ni Edge Function en este bloque. Procedimiento previsto, a ejecutar por una persona autorizada desde el panel o CLI de Supabase del entorno correspondiente (nunca desde el navegador de la aplicación):
+
+1. Crear el usuario en Auth con email `<usuario>@usuarios.distribuidora.invalid`, contraseña inicial y email confirmado.
+2. Insertar su fila en `public.perfiles` (`usuario_id`, `empresa_id`, `usuario`, `nombre`, `rol`, `activo`) con un rol administrativo de base.
+3. Bajas: `activo = false` (la FK `ON DELETE RESTRICT` impide borrar cuentas con perfil).
+
+Una herramienta de administración de usuarios requiere decisión aparte (P11, Edge Function o RPC privilegiada).
+
+### Archivos
+
+- Supabase: `supabase/config.toml` (`[auth] enable_signup = false`, `[auth.email] enable_signup = true`, password mínimo 8, URLs locales), `supabase/.gitignore`, `supabase/migrations/20261022120000_auth_base_empresas_perfiles.sql`, `supabase/seed.sql` (sólo local), `supabase/tests/auth_base_rls.test.sql`.
+- Frontend: `apps/web/src/lib/supabase.ts`, `apps/web/src/auth/{sesion,roles,AuthContextValue}.ts`, `apps/web/src/domain/usuario_auth.ts`, `apps/web/src/AuthContext.tsx`, `apps/web/src/App.tsx`, `apps/web/src/pages/Login.tsx`, `apps/web/src/components/{ProtectedRoute,EstadoAcceso}.tsx`, `apps/web/src/components/layout/{AppLayout,Sidebar}.tsx`, `apps/web/src/pages/ConfiguracionDemo.tsx`; se elimina `apps/web/src/auth/usuariosDemo.ts`.
+- Tests: `src/domain/usuario_auth.test.ts`, `src/auth/sesion.test.ts`, `src/lib/supabase.test.ts`, `src/components/ProtectedRoute.test.tsx`, `tests/auth/{auth.setup.ts,auth.spec.ts,cuentasPrueba.ts}`; los 8 specs operativos dejan de escribir la sesión demo y usan la sesión real del dueño de prueba (`storageState`).
+- Configuración: `apps/web/playwright.config.ts` (proyecto `setup`), `apps/web/.env.example`, `apps/web/package.json` / `package-lock.json` (`@supabase/supabase-js@2.117.3`, `supabase@2.120.0` como devDependency, versiones exactas publicadas hace más de dos semanas).
+- Documentación: `docs/decisions/001-rpc-privilegiadas.md`, `docs/decisions/README.md`, `AGENTS.md`, `CLAUDE.md`, este archivo.
+
+### Modelo
+
+- `empresas(id uuid PK, nombre text NOT NULL, activo boolean, creado_en timestamptz)`.
+- `perfiles(usuario_id uuid PK FK auth.users ON DELETE RESTRICT, empresa_id uuid FK empresas, usuario text UNIQUE + CHECK formato, nombre text, rol text CHECK (dueno|encargado|vendedor_piloto), activo boolean, creado_en timestamptz)`.
+- `rol` con CHECK sobre `text` y no enum: igual de restrictivo, legible en el DDL y modificable sin `ALTER TYPE`. Sin tabla `roles` ni membresías.
+- Sin `actualizado_en`: en este bloque no existe ningún camino de modificación desde la aplicación; se agregará cuando exista uno.
+
+### RLS y grants
+
+- `REVOKE ALL` sobre ambas tablas a `public`, `anon` y `authenticated`; `GRANT SELECT` sólo a `authenticated`.
+- `perfiles_select_propio`: `usuario_id = auth.uid()` (el usuario inactivo ve su fila para que la interfaz informe el bloqueo).
+- `empresas_select_propia`: sólo la empresa de un perfil propio **activo**.
+- Sin políticas ni grants de INSERT/UPDATE/DELETE.
+
+### Verificación
+
+- `npm run typecheck` → exit 0.
+- `npm run lint` → exit 0.
+- `npm test` → 22 archivos / 649 tests passed.
+- `npm run build` → exit 0 (aviso preexistente de chunk > 500 kB).
+- Búsqueda de seguridad de §13 (`service_role|secret|user_metadata|raw_user_meta_data|password|SUPABASE`) → sólo falsos positivos: comentarios, plantillas `env()` de `config.toml`, la credencial de prueba explícita del seed/E2E y los tests que verifican el rechazo de `user_metadata` y de claves secretas.
+- **Validación SQL parcial sin Docker (no reemplaza `supabase test db`):** cluster PostgreSQL 17.11 descartable + stub mínimo de Supabase (roles `anon`/`authenticated`/`service_role`, `auth.users`, `auth.identities`, `auth.uid()` con la definición de Supabase y privilegios por defecto permisivos `GRANT ALL` a los tres roles) + pgTAP v1.3.3 cargado como SQL. Resultado: migración OK, seed OK, **37/37 aserciones `ok`**. Prueba de mutación (RLS de perfiles `using (true)`, empresas sin `p.activo` y `UPDATE` concedido): **13 `not ok`**, lo que confirma que la batería detecta regresiones.
+- ~~**NO EJECUTADO:** `supabase start`, `supabase test db` y `npx playwright test`~~ → ejecutados con Docker; ver «Corrección de configuración Auth y workdir» más abajo.
+
+### Corrección de configuración Auth y workdir (22/10/2026)
+
+**Error de workdir encontrado.** Los comandos de la CLI se documentaron y ejecutaron desde `apps/web` con `--workdir ..`, que apunta a `apps/` y no a la raíz del repositorio. La CLI generó el directorio accidental `apps/supabase/` (sin `config.toml`, migraciones, seed ni tests: sólo `.branches/_current_branch`, `.temp/cli-latest` y los directorios vacíos `snippets/`, `tests/` y `.temp/start-secrets/`).
+
+**Corrección.**
+- `apps/web/playwright.config.ts` y `apps/web/.env.example`: `--workdir ..` → `--workdir ../..`. Búsqueda en todo el repo (excluyendo `node_modules`): no quedan otras ocurrencias de `--workdir`.
+- Se verificó que `apps/supabase/` no tenía cambios manuales útiles y que el Supabase real sigue en `supabase/`; se eliminó sólo `apps/supabase/`. `supabase/` no se tocó salvo `config.toml`.
+- `supabase/config.toml`: `[auth.email] enable_signup` pasó de `false` a `true`. En la CLI ese flag habilita el **proveedor email** (incluido el login con contraseña); con `false` el login de las cuentas existentes no estaba habilitado. El registro público sigue cerrado por `[auth] enable_signup = false`. No se agregó registro en el frontend.
+
+**Configuración final de Auth (verificada en el contenedor `supabase_auth`):** `GOTRUE_EXTERNAL_EMAIL_ENABLED=true`, `GOTRUE_DISABLE_SIGNUP=true`. Comprobación directa contra la API local con la publishable key:
+- `POST /auth/v1/token?grant_type=password` con `dueno.prueba@usuarios.distribuidora.invalid` y la contraseña de prueba → **HTTP 200**, `user.email` = `dueno.prueba@usuarios.distribuidora.invalid`, `access_token` presente. **Supabase Auth acepta el dominio `.invalid`.**
+- Misma cuenta con contraseña incorrecta → **HTTP 400** `invalid_credentials`.
+- `POST /auth/v1/signup` con `intruso@usuarios.distribuidora.invalid` → **HTTP 422** `signup_disabled` («Signups not allowed for this instance»).
+
+**Stack real** (`npx supabase stop/start/db reset --workdir ../..`, CLI v2.120.0): migración `20261022120000_auth_base_empresas_perfiles.sql` y `seed.sql` aplicados sin errores.
+
+**Resultados reales:**
+- `npx supabase test db --workdir ../..` → `auth_base_rls.test.sql .. ok` · `All tests successful.` · `Files=1, Tests=37` · `Result: PASS`.
+- `npx playwright test tests/auth/auth.setup.ts` → 1 passed (login real de `dueno.prueba`, «Dueño de prueba» visible).
+- `npx playwright test` → **46 passed** (1 setup + 10 auth + 35 operativos previos).
+- `npm run typecheck` → exit 0 · `npm run lint` → exit 0 · `npm test` → 22 archivos / 649 tests passed · `npm run build` → exit 0 (aviso preexistente de chunk > 500 kB) · `git diff --check` → exit 0.
+- Búsqueda de seguridad repetida (`service_role`, `sb_secret_`, `user_metadata`, `raw_user_meta_data`, `password`, `SUPABASE`, más patrones de JWT `eyJ…` y claves `sb_*` literales): sin secretos reales en archivos versionables. Coincidencias = documentación, comentarios, plantillas `env()` de `config.toml`, la credencial de prueba local explícita (`seed.sql`, `tests/auth/cuentasPrueba.ts`) y tests que verifican el rechazo de `user_metadata`, `sb_secret_` y JWT de `service_role`. El bundle `dist/` no contiene `sb_secret_` ni JWT. `supabase/.temp/` (incluye `start-secrets`), `apps/web/.env.local` y `apps/web/playwright/.auth/` están ignorados por git.
+
+### Riesgos
+
+1. ~~Sin ejecución de pgTAP ni E2E~~ → resuelto en local: pgTAP 37/37 y Playwright 46/46. Sigue sin haber evidencia en staging ni en CI.
+2. ~~Aceptación del dominio `.invalid`~~ → confirmada en el Auth local (HTTP 200). Debe reconfirmarse en el proyecto Supabase remoto cuando exista, junto con que `[auth.email]` quede habilitado y el signup cerrado (la config local no se propaga sola).
+3. La coherencia entre `perfiles.usuario` y el email interno de `auth.users` depende del procedimiento administrativo; no hay constraint que la imponga.
+4. El CI no ejecuta Supabase ni Playwright; los E2E dependen ahora de Supabase local.
+5. `npm audit` informa 2 vulnerabilidades moderadas preexistentes en `vitest@5.0.2` / `@vitest/mocker` (no introducidas por este bloque).
+6. Los módulos operativos siguen siendo demo sobre `localStorage`; este bloque sólo cambia autenticación y autorización de rutas.
+
+### Pendientes
+
+- ~~Ejecutar `supabase start`, `supabase test db` y la suite Playwright con Docker disponible.~~ Hecho en local (ver corrección de configuración Auth y workdir).
+- Security review independiente y auditoría independiente del hash.
+- Decidir la herramienta de alta de cuentas reales (P11) y la incorporación de Supabase/Playwright al CI.
+- Alinear las menciones genéricas a «P2–P17» que quedan en `BLUEPRINT.md`, `docs/PRD.md`, `INVENTARIO_ETAPA_0.md`, `docs/quality/*`, `docs/architecture/analisis-base-datos.md`, `docs/requirements/migracion-unidades-prototipo.md` y ADR-003/ADR-004 (no modificados en este bloque; la fuente vigente de P5–P7 es ADR-001 §18).
+
+---
 ## 22/10/2026 — Refuerzo de fuentes de verdad y contexto de negocio
 
 **Rama:** `chore/reforzar-fuentes-proyecto` · **Estado:** bloque exclusivamente documental implementado; sin código, SQL, migraciones, Supabase, backend ni deploy.

@@ -1,0 +1,152 @@
+// Cliente Supabase del navegador.
+//
+// Usa únicamente variables públicas: la URL del proyecto y la publishable key
+// (o la anon key legacy). Nunca service_role ni secret keys: se rechazan si
+// alguien las configura por error.
+
+import {
+  createClient,
+  type AuthChangeEvent,
+  type Session,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
+
+import type { PuertoAuth } from "../auth/sesion";
+
+export interface ConfigSupabase {
+  url: string;
+  clavePublica: string;
+}
+
+function rolDeJwt(clave: string): string | null {
+  const partes = clave.split(".");
+  if (partes.length !== 3) return null;
+
+  try {
+    const base64 = partes[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload: unknown = JSON.parse(atob(base64));
+
+    return typeof payload === "object" &&
+      payload !== null &&
+      typeof (payload as { role?: unknown }).role === "string"
+      ? (payload as { role: string }).role
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function leerConfigSupabase(
+  env: Record<string, unknown>
+): ConfigSupabase {
+  const url = env.VITE_SUPABASE_URL;
+  const clavePublica = env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+  const faltantes = [
+    typeof url === "string" && url.trim() ? null : "VITE_SUPABASE_URL",
+    typeof clavePublica === "string" && clavePublica.trim()
+      ? null
+      : "VITE_SUPABASE_PUBLISHABLE_KEY",
+  ].filter(Boolean);
+
+  if (faltantes.length > 0) {
+    throw new Error(
+      `Falta configurar ${faltantes.join(" y ")} (ver apps/web/.env.example).`
+    );
+  }
+
+  const clave = (clavePublica as string).trim();
+
+  if (clave.startsWith("sb_secret_") || rolDeJwt(clave) === "service_role") {
+    throw new Error(
+      "VITE_SUPABASE_PUBLISHABLE_KEY contiene una clave secreta. En el navegador sólo se admite la publishable key."
+    );
+  }
+
+  return { url: (url as string).trim(), clavePublica: clave };
+}
+
+export function crearPuertoSupabase(cliente: SupabaseClient): PuertoAuth {
+  return {
+    async iniciarConPassword(identificador, password) {
+      const { error } = await cliente.auth.signInWithPassword({
+        email: identificador,
+        password,
+      });
+
+      if (!error) return { error: null };
+
+      return {
+        error:
+          error.code === "invalid_credentials" || error.status === 400
+            ? "credenciales"
+            : "otro",
+      };
+    },
+
+    async cerrarSesion() {
+      const { error } = await cliente.auth.signOut();
+
+      // Si la revocación remota falla (p. ej. sin conexión), igual se
+      // elimina la sesión local para no dejar al usuario conectado.
+      if (error) await cliente.auth.signOut({ scope: "local" });
+    },
+
+    alCambiarUsuario(callback) {
+      let ultimo: string | null | undefined;
+
+      const { data } = cliente.auth.onAuthStateChange(
+        (_evento: AuthChangeEvent, sesion: Session | null) => {
+          const usuarioId = sesion?.user.id ?? null;
+
+          if (usuarioId === ultimo) return;
+          ultimo = usuarioId;
+
+          // Supabase recomienda no llamar a otros métodos del cliente dentro
+          // del callback: se difiere la lectura del perfil.
+          setTimeout(() => callback(usuarioId), 0);
+        }
+      );
+
+      return () => data.subscription.unsubscribe();
+    },
+
+    async leerPerfil(usuarioId) {
+      const { data, error } = await cliente
+        .from("perfiles")
+        .select("usuario_id, empresa_id, usuario, nombre, rol, activo")
+        .eq("usuario_id", usuarioId)
+        .maybeSingle();
+
+      if (error) throw new Error("No se pudo leer el perfil.");
+
+      return data;
+    },
+
+    async leerEmpresa(empresaId) {
+      const { data, error } = await cliente
+        .from("empresas")
+        .select("id, nombre, activo")
+        .eq("id", empresaId)
+        .maybeSingle();
+
+      if (error) throw new Error("No se pudo leer la empresa.");
+
+      return data;
+    },
+  };
+}
+
+let puerto: PuertoAuth | null = null;
+
+// Crea el cliente una sola vez. Lanza un error claro si falta configuración.
+export function obtenerPuertoAuth(): PuertoAuth {
+  if (!puerto) {
+    const config = leerConfigSupabase(import.meta.env);
+    puerto = crearPuertoSupabase(
+      createClient(config.url, config.clavePublica)
+    );
+  }
+
+  return puerto;
+}

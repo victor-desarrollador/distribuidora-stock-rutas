@@ -9,7 +9,6 @@ test("Rendición avisa movimientos corruptos, no inventa ceros y bloquea el cier
 }) => {
   await page.addInitScript(
     ({ claveJornadas, claveMovimientos, rawCorrupto }) => {
-      localStorage.setItem("distribuidora_sesion_demo_v1", "admin-demo");
       localStorage.setItem(
         claveJornadas,
         JSON.stringify([
