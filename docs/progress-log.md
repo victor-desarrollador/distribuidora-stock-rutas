@@ -1,4 +1,39 @@
 ---
+## 23/10/2026 — Aclaración documental: empresa única y aislamiento por `empresa_id`
+
+**Rama:** `chore/aclarar-empresa-unica` · **Base:** `main` en `12707516fd6a861efd02e0280f9c7ee1fd9fae4e` · **Estado:** cambio documental local, sin push, merge ni deploy; pendiente de commit autorizado. Sin cambios de código, SQL, migraciones ni tests.
+
+### Decisión humana (23/10/2026)
+
+- El producto opera para **UNA SOLA EMPRESA OPERATIVA**. No es multiempresa, multi-tenant ni SaaS.
+- `empresa_id` es una **clave técnica de pertenencia, frontera de aislamiento, soporte de RLS e integridad referencial** (defensa en profundidad). Su presencia no implica ni autoriza funcionalidad multiempresa.
+- No existen membresías, workspaces, selector de empresa, administración de empresas ni onboarding/registro de organizaciones, invitaciones, planes ni suscripciones.
+- Las empresas adicionales de los tests son **fixtures adversariales** para comprobar el aislamiento por `empresa_id`; no son una funcionalidad. Se llaman «aislamiento por `empresa_id`» o «aislamiento de pertenencia».
+
+### Documentos alineados
+
+- `BLUEPRINT.md` §7.3 («Empresa única y aislamiento por `empresa_id`»; se elimina «inicialmente exista una sola empresa»), referencias a membresías en §8, §9 y §10, y criterios de aceptación de §12. Sin cambio de versión.
+- `docs/PRD.md` §12, RNF-06, autenticación y criterio de seguridad de §17 (membresía → perfil/empresa/rol del perfil).
+- `AGENTS.md` (§2.4, superficies sensibles) y `docs/quality/security-review.md` («filtrado/aislamiento multiempresa» → «aislamiento por `empresa_id`»; membresía → perfil).
+- `docs/architecture/analisis-base-datos.md` (resumen de decisiones, `perfiles`/`roles`, validación de la implementación privada y riesgo de RLS con una sola empresa).
+- `docs/decisions/001-rpc-privilegiadas.md`: encabezado de §8 («Invariante de aislamiento por `empresa_id`») y fila nueva de historial. Corrección terminológica sin cambio de comportamiento: las garantías, T4/T5/T15 y el estado (**APROBADA PARA VALIDACIÓN CONTROLADA**) no cambian. Se alinearon al modelo vigente (perfil 1:1, una empresa, un rol) las referencias normativas de «membresía» (§3.1, §8, §9, T2, T3 y la nota de inicio de sesión anónimo), sin cambio de comportamiento. Las apariciones históricas en el cuerpo anterior (historial, preguntas abiertas P5–P7 con texto conservado como registro, alternativas y la resolución de §18) no se reescribieron; la resolución vigente sigue en §18 (perfil 1:1, una empresa, un rol, sin tabla de membresías).
+
+### No modificado
+
+- `INVENTARIO_ETAPA_0.md` y las entradas históricas de este archivo (registro histórico).
+- `supabase/migrations/*`, `supabase/tests/*`, `apps/web/*` y los comentarios SQL/tests del slice productos que aún dicen «multiempresa»: cambiarlos alteraría el hash auditado de `feat/catalogo-productos-supabase`. Pueden corregirse después de cerrar y mergear productos, en un cambio mecánico separado.
+- El slice productos (`935bfcd5d693fb6404aaf32c806a09743d8431d8`) permanece intacto.
+
+### Verificación
+
+Cambio sólo Markdown: `git diff --check` y `git diff --name-only` (únicamente `.md`). No se ejecutaron Supabase, pgTAP, Vitest ni Playwright.
+
+### Riesgos y pendientes
+
+1. **Producción y migraciones remotas siguen bloqueadas** (ADR-001 sin aceptación final; `AGENTS.md` §5).
+2. Al mergear el slice productos habrá un conflicto trivial en el historial de ADR-001 y en la parte superior de este archivo: se resuelve conservando ambas entradas.
+3. Pendiente (fuera de esta tarea): comentarios «multiempresa» del slice productos, tras su merge.
+
 ## 23/10/2026 — Sincronización documental post-Auth
 
 **Rama:** `chore/sincronizar-documentacion-post-auth` · **Base:** `main` en `e5ce8aedd0b5d4dcb424a431187e9bd937e07fe6` · **Estado:** implementado sin commit; pendiente de revisión humana. Sin push, merge, deploy ni migraciones remotas. Sólo Markdown.

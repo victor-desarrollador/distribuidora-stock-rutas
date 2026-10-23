@@ -27,7 +27,7 @@ Este documento consolida el análisis de arquitectura de base de datos para la F
 | Dinero y stock separados; correcciones compensatorias, no automáticas | §7.9.5 |
 | Idempotencia en cada comando crítico; `idempotency_key` en `operaciones` | §7.9.6 |
 | Concurrencia: solo garantías funcionales; implementación en diseño SQL/RPC | §7.9.7 |
-| Multiempresa: `empresa_id` en todas las tablas; RLS por empresa | §7.3 |
+| Empresa única: `empresa_id` en las tablas de negocio como clave técnica de aislamiento y RLS | §7.3 |
 | Roles funcionales: dueño, encargado, vendedor/piloto; tabla `roles` NO aprobada | §9 |
 | Auditoría: sin tabla genérica; trazabilidad en ledgers/documentos | §10 |
 
@@ -39,7 +39,7 @@ Este documento consolida el análisis de arquitectura de base de datos para la F
 |---|---|---|
 | `empresas` | **APROBADA CONCEPTUALMENTE** | Entidad dueña; FK `empresa_id` en tablas de negocio; RLS por empresa |
 | `perfiles` | **APROBADA CONCEPTUALMENTE** | Usuario auth + nombre + activo; empresa y rol leídos de tablas protegidas |
-| `roles` / membresías | **PROPUESTA TÉCNICA** | Forma exacta de dividir perfiles/membresías/rol/usuario↔empresa: pendiente de diseño SQL-RLS. **Roles funcionales (dueño, encargado, vendedor/piloto) APROBADOS**; tabla `roles` NO aprobada |
+| `roles` | **PROPUESTA TÉCNICA** | Sin tabla de membresías: un perfil 1:1 con `auth.users`, una empresa y un rol por usuario (decisión humana P5–P7, ADR-001 §18). **Roles funcionales (dueño, encargado, vendedor/piloto) APROBADOS**; tabla `roles` NO aprobada |
 | `productos` | **APROBADA CONCEPTUALMENTE** | Código, nombre, categoría, forma_venta (`unidad`/`pieza`), precios, stock_mínimo, activo |
 | `camiones` | **APROBADA CONCEPTUALMENTE** | Patente, nombre, activo |
 | `clientes` | **APROBADA CONCEPTUALMENTE** | Contraparte comercial; creable por vendedor, editable solo por encargado/dueño |
@@ -284,7 +284,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 4. La función privada no es invocable directamente desde la Data API.
 5. La implementación privada valida **antes de escribir**:
    - `auth.uid()` existe
-   - Membresía vigente en empresa
+   - Perfil activo (empresa y rol del perfil)
    - `empresa_id` obtenida/verificada del servidor (no del cliente)
    - Rol autorizado para la operación
    - Estado de la jornada compatible
@@ -300,7 +300,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 | Tema | Qué falta decidir | Estado |
 |---|---|---|
-| Esquema exacto de `perfiles` / membresías / rol | Tabla única vs. separadas; FK a `auth.users`; cómo se deriva `empresa_id` y `rol` | PROPUESTA TÉCNICA |
+| Esquema de `perfiles` | Perfil 1:1 con `auth.users`, una empresa y un rol, sin membresías (P5–P7, ADR-001 §18); cómo se deriva `empresa_id` y `rol` | PROPUESTA TÉCNICA |
 | `idempotency_key`: formato, unicidad compuesta, índice | `empresa_id + tipo + clave` vs. global; longitud; generar en cliente vs. servidor | PROPUESTA TÉCNICA |
 | `ubicaciones`: una fila por camión vs. fila genérica + `camion_id` | Cómo modelar `camion:<id>` sin duplicar identidad | PROPUESTA TÉCNICA |
 | `rendicion_items`: aprobar tabla propia vs. solo vista/derivado | Si se aprueba, columnas exactas; si no, vista materializada opcional | PROPUESTA TÉCNICA |
@@ -315,7 +315,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 1. **ADR-001 no aprobada para producción**: la Topología D y la gobernanza están resueltas, pero P8–P17 bloquean las partes correspondientes de una validación completa; producción sigue bloqueada.
 2. **`movimientos_stock` sin `saldo_actual`**: requiere consultas de suma frecuentes; evaluar vistas/materializadas en fase de optimización (no requisito Fase 1).
-3. **Multiempresa con una sola empresa real**: RLS debe implementarse desde el día 1 aunque solo haya un `empresa_id`; probar aislamiento con datos de prueba multi-empresa.
+3. **Empresa única con RLS desde el día 1**: RLS debe implementarse desde el día 1 aunque solo haya un `empresa_id`; una segunda empresa ficticia se usa únicamente en tests de aislamiento.
 4. **`idempotency_key` en `operaciones`**: centraliza protección pero exige que **toda** escritura crítica pase por creación de operación. Verificar que no quede ruta directa (ej. `INSERT` directo en `movimientos_stock` desde RPC sin operación).
 5. **Cierre sin tabla propia**: la operación tipo `cierre` debe capturar estado previo (snapshot de totales) para auditoría, ya que `jornadas` solo guarda estado final.
 6. **Dinero sin ledger propio**: `venta_pagos`, `retiros_efectivo`, `gastos_ruta`, `rendiciones` son la fuente. Confirmar que cubren todos los casos (ingresos varios, ajustes de caja).
