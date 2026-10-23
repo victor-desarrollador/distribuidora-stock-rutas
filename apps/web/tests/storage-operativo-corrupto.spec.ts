@@ -2,12 +2,14 @@ import { expect, test } from "@playwright/test";
 
 const casos = [
   {
+    // /productos ya no usa el catálogo demo (lee Supabase); el catálogo demo
+    // dañado se sigue detectando en las pantallas operativas que lo usan.
     nombre: "productos",
     clave: "distribuidora_productos_demo_v4",
-    ruta: "/productos",
+    ruta: "/jornadas",
     aviso: "Los datos de productos guardados están dañados.",
-    accion: "Nuevo producto",
-    semilla: "Yogur bebible 1 L",
+    accion: "Nueva jornada",
+    semilla: null,
   },
   {
     nombre: "camiones",

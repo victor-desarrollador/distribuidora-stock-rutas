@@ -34,6 +34,106 @@ Cambio sólo Markdown: `git diff --check` y `git diff --name-only` (únicamente 
 2. Al mergear el slice productos habrá un conflicto trivial en el historial de ADR-001 y en la parte superior de este archivo: se resuelve conservando ambas entradas.
 3. Pendiente (fuera de esta tarea): comentarios «multiempresa» del slice productos, tras su merge.
 
+## 23/10/2026 — Corrección post-Architect del slice productos (H-01 `service_role`)
+
+**Rama:** `feat/catalogo-productos-supabase` · **Base:** checkpoint local `ecbfe94494a6d18cc7dc4f8f3600319b1959d9bb` (no pusheado) · **Estado:** corrección en commit local propio (sin amend del checkpoint; sin push), pendiente de **security review** (grants, `service_role`, RLS, `SECURITY DEFINER`) y de auditoría independiente del hash que se cree después. Sin push, merge, deploy ni Supabase remoto.
+
+### Hallazgo de The Architect (veredicto APPROVED WITH CORRECTIONS)
+
+- **H-01 (HIGH):** `service_role` conservaba por los privilegios por defecto de Supabase `INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER` sobre `public.productos`, además de `BYPASSRLS`. Con la service key se podía insertar un precio con fracción de centavo (redondeo silencioso a `numeric(14,2)`) o mutar `categoria`/`forma_venta`, salteando la validación de las RPC. La migración revocaba a `public`, `anon` y `authenticated`, pero no a `service_role`, y el pgTAP sólo cubría su `EXECUTE`.
+
+### Corrección aplicada (decisión humana: complemento de P11-productos)
+
+- `supabase/migrations/20261023140000_catalogo_productos.sql`: `revoke insert, update, delete, truncate, references, trigger on table public.productos from service_role`. Conserva `SELECT`. Se editó la migración existente porque el checkpoint no fue pusheado; no se creó otra.
+- Sin cambios en `authenticated` (sólo `SELECT`), `anon`/`PUBLIC`, `propietario_rpc`, Topología D ni `EXECUTE` de `service_role` (ya revocado).
+- **No se tocó** `service_role` sobre `perfiles`, Auth ni la administración de cuentas. **P11 global sigue pendiente.**
+- `docs/decisions/001-rpc-privilegiadas.md`: P11-productos en §18.1 y fila de historial. El estado de ADR-001 no cambia (**APROBADA PARA VALIDACIÓN CONTROLADA**); no autoriza producción.
+
+### Pruebas
+
+- pgTAP (`supabase/tests/productos_catalogo.test.sql`, plan 114 → 125): `service_role` puede `SELECT`; no tiene ninguno de los seis privilegios de escritura (tabla ni columna); no ejecuta ninguna fachada ni implementación de productos. Prueba real: `set local role service_role` y se intenta `INSERT` directo (20.999), `UPDATE` de precio, `UPDATE` de categoría/forma de venta, `DELETE` y `TRUNCATE`; los cinco fallan con `42501` y una huella (cantidad de filas + md5) demuestra que la tabla no cambió.
+- Mutaciones (en la base local, revertidas): conceder `INSERT` → fallan 4 pruebas; conceder `UPDATE (precio)` → fallan 3; conceder `ALL` (el estado anterior) → fallan 8; control sin mutación → 0 fallas.
+- Playwright (`apps/web/tests/productos-catalogo.spec.ts`): 2 pruebas nuevas verifican el aviso de catálogo demo en `/jornadas` y `/movimientos`.
+
+### M-02, M-03 y M-04
+
+- **M-02 (aceptado):** `categoria`, `forma_venta`, `empresa_id` y `creado_por` son inmutables para **todas las rutas operativas** (`authenticated`, `anon`, `service_role` y `propietario_rpc` no tienen `UPDATE` sobre ellas; lo prueba el pgTAP). El owner de migraciones conserva capacidad administrativa por ser owner: no es una ruta de aplicación y **no se protege la tabla contra su propio owner con triggers**. Sin cambio de modelo.
+- **M-03 (verificado):** `AvisoCatalogoDemo` ya se renderiza siempre en `Jornadas.tsx` y `Movimientos.tsx`. No se cambió código; faltaba cobertura y se agregó (Playwright).
+- **M-04 (pendiente de staging):** `pg_graphql` no está habilitado en local, así que no se resuelve acá. **Gate obligatorio de staging:** `privado` no expuesto por GraphQL y `productos` sin mutaciones GraphQL que salteen las RPC. Producción sigue bloqueada hasta verificarlo.
+
+### Cómo se verificó
+
+`npx supabase db reset` OK; `npx supabase test db`: 180/180 PASS (55 de Auth + 125 de productos); `npm run typecheck`, `npm run lint` (exit 0), `npm test` (716), `npx playwright test` (60) y `npm run build` PASS. `supabase db advisors --local`: sólo 2 avisos INFO de rendimiento (FK `productos_creado_por_fk` sin índice; índice `perfiles_empresa_id_idx` sin uso); `supabase db lint --local`: sin errores.
+
+### Riesgos pendientes
+
+- Security review y auditoría independiente del nuevo hash.
+- M-04 (GraphQL) como gate de staging; P11 global; convivencia con el catálogo demo (M-03) sigue bloqueando producción.
+- Sin índice sobre `productos(empresa_id, creado_por)`: irrelevante con el volumen actual, a reevaluar.
+
+## 23/10/2026 — Catálogo de productos en Supabase (slice productos)
+
+**Rama:** `feat/catalogo-productos-supabase` · **Base:** `main` en `e5ce8aedd0b5d4dcb424a431187e9bd937e07fe6` (no depende del PR #7, todavía abierto) · **Estado:** implementación local completa; checkpoint local autorizado por decisión humana (commit «feat: implementar catalogo de productos en supabase»). Pendiente de **security review** (Supabase, RLS, `empresa_id`, roles, grants, `SECURITY DEFINER`) y auditoría independiente de ese hash. Sin push, merge, deploy ni migraciones remotas. Validación de base **sólo local**.
+
+### Objetivo
+
+Primer bloque backend operativo después de Auth: el catálogo de productos pasa de `localStorage` a Supabase, **sin stock** (el stock sólo saldrá de `movimientos_stock`, Blueprint §3.1 y §7.4) y sin mover dinero.
+
+### Decisiones humanas usadas (23/10/2026, sólo para este slice)
+
+- **DE-1** tabla `public.productos`; **DE-3** `codigo` opcional, único por empresa, normalizado con trim, vacío→NULL y mayúsculas intactas; **DE-4** nombre sin unicidad; **DE-5** `categoria`/`forma_venta` como texto con CHECK; **DE-6** categoría y forma de venta inmutables; **DE-7** sólo `creado_en`/`creado_por`; **DE-8** FK compuesta multiempresa para `creado_por`; **DE-9** los tres roles leen los productos de su empresa; **DE-10** `stock_minimo integer >= 0`; **DE-11 (modificada)** `empresa_id` se deriva del perfil en el servidor, no la envía el cliente; **DE-12** `/productos` pasa a Supabase y las pantallas operativas siguen con el catálogo demo; **DE-13** `/productos` no muestra ni carga stock; **DE-14** gana la última edición.
+- **DE-2:** `precio numeric(14,2)`. Toda asignación a esa columna redondea antes de CHECK, trigger o RLS, así que el rechazo de más de 2 decimales se hace sobre un parámetro `numeric` sin escala, en una RPC. Con `SECURITY INVOKER` el usuario conservaría un INSERT/UPDATE directo que saltea la validación; por eso se usa **Topología D** (ADR-001 P1): fachada `SECURITY INVOKER` en `public` + implementación `SECURITY DEFINER` en `privado`, propiedad de `propietario_rpc`. `authenticated` sólo tiene SELECT sobre `productos`.
+- **DE-15:** control de decimales por valor, `round(p, 2) = p` (`20.990` se acepta, `20.999` se rechaza).
+- **P10-productos:** dueño y encargado crean, editan y cambian el estado; vendedor/piloto sólo lee. Operaciones: `crear_producto`, `actualizar_producto`, `cambiar_estado_producto`. **P14-productos:** sin sobrecargas en `public` ni en `privado`. **P16-productos:** códigos estables `producto_*` y mensajes seguros, nunca detalle SQL/PostgREST.
+- **Aprobadas después de la implementación (mismo día), también acotadas al slice:** **P11-productos** `service_role` sin `EXECUTE` sobre estas RPC; **P12/P15-productos** el ABM no usa idempotencia; **P13-productos** sin bloqueos explícitos, gana la última escritura; **P17-productos** trazabilidad sólo con `creado_en`/`creado_por`, auditoría adicional futura.
+- **Registro:** todas quedan en ADR-001 §18.1 («Decisiones de validación acotadas al slice productos»). **No resuelven P10–P17 globalmente**, no cambian el estado de ADR-001 (**APROBADA PARA VALIDACIÓN CONTROLADA**) y no autorizan producción.
+- **Identidad dentro de `propietario_rpc` (decisión humana tras verificación local):** el rol de migraciones (`postgres`) **no puede** conceder `USAGE` sobre el esquema `auth` (propiedad de `supabase_admin`; el `GRANT` no tiene efecto). Por eso `privado.usuario_actual()` copia exactamente la expresión de `auth.uid()` (claim `sub` de `request.jwt.claims`). Mismo modelo de confianza; una prueba pgTAP verifica que coincidan.
+
+### Implementación
+
+- **Migración** `supabase/migrations/20261023140000_catalogo_productos.sql`:
+  - `perfiles`: nueva unicidad `(empresa_id, usuario_id)` para la FK compuesta.
+  - Rol `propietario_rpc` (`NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION`; si ya existe con otros atributos, la migración falla) y esquema `privado` (no expuesto). Se crean ahora porque son el primer objeto que los necesita (AGENTS §4.4). `CREATE` sobre `privado` se concede sólo para transferir la propiedad y se revoca al final.
+  - Tabla `productos` (sin stock), con CHECK de normalización, categoría, forma de venta, combinación, precio `>= 0` y stock mínimo `>= 0`; unicidades `(empresa_id, codigo)` y `(empresa_id, id)`; FK compuesta `(empresa_id, creado_por)` → `perfiles`.
+  - Grants: `authenticated` sólo SELECT; `propietario_rpc` SELECT, INSERT por columnas y UPDATE sólo de `codigo`, `nombre`, `precio`, `stock_minimo` y `activo`; nadie DELETE ni TRUNCATE.
+  - RLS: lectura para `authenticated` por empresa del perfil activo; políticas propias de `propietario_rpc` (lectura, alta y edición acotadas a perfil activo, rol de gestión y misma empresa) y lectura de su propio perfil. Sin `FORCE`.
+  - Funciones: 3 fachadas `SECURITY INVOKER` en `public` y 3 implementaciones `SECURITY DEFINER` en `privado` (`search_path = ''`, `VOLATILE`), más auxiliares `INVOKER` que sólo ejecuta `propietario_rpc`. `EXECUTE` sólo para `authenticated` en las 6 firmas exactas; revocado a `PUBLIC`, `anon` y `service_role`.
+  - Errores: SQLSTATE `PT401/PT403/PT404/PT400/PT409` (PostgREST responde ese HTTP) con `message` estable (`producto_no_autenticado`, `producto_no_autorizado`, `producto_no_encontrado`, `producto_*_invalido`, `producto_codigo_duplicado`). Las violaciones de restricción se capturan y se traducen.
+- **Seed local:** 4 productos de ejemplo (uno inactivo).
+- **Frontend:**
+  - `src/lib/supabase.ts`: el cliente pasa a un singleton compartido (`obtenerClienteSupabase`) para usar la misma sesión que Auth.
+  - `src/lib/productos.ts` (nuevo): lectura fail-closed (una fila inválida invalida todo), escritura sólo por RPC sin enviar `empresa_id`, traducción de códigos estables y mensaje genérico para todo lo demás.
+  - `src/hooks/useCatalogoProductos.ts` (nuevo): estados cargando/listo/error y relectura después de cada escritura.
+  - `src/pages/Productos.tsx`: catálogo de Supabase con código, estado activo/inactivo, baja y reactivación; sin stock ni «stock inicial»; stock mínimo en unidad mínima (medias piezas para fiambres); errores en la página en lugar de `alert()`; botones deshabilitados durante el envío.
+  - `src/components/AvisoCatalogoDemo.tsx` (nuevo), mostrado en Jornadas y Movimientos: aclara que esas pantallas usan el catálogo de demostración.
+  - Hooks y datos demo (`useProductos`, `distribuidora_productos_demo_v4`) **sin cambios** (AGENTS §6.6).
+
+### Verificación (desde `apps/web`, Supabase CLI v2.120.0, Docker local, PostgreSQL 17.11)
+
+- `npx supabase db reset --workdir ../..`: aplica las tres migraciones y el seed sin errores.
+- `npx supabase test db --workdir ../..` → `auth_base_rls.test.sql .. ok`, `productos_catalogo.test.sql .. ok`, `All tests successful.`, `Files=2, Tests=169`, `Result: PASS` (55 previas + 114 nuevas).
+- **Mutaciones pgTAP** (en transacción revertida contra la base local; la base quedó intacta, verificado por catálogo): sin mutación → 0 `not ok`; conceder INSERT/UPDATE a `authenticated` → 3 `not ok`; quitar el control de decimales → 7; poner la implementación privada como `INVOKER` → 41; crear una sobrecarga expuesta → 1.
+- `npm run typecheck` → exit 0 · `npm run lint` → exit 0 · `npm test` → 23 archivos / **716 tests passed** (antes 681) · `npx playwright test` → **58 passed** · `npm run build` → exit 0 (aviso preexistente de chunk > 500 kB) · `git diff --check` → exit 0.
+- **Pruebas HTTP contra la Data API local** (Playwright): RPC con `20.999` (número o string) → 400 `{"code":"PT400","message":"producto_precio_invalido","details":null,"hint":null}`; RPC con `20.99` → se guarda exacto; INSERT/PATCH/DELETE directos → 403 `42501` y el producto queda igual; GET sobre RPC de escritura → 405; `Content-Profile: privado` → 406 `PGRST106`; vendedor → 403 `producto_no_autorizado` (pero lee el catálogo); sin sesión → 401 `42501`.
+- Búsqueda de seguridad sobre las líneas agregadas (`service_role`, `sb_secret_`, `sb_publishable_`, JWT `eyJ…`, `SUPABASE_`, `user_metadata`, `password`): sin secretos; sólo la credencial de prueba local ya documentada, las revocaciones a `service_role` y la metadata falsa de los tests.
+
+### Tests modificados
+
+- `tests/storage-operativo-corrupto.spec.ts`: el caso de productos corruptos se verifica en `/jornadas`, que sigue usando el catálogo demo.
+- `tests/catalogos-escritura-post-montaje.spec.ts`: se quitan los 3 casos de escritura demo de `/productos` (esa pantalla ya no escribe en `localStorage`); camiones y clientes no cambian.
+
+### Riesgos y pendientes
+
+1. **Security review obligatoria** antes de cerrar: primera función `SECURITY DEFINER`, primer rol técnico, grants por columna y políticas para `propietario_rpc`.
+2. `privado.usuario_actual()` replica la implementación actual de `auth.uid()`. Si Supabase la cambia, la prueba de equivalencia lo detecta, pero la copia habría que actualizarla.
+3. **`pg_graphql` no está habilitado en local**, así que no se pudo verificar si GraphQL alcanza `privado` (ADR-001 §17.1). Queda pendiente para staging.
+4. El rol `propietario_rpc` y su membresía para el rol de migraciones dependen del entorno alojado: verificar en staging que `postgres` pueda crearlo, transferirle la propiedad de funciones y que no exista con otros atributos (ADR-001 §17.2).
+5. No verifiqué si la CLI aplica cada archivo de migración en una única transacción (ADR-001 §12.5 pide crear y revocar sin ventana). Localmente no hay otros usuarios durante la migración; en staging/producción conviene confirmarlo.
+6. Ediciones simultáneas: gana la última (DE-14). Un doble envío de un alta sin código podría duplicar el producto; la UI deshabilita el botón mientras envía.
+7. Dos catálogos conviven (DE-12): los productos reales no aparecen en Jornadas/Movimientos hasta sus bloques de backend.
+8. Los productos que crean las pruebas Playwright quedan en la base local (nombres únicos); `db reset` los limpia.
+9. Producción y migraciones remotas permanecen bloqueadas.
+
 ## 23/10/2026 — Sincronización documental post-Auth
 
 **Rama:** `chore/sincronizar-documentacion-post-auth` · **Base:** `main` en `e5ce8aedd0b5d4dcb424a431187e9bd937e07fe6` · **Estado:** implementado sin commit; pendiente de revisión humana. Sin push, merge, deploy ni migraciones remotas. Sólo Markdown.

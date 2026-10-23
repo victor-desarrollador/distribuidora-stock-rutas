@@ -147,15 +147,23 @@ export function crearPuertoSupabase(cliente: SupabaseClient): PuertoAuth {
   };
 }
 
+let cliente: SupabaseClient | null = null;
 let puerto: PuertoAuth | null = null;
 
-// Crea el cliente una sola vez. Lanza un error claro si falta configuración.
+// Crea el cliente una sola vez y lo comparten Auth y los datos, para usar la
+// misma sesión. Lanza un error claro si falta configuración.
+export function obtenerClienteSupabase(): SupabaseClient {
+  if (!cliente) {
+    const config = leerConfigSupabase(import.meta.env);
+    cliente = createClient(config.url, config.clavePublica);
+  }
+
+  return cliente;
+}
+
 export function obtenerPuertoAuth(): PuertoAuth {
   if (!puerto) {
-    const config = leerConfigSupabase(import.meta.env);
-    puerto = crearPuertoSupabase(
-      createClient(config.url, config.clavePublica)
-    );
+    puerto = crearPuertoSupabase(obtenerClienteSupabase());
   }
 
   return puerto;

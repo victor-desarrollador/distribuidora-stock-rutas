@@ -32,6 +32,7 @@ import {
 } from "../domain/movimientos";
 import { revalidar_jornada_para_operacion } from "../domain/jornadas";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
+import AvisoCatalogoDemo from "../components/AvisoCatalogoDemo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
 type DatosFormulario = {
@@ -421,6 +422,7 @@ export default function Movimientos() {
       </div>
 
       <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
+      <AvisoCatalogoDemo />
 
       {mensaje && (
         <div role="status" className="flex items-center gap-2 rounded-xl bg-green-50 p-4 text-green-800">
