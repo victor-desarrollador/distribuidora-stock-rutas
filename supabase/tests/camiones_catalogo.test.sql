@@ -169,12 +169,16 @@ select is(
            and p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
          order by 1),
   array['privado.actualizar_camion(uuid,text,text)',
+        'privado.actualizar_cliente(uuid,text,text,text,text)',
         'privado.actualizar_producto(uuid,text,text,numeric,integer)',
         'privado.cambiar_estado_camion(uuid,boolean)',
+        'privado.cambiar_estado_cliente(uuid,boolean)',
         'privado.cambiar_estado_producto(uuid,boolean)',
         'privado.crear_camion(text,text)',
-        'privado.crear_producto(text,text,text,text,numeric,integer)'],
-  'ninguna función de public es SECURITY DEFINER; sólo las implementaciones privadas lo son');
+        'privado.crear_cliente(text,text,text,text)',
+        'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.validar_cliente(uuid)'],
+  'ninguna función de public es SECURITY DEFINER; sólo las implementaciones privadas (productos, camiones y clientes) lo son');
 
 select is(
   (select count(*)::int from firmas f

@@ -1,4 +1,91 @@
 ---
+## 24/10/2026 — Slice Etapa 1: catálogo de clientes (local; sin commit)
+
+**Rama:** `feat/catalogo-clientes` desde `origin/main` = `5ec2ada240a15f24307e0cb078f705ef78e907c6` (merge del PR #14) · **Autorización humana explícita:** diseñar e implementar el slice en rama, con migración local, RLS, RPC, pgTAP, frontend, Vitest, Playwright, documentación y ejecución local de las verificaciones. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. Las operaciones remotas las hace el humano.
+
+### Objetivo y alcance
+Catálogo real de clientes de Etapa 1 (Blueprint §8: `clientes` = nombre, comercio, direccion, telefono, activo, creado_por, validado_por, estado_validacion; aprobada conceptualmente; §2/§9: el vendedor/piloto crea clientes pero nunca edita fichas existentes; dueño y encargado corrigen y validan), con la Topología D de ADR-001 (fachada `public` SECURITY INVOKER → implementación `privado` SECURITY DEFINER de `propietario_rpc` → tabla con RLS). `/clientes` pasa del catálogo demo (`localStorage`) a Supabase.
+
+**Fuera de alcance (no implementado):** cuenta corriente real, límites de crédito, historial de ventas, cobranzas, CUIT/DNI, email, GPS/geocoding, archivos, listas de precios, descuentos, ventas, pagos, jornadas, stock, ubicaciones, Fase 2, deduplicación automática, fuzzy matching, normalización o regex de teléfonos, P11 global, producción.
+
+### Decisiones humanas de este slice
+- **Campos:** `nombre` y `telefono` obligatorios; `comercio` y `direccion` opcionales. Todo texto con `btrim`; `nombre`/`telefono` no pueden quedar vacíos; `comercio`/`direccion` vacíos o de espacios → `NULL`. Sin regex ni normalización de teléfono, sin unicidad de nombre/teléfono/comercio/dirección, sin CUIT/DNI/email/crédito.
+- **Duplicados:** no se bloquea ninguno (homónimos, teléfonos repetidos, duplicado completo, ni entre empresas). La política inteligente de duplicados **sigue PENDIENTE**. Por eso no existe `PT409`.
+- **Validación:** estados `pendiente` | `validado`. Alta de vendedor/piloto → `pendiente`, `validado_por`/`validado_en` `NULL`. Alta de dueño o encargado → `validado`, `validado_por = auth.uid()`, `validado_en = now()` del servidor. Dueño y encargado validan un pendiente por RPC específica; vendedor/piloto no valida, no edita, no activa/desactiva.
+- **Edición:** dueño y encargado editan `nombre`, `telefono`, `comercio`, `direccion`. Nunca directamente `empresa_id`, `creado_por`, `creado_en`, `validado_por`, `validado_en`, `estado_validacion`.
+- **Baja:** sólo lógica por `activo`; dueño y encargado activan/desactivan; sin DELETE.
+- **Lectura:** dueño y encargado leen activos e inactivos de su empresa; el vendedor/piloto lee **sólo los clientes activos** de su empresa (decisión humana posterior a la revisión independiente; ver «Corrección pre-commit»; sin restricción por jornada: las jornadas reales aún no existen). Perfil inactivo, sin perfil, anon y otra empresa: nada.
+- **`service_role`:** sin privilegios sobre `clientes` ni sus RPC (P11 global pendiente; no se generaliza el SELECT de productos), igual que camiones.
+
+### Decisiones técnicas aplicadas (no son reglas de negocio nuevas)
+- `validar_cliente` es **idempotente**: validar un cliente ya validado no falla ni cambia `validado_por`/`validado_en` (conserva al primer validador). Editar un cliente no altera su validación. Validar no altera `activo`. Un cliente inactivo se puede editar y validar.
+- `actualizar_cliente` reemplaza los cuatro campos editables (un `comercio`/`direccion` nulo o vacío los borra); no recibe defaults a propósito para que un borrado sea explícito.
+- CHECK `clientes_validacion_coherente`: `pendiente` ⇒ sin validador ni fecha; `validado` ⇒ ambos presentes. FK compuestas `(empresa_id, creado_por)` y `(empresa_id, validado_por)` a `perfiles`: autor y validador son de la misma empresa.
+- Errores estables (`cliente_*`): `PT401` no autenticado, `PT403` no autorizado, `PT404` inexistente/otra empresa (indistinguibles), `PT400` campos/estado inválido, `PT500` interno (violación de CHECK inesperada).
+- RLS en tres capas: SELECT para `authenticated`; para `propietario_rpc`, SELECT por empresa, INSERT que exige rol/estado coherente (gestión → `validado` por sí mismo; vendedor → `pendiente`) y UPDATE sólo para dueño/encargado activos de la misma empresa. `propietario_rpc` inserta/actualiza sólo columnas concretas (sin `id`, `activo`, `creado_en` en INSERT; sin `empresa_id`, `creado_por`, `creado_en` en UPDATE); sin DELETE.
+- Se actualizaron las listas cerradas de `camiones_catalogo`, `productos_catalogo` y `grants_default_privileges` (implementaciones SECURITY DEFINER y firmas ejecutables por `authenticated`: ahora 20, productos + camiones + clientes). No se debilitó ningún grant ni default privilege.
+
+### Archivos
+**Nuevos:** `supabase/migrations/20261024180000_catalogo_clientes.sql`; `supabase/tests/clientes_catalogo.test.sql`; `apps/web/src/lib/clientes.ts`; `apps/web/src/lib/clientes.test.ts`; `apps/web/src/hooks/useCatalogoClientes.ts`; `apps/web/tests/clientes-catalogo.spec.ts`.
+**Modificados:** `apps/web/src/pages/Clientes.tsx` (reescrita sobre Supabase); `supabase/seed.sql` (fixture adversarial local: empresa `…e2`, `otraempresa.prueba` y un cliente propio, para probar aislamiento en Playwright; sólo local); `apps/web/tests/auth/cuentasPrueba.ts`; `apps/web/tests/storage-operativo-corrupto.spec.ts` (el caso `clientes` apunta a `/movimientos`, que sigue usando el demo; sin botón que bloquear, se verifica el aviso y el raw intacto); `supabase/tests/{camiones_catalogo,productos_catalogo,grants_default_privileges}.test.sql` (listas cerradas); `docs/progress-log.md`.
+**Eliminado:** `apps/web/tests/catalogos-escritura-post-montaje.spec.ts` (su único caso era la edición de clientes en `localStorage`, que `/clientes` ya no hace; la frontera de escritura es ahora la RPC).
+
+### Seguridad
+Superficie sensible (RLS, RPC, roles, `SECURITY DEFINER`, grants): **corresponde security review** y auditoría independiente del hash que se commitee; no se considera cerrada sin ellas. No se tocó ADR-001 (sigue APROBADA PARA VALIDACIÓN CONTROLADA; P8–P17 sin resolver). `privado` sigue sin exponerse; `anon` y `service_role` sin EXECUTE ni privilegios; fachadas INVOKER con `search_path` vacío; sin `FORCE RLS`. Frontend: sólo `select` de lectura y `rpc`; nunca `insert`/`update`/`delete` sobre la tabla; sin secret/service key. Los botones sólo son UX: Playwright fuerza las RPC como vendedor por HTTP y verifica `PT403` y datos intactos.
+
+### Verificación (local, desde `apps/web/` o la raíz según corresponda)
+| Verificación | Resultado |
+|---|---|
+| `git diff --check` | exit 0 (sin espacios finales tampoco en archivos nuevos) |
+| `npx supabase db reset` | OK, 6 migraciones + seed |
+| `npx supabase test db` | **PASS, 500/500** en 5 archivos (clientes 176, productos 125, camiones 112, auth 55, grants 32) |
+| `npx supabase db lint` | PASS, «No schema errors found» |
+| `npx supabase db advisors --local` | «No issues found» |
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS, exit 0 |
+| `npm test` (Vitest 5.0.2) | **PASS, 25 archivos / 805 tests** (37 nuevos en `clientes.test.ts`) |
+| `npx playwright test` | **PASS, 75/75** (12 del spec de clientes, repetido sobre base «sucia»: pasa) |
+| `npm run build` | PASS (aviso conocido de chunk > 500 kB) |
+
+*(La tabla anterior y el párrafo siguiente corresponden a la entrega previa a la corrección pre-commit; los resultados vigentes están en «Corrección pre-commit».)*
+
+**Mutaciones pgTAP** (arnés ad hoc no versionado, en transacción revertida; control sin mutación: 0 `not ok` / 176 `ok`; base verificada intacta después con `supabase test db` 500/500). **8/8 detectadas:** (1) `INSERT`/`UPDATE` directo a `authenticated` → 4 `not ok`; (2) `EXECUTE` a `anon` en `crear_cliente` → 1; (3) vendedor admitido por el chequeo de gestión (edita) → 7; (4) vendedor valida (chequeo de gestión omitido en `validar_cliente` + policy UPDATE abierta) → 7; (5) aislamiento por `empresa_id` eliminado en funciones y en las tres policies → 18 (la corrida aborta más adelante por errores SQL derivados de la mutación); (6) RLS deshabilitada → 15 (ídem); (7) fachada `crear_cliente` como SECURITY DEFINER → 2; (8) `service_role` con SELECT/INSERT/UPDATE → 5. Nota: igual que en camiones, quitar sólo una de las tres capas de aislamiento no altera el comportamiento observable (defensa en profundidad); la mutación (5) las quita todas.
+
+### Convivencia con el demo (legacy)
+`Autoventa`, `Cuentas corrientes` y `Movimientos` siguen leyendo el catálogo demo de clientes (`distribuidora_clientes_demo_v2`, `useClientes`/`mockClientes`) y **no ven los clientes reales**: un cliente creado en `/clientes` no aparece ahí y viceversa. La pantalla `/clientes` lo advierte al pie. No se migró cuenta corriente, ventas ni jornadas. `useClientes` y `mockClientes` se conservan para esos consumidores.
+
+### Riesgos y pendientes
+- **Política de duplicados:** pendiente de decisión humana; hoy se permiten todos los duplicados, incluidos los del vendedor (que quedan pendientes y los resuelve el encargado/dueño a ojo).
+- **Datos obligatorios definitivos y límites de crédito** (Blueprint §15 punto 7): sólo se fijaron nombre y teléfono obligatorios; el crédito queda fuera.
+- El vendedor/piloto lee **sólo los clientes activos** de su empresa; la restricción por jornada se decide cuando existan jornadas reales.
+- Editar una ficha **validada** no la vuelve a `pendiente`.
+- **P11 global**, **O-3** y **O-4** siguen abiertos; producción bloqueada; ADR-001 no cambia de estado.
+- La migración **no se aplicó** en staging: queda para la validación controlada que decida el humano, con su gate funcional y `pg_graphql` verificado.
+
+### Corrección pre-commit (revisión independiente de OpenCode: CHANGES REQUIRED)
+**Hallazgo:** el vendedor/piloto podía leer clientes inactivos de su empresa. **Decisión humana aprobada:** dueño y encargado ven activos e inactivos; el vendedor/piloto ve sólo `activo = true`. No cambia ninguna otra decisión del slice.
+- `20261024180000_catalogo_clientes.sql`: la policy `clientes_select_empresa` agrega `and (p.rol in ('dueno', 'encargado') or clientes.activo)`; se mantienen el perfil activo y la empresa. Sólo se actualizaron además los comentarios que describían la regla anterior. Las policies de `propietario_rpc`, las RPC, los grants y `service_role` no cambian.
+- `clientes_catalogo.test.sql` (176 → 183): el vendedor ya no ve `c003` (inactivo); aserciones explícitas vendedor + activo → visible, vendedor + inactivo → invisible (también con metadata de dueño), dueño + inactivo → visible, encargado + inactivo → visible; y el vendedor deja de ver un cliente al desactivarlo y lo vuelve a ver al reactivarlo.
+- `clientes-catalogo.spec.ts`: el dueño crea dos clientes, el encargado desactiva uno, el vendedor no lo ve (ni buscando ni con el filtro «Inactivos», ni por la Data API pidiéndolo por id) y sí ve el activo; el dueño lo sigue leyendo. Con la mutación 9 aplicada a la base local, esta prueba falla; restaurada con `db reset`, pasa.
+- La pantalla conserva la opción de filtro «Inactivos» también para el vendedor (queda vacía); no se tocó el frontend.
+
+| Verificación | Resultado |
+|---|---|
+| `git diff --check` | exit 0 |
+| `npx supabase db reset` | OK |
+| `npx supabase test db` | **PASS, 507/507** (clientes 183) |
+| `npx supabase db lint` | PASS, «No schema errors found» |
+| `npx supabase db advisors --local` | «No issues found» |
+| `npm run typecheck` / `npm run lint` | exit 0 / exit 0 |
+| `npm test` | **PASS, 25 archivos / 805 tests** |
+| `npx playwright test` | **PASS, 76/76** |
+| `npm run build` | exit 0 (aviso conocido de chunk > 500 kB) |
+
+**Mutaciones pgTAP** (arnés ad hoc reconstruido, no versionado; cada mutación dentro de la transacción del test y revertida por su `rollback`; después, `supabase test db` 507/507). Control: 183 `ok` / 0 `not ok`. **9/9 detectadas:** (1) INSERT/UPDATE a `authenticated` → 4; (2) EXECUTE a `anon` en `crear_cliente` → 1; (3) vendedor admitido por el chequeo de gestión → 7; (4) vendedor valida → 7; (5) sin aislamiento por `empresa_id` (funciones y tres policies) → 17; (6) RLS deshabilitada → 20; (7) fachada SECURITY DEFINER → 2; (8) `service_role` con SELECT/INSERT/UPDATE → 5; **(9) vendedor lee inactivos (policy SELECT anterior) → 4**. Los conteos de (5) y (6) difieren de la corrida anterior porque el arnés se reconstruyó, la batería tiene 7 aserciones más y estas corridas no abortan.
+
+**STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · REMOTE ACTIONS: NONE · SECRETS EXPOSED: NO.**
+
+---
 ## 24/10/2026 — Cierre de staging: catálogo de camiones (validación controlada) — PASS
 
 **Entorno:** staging, project ref `rtsncntppghdynzhezzg` · **Código:** `main` = `37250de56c73f82aca5a6db3f7cbdbcffdc571ab` (merge del PR #13) · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y ejecutar esta validación con fixtures controlados y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, migraciones nuevas, cambios de código, commit, push, PR, merge ni deploy en la validación. Esta entrada complementa la del slice («Slice Etapa 1: catálogo de camiones»), cuya línea «STAGING: NO TOCADO» refleja el momento de aquella entrada y queda superada por esta.

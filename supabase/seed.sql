@@ -14,13 +14,18 @@
 --   vendedor.prueba   vendedor_piloto  activo
 --   inactivo.prueba   vendedor_piloto  INACTIVO
 --   sinperfil.prueba  (cuenta Auth sin perfil)
+--   otraempresa.prueba dueno           activo, de OTRA empresa (fixture adversarial
+--                                      para probar aislamiento por empresa_id; no
+--                                      es un producto multiempresa)
 --
 -- Todos cumplen el contrato de `perfiles_usuario_formato` (3–32 caracteres,
 -- empieza y termina con a-z/0-9, interiores a-z 0-9 . _ -, sin puntos
 -- consecutivos), el mismo que apps/web/src/domain/usuario_auth.ts.
 
 insert into public.empresas (id, nombre)
-values ('00000000-0000-4000-8000-0000000000e1', 'Distribuidora (local)');
+values ('00000000-0000-4000-8000-0000000000e1', 'Distribuidora (local)'),
+       -- Fixture adversarial de aislamiento (ver cabecera).
+       ('00000000-0000-4000-8000-0000000000e2', 'Otra empresa (local, aislamiento)');
 
 with cuentas (id, usuario) as (
   values
@@ -28,7 +33,8 @@ with cuentas (id, usuario) as (
     ('00000000-0000-4000-8000-000000000002'::uuid, 'encargado.prueba'),
     ('00000000-0000-4000-8000-000000000003'::uuid, 'vendedor.prueba'),
     ('00000000-0000-4000-8000-000000000004'::uuid, 'inactivo.prueba'),
-    ('00000000-0000-4000-8000-000000000005'::uuid, 'sinperfil.prueba')
+    ('00000000-0000-4000-8000-000000000005'::uuid, 'sinperfil.prueba'),
+    ('00000000-0000-4000-8000-000000000006'::uuid, 'otraempresa.prueba')
 )
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -70,7 +76,21 @@ values
   ('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-0000000000e1',
    'vendedor.prueba', 'Vendedor de prueba', 'vendedor_piloto', true),
   ('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-0000000000e1',
-   'inactivo.prueba', 'Inactivo de prueba', 'vendedor_piloto', false);
+   'inactivo.prueba', 'Inactivo de prueba', 'vendedor_piloto', false),
+  ('00000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-0000000000e2',
+   'otraempresa.prueba', 'Dueño de otra empresa', 'dueno', true);
+
+-- Cliente de la otra empresa: ningún usuario de la empresa principal debe
+-- verlo ni poder modificarlo (Playwright, tests/clientes-catalogo.spec.ts).
+insert into public.clientes (
+  id, empresa_id, nombre, comercio, direccion, telefono, activo,
+  estado_validacion, creado_por, validado_por, validado_en
+)
+values
+  ('00000000-0000-4000-8000-0000000000c1', '00000000-0000-4000-8000-0000000000e2',
+   'Cliente de otra empresa (seed)', null, null, '0000000000', true,
+   'validado', '00000000-0000-4000-8000-000000000006',
+   '00000000-0000-4000-8000-000000000006', now());
 
 -- Catálogo de productos de prueba (sólo local). Sin stock: el stock sólo
 -- sale de movimientos_stock (Blueprint §3.1). Fiambres con precio de pieza
