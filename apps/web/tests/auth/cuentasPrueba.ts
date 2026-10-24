@@ -8,4 +8,5 @@ export const CUENTAS = {
   vendedor: 'vendedor.prueba',
   inactivo: 'inactivo.prueba',
   sinPerfil: 'sinperfil.prueba',
+  otraEmpresa: 'otraempresa.prueba',
 } as const

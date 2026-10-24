@@ -1,97 +1,87 @@
-
 import { useMemo, useState } from "react";
 import {
-  Users,
-  Plus,
-  Search,
-  Pencil,
+  AlertTriangle,
+  BadgeCheck,
   CheckCircle2,
   MapPin,
+  Pencil,
   Phone,
+  Plus,
+  Power,
+  Search,
+  Users,
 } from "lucide-react";
 
+import { useAuth } from "../auth/useAuth";
+import { useCatalogoClientes } from "../hooks/useCatalogoClientes";
 import {
-  type Cliente,
-  type CondicionPago,
-} from "../data/mockClientes";
+  normalizarDatosCliente,
+  permisosClientes,
+  validarDatosCliente,
+  type ClienteCatalogo,
+  type EntradaCliente,
+} from "../lib/clientes";
 
-import { useClientes } from "../hooks/useClientes";
-import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
-import { estadoStorageOperativo } from "./estadoStorageOperativo";
-
-type FormularioCliente = {
-  nombreComercio: string;
-  titular: string;
-  telefono: string;
-  direccion: string;
-  zona: string;
-  condicionPago: CondicionPago;
-  limiteCredito: string;
-  activo: boolean;
-};
-
-function formularioVacio(): FormularioCliente {
-  return {
-    nombreComercio: "",
-    titular: "",
-    telefono: "",
-    direccion: "",
-    zona: "",
-    condicionPago: "contado",
-    limiteCredito: "0",
-    activo: true,
-  };
+function formularioVacio(): EntradaCliente {
+  return { nombre: "", telefono: "", comercio: "", direccion: "" };
 }
 
-const formatoMoneda = (valor: number) =>
-  new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "ARS",
-    maximumFractionDigits: 2,
-  }).format(valor);
-
 export default function Clientes() {
-  const { clientes, actualizarClientes, estadoLectura } = useClientes();
-  const estadoOperacion = estadoStorageOperativo({ clientes: estadoLectura });
+  const { usuario } = useAuth();
+  // Sólo para mostrar u ocultar acciones: la frontera real es la base (RPC +
+  // RLS). Dueño y encargado crean, editan, validan y activan/desactivan; el
+  // vendedor/piloto sólo crea (queda pendiente) y consulta.
+  const permisos = permisosClientes(usuario?.rol);
+
+  const { catalogo, recargar, crear, actualizar, validar, cambiarEstado } =
+    useCatalogoClientes();
+  const disponible = catalogo.estado === "listo";
+  const clientes = useMemo(
+    () => (catalogo.estado === "listo" ? catalogo.clientes : []),
+    [catalogo]
+  );
 
   const [busqueda, setBusqueda] = useState("");
   const [filtro, setFiltro] = useState("todos");
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
-  const [clienteEditando, setClienteEditando] = useState<number | null>(null);
+  const [clienteEditando, setClienteEditando] =
+    useState<ClienteCatalogo | null>(null);
   const [mensaje, setMensaje] = useState("");
+  const [error, setError] = useState("");
+  // Evita envíos dobles mientras una escritura está en curso.
+  const [enviando, setEnviando] = useState(false);
 
   const [formulario, setFormulario] =
-    useState<FormularioCliente>(formularioVacio);
+    useState<EntradaCliente>(formularioVacio);
 
+  const mostrarAcciones =
+    permisos.puedeEditar || permisos.puedeValidar || permisos.puedeCambiarEstado;
+
+  // Filtrar clientes sin modificar el catálogo.
   const clientesFiltrados = useMemo(() => {
     const termino = busqueda.trim().toLocaleLowerCase("es-AR");
 
     return clientes.filter((cliente) => {
       const coincideBusqueda = [
-        cliente.nombreComercio,
-        cliente.titular,
+        cliente.nombre,
+        cliente.comercio ?? "",
         cliente.telefono,
-        cliente.direccion,
-        cliente.zona,
-      ].some((valor) =>
-        valor.toLocaleLowerCase("es-AR").includes(termino)
-      );
+        cliente.direccion ?? "",
+      ].some((valor) => valor.toLocaleLowerCase("es-AR").includes(termino));
 
       const coincideEstado =
         filtro === "todos" ||
         (filtro === "activos" && cliente.activo) ||
         (filtro === "inactivos" && !cliente.activo) ||
-        (filtro === "cuenta_corriente" &&
-          cliente.condicionPago === "cuenta_corriente");
+        (filtro === "pendientes" && cliente.estadoValidacion === "pendiente");
 
       return coincideBusqueda && coincideEstado;
     });
   }, [clientes, busqueda, filtro]);
 
-  const totalActivos = clientes.filter((cliente) => cliente.activo).length;
-
-  const totalCuentaCorriente = clientes.filter(
-    (cliente) => cliente.condicionPago === "cuenta_corriente"
+  const totalActivos = clientes.filter((c) => c.activo).length;
+  const totalPendientes = clientes.filter(
+    (c) => c.estadoValidacion === "pendiente"
   ).length;
 
   function cancelarFormulario() {
@@ -101,99 +91,113 @@ export default function Clientes() {
   }
 
   function abrirNuevoCliente() {
-    if (estadoOperacion.bloqueado) return;
+    if (!permisos.puedeCrear || !disponible) return;
     cancelarFormulario();
     setMensaje("");
+    setError("");
     setMostrarFormulario(true);
   }
 
-  function editarCliente(cliente: Cliente) {
-    setClienteEditando(cliente.id);
-
+  function editarCliente(cliente: ClienteCatalogo) {
+    if (!permisos.puedeEditar) return;
+    setClienteEditando(cliente);
     setFormulario({
-      nombreComercio: cliente.nombreComercio,
-      titular: cliente.titular,
+      nombre: cliente.nombre,
       telefono: cliente.telefono,
-      direccion: cliente.direccion,
-      zona: cliente.zona,
-      condicionPago: cliente.condicionPago,
-      limiteCredito: String(cliente.limiteCredito),
-      activo: cliente.activo,
+      comercio: cliente.comercio ?? "",
+      direccion: cliente.direccion ?? "",
     });
-
-    setMostrarFormulario(true);
     setMensaje("");
+    setError("");
+    setMostrarFormulario(true);
+
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function guardarCliente(evento: React.SubmitEvent<HTMLFormElement>) {
+  // Guardar un cliente nuevo o actualizar uno existente.
+  async function guardarCliente(evento: React.SubmitEvent<HTMLFormElement>) {
     evento.preventDefault();
-    if (estadoOperacion.bloqueado) return;
+    if (!disponible || enviando) return;
 
-    const limiteCredito = Number(formulario.limiteCredito);
+    const editando = clienteEditando !== null;
+    if (editando ? !permisos.puedeEditar : !permisos.puedeCrear) return;
 
-    if (
-      !formulario.nombreComercio.trim() ||
-      !formulario.titular.trim() ||
-      !formulario.direccion.trim() ||
-      !formulario.zona.trim() ||
-      formulario.limiteCredito.trim() === "" ||
-      !Number.isFinite(limiteCredito) ||
-      limiteCredito < 0
-    ) {
-      alert("Completá correctamente los datos del cliente.");
+    setMensaje("");
+    setError("");
+
+    // Validación previa al envío. La base vuelve a validar todo: es la
+    // autoridad.
+    const datos = normalizarDatosCliente(formulario);
+    const errorValidacion = validarDatosCliente(datos);
+    if (errorValidacion) {
+      setError(errorValidacion);
       return;
     }
 
-    const datos = {
-      nombreComercio: formulario.nombreComercio.trim(),
-      titular: formulario.titular.trim(),
-      telefono: formulario.telefono.trim(),
-      direccion: formulario.direccion.trim(),
-      zona: formulario.zona.trim(),
-      condicionPago: formulario.condicionPago,
-      limiteCredito:
-        formulario.condicionPago === "contado" ? 0 : limiteCredito,
-      activo: formulario.activo,
-    };
+    setEnviando(true);
 
-    if (clienteEditando !== null) {
-      const guardado = actualizarClientes((actuales) =>
-        actuales.map((cliente) =>
-          cliente.id === clienteEditando
-            ? { ...cliente, ...datos }
-            : cliente
-        )
-      );
+    const resultado = editando
+      ? await actualizar(clienteEditando.id, datos)
+      : await crear(datos);
 
-      if (!guardado) {
-        alert(
-          "No se pudo guardar el cliente en este navegador. Intentá de nuevo."
-        );
-        return;
-      }
+    setEnviando(false);
 
-      setMensaje("Cliente actualizado correctamente.");
-    } else {
-      const guardado = actualizarClientes((actuales) => [
-        ...actuales,
-        {
-          id: Math.max(0, ...actuales.map((c) => c.id)) + 1,
-          ...datos,
-        },
-      ]);
-
-      if (!guardado) {
-        alert(
-          "No se pudo guardar el cliente en este navegador. Intentá de nuevo."
-        );
-        return;
-      }
-
-      setMensaje("Cliente registrado correctamente.");
+    if (!resultado.ok) {
+      setError(resultado.error);
+      return;
     }
 
+    setMensaje(
+      editando
+        ? "Cliente actualizado correctamente."
+        : permisos.puedeValidar
+          ? "Cliente agregado correctamente."
+          : "Cliente agregado correctamente. Queda pendiente de validación."
+    );
     cancelarFormulario();
+  }
+
+  async function validarCliente(cliente: ClienteCatalogo) {
+    if (!permisos.puedeValidar || !disponible || enviando) return;
+
+    setMensaje("");
+    setError("");
+    setEnviando(true);
+
+    const resultado = await validar(cliente.id);
+
+    setEnviando(false);
+
+    if (!resultado.ok) {
+      setError(resultado.error);
+      return;
+    }
+
+    setMensaje(`${cliente.nombre} quedó validado.`);
+  }
+
+  // Activar o desactivar (baja lógica: no hay borrado).
+  async function alternarEstado(cliente: ClienteCatalogo) {
+    if (!permisos.puedeCambiarEstado || !disponible || enviando) return;
+
+    setMensaje("");
+    setError("");
+    setEnviando(true);
+
+    const resultado = await cambiarEstado(cliente.id, !cliente.activo);
+
+    setEnviando(false);
+
+    if (!resultado.ok) {
+      setError(resultado.error);
+      return;
+    }
+
+    setMensaje(
+      cliente.activo
+        ? `${cliente.nombre} quedó desactivado.`
+        : `${cliente.nombre} quedó activado.`
+    );
   }
 
   return (
@@ -201,229 +205,179 @@ export default function Clientes() {
       {/* Encabezado */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-800">
-            Clientes
-          </h1>
-          <p className="mt-1 text-slate-500">
-            Gestión de comercios y condiciones comerciales
-          </p>
+          <h1 className="text-3xl font-bold text-slate-800">Clientes</h1>
+
+          <p className="mt-1 text-slate-500">Catálogo de clientes</p>
         </div>
 
-        <button
-          type="button"
-          onClick={abrirNuevoCliente}
-          disabled={estadoOperacion.bloqueado}
-          className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700"
-        >
-          <Plus size={20} />
-          Nuevo cliente
-        </button>
+        {permisos.puedeCrear && (
+          <button
+            type="button"
+            onClick={abrirNuevoCliente}
+            disabled={!disponible || enviando}
+            className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            <Plus size={20} />
+            Nuevo cliente
+          </button>
+        )}
       </div>
 
-      <AvisoStorageOperativo avisos={estadoOperacion.avisos} />
+      {/* Error de lectura: sin datos viejos */}
+      {catalogo.estado === "error" && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+        >
+          <AlertTriangle size={20} />
+          <span>{catalogo.error}</span>
+          <button
+            type="button"
+            onClick={() => void recargar()}
+            className="min-h-11 rounded-lg border border-red-300 px-4 hover:bg-red-100"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
 
       {/* Tarjetas de resumen */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[
-          { titulo: "Total de clientes", valor: clientes.length },
-          { titulo: "Clientes activos", valor: totalActivos },
-          {
-            titulo: "Con cuenta corriente",
-            valor: totalCuentaCorriente,
-          },
-        ].map((tarjeta) => (
-          <div
-            key={tarjeta.titulo}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <div className="mb-3 flex items-center gap-2 text-slate-500">
-              <Users size={18} />
-              <span className="text-sm">{tarjeta.titulo}</span>
+      {disponible && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            { titulo: "Total de clientes", valor: clientes.length },
+            { titulo: "Clientes activos", valor: totalActivos },
+            { titulo: "Pendientes de validar", valor: totalPendientes },
+          ].map((tarjeta) => (
+            <div
+              key={tarjeta.titulo}
+              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
+              <div className="mb-3 flex items-center gap-2 text-slate-500">
+                <Users size={18} />
+                <span className="text-sm">{tarjeta.titulo}</span>
+              </div>
+              <p className="text-3xl font-bold text-slate-800">
+                {tarjeta.valor}
+              </p>
             </div>
-            <p className="text-3xl font-bold text-slate-800">
-              {tarjeta.valor}
-            </p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error de una operación */}
+      {error && (
+        <div
+          role="alert"
+          className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+        >
+          <AlertTriangle size={20} />
+          {error}
+        </div>
+      )}
 
       {/* Mensaje de confirmación */}
       {mensaje && (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-4 text-green-800"
+          className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800"
         >
           <CheckCircle2 size={20} />
           {mensaje}
         </div>
       )}
 
-      {/* Formulario */}
-      {mostrarFormulario && (
-        <form
-          onSubmit={guardarCliente}
-          className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
-        >
-          <h2 className="mb-5 text-xl font-bold text-slate-800">
-            {clienteEditando === null
-              ? "Registrar cliente"
-              : "Editar cliente"}
-          </h2>
+      {/* Formulario para agregar (todos los roles) o editar (dueño/encargado) */}
+      {mostrarFormulario &&
+        (clienteEditando !== null ? permisos.puedeEditar : permisos.puedeCrear) && (
+          <form
+            onSubmit={guardarCliente}
+            className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+          >
+            <h2 className="mb-5 text-lg font-semibold text-slate-800">
+              {clienteEditando !== null ? "Editar cliente" : "Agregar cliente"}
+            </h2>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm font-medium">
-              <span>Nombre del comercio *</span>
-              <input
-                required
-                value={formulario.nombreComercio}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    nombreComercio: e.target.value,
-                  })
-                }
-                placeholder="Ej: Almacén Don Pedro"
-                className="w-full rounded-lg border border-slate-300 p-3"
-              />
-            </label>
-
-            <label className="space-y-1 text-sm font-medium">
-              <span>Nombre del titular *</span>
-              <input
-                required
-                value={formulario.titular}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    titular: e.target.value,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3"
-              />
-            </label>
-
-            <label className="space-y-1 text-sm font-medium">
-              <span>Teléfono</span>
-              <input
-                type="tel"
-                value={formulario.telefono}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    telefono: e.target.value,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3"
-              />
-            </label>
-
-            <label className="space-y-1 text-sm font-medium">
-              <span>Dirección *</span>
-              <input
-                required
-                value={formulario.direccion}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    direccion: e.target.value,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3"
-              />
-            </label>
-
-            <label className="space-y-1 text-sm font-medium">
-              <span>Zona de reparto *</span>
-              <input
-                required
-                value={formulario.zona}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    zona: e.target.value,
-                  })
-                }
-                placeholder="Ej: Centro"
-                className="w-full rounded-lg border border-slate-300 p-3"
-              />
-            </label>
-
-            <label className="space-y-1 text-sm font-medium">
-              <span>Condición de pago</span>
-              <select
-                value={formulario.condicionPago}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    condicionPago: e.target.value as CondicionPago,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3"
-              >
-                <option value="contado">Contado</option>
-                <option value="cuenta_corriente">Cuenta corriente</option>
-              </select>
-            </label>
-
-            {formulario.condicionPago === "cuenta_corriente" && (
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-1 text-sm font-medium">
-                <span>Límite de crédito ($)</span>
+                <span>Nombre del cliente *</span>
                 <input
                   required
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formulario.limiteCredito}
+                  value={formulario.nombre}
                   onChange={(e) =>
-                    setFormulario({
-                      ...formulario,
-                      limiteCredito: e.target.value,
-                    })
+                    setFormulario({ ...formulario, nombre: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-slate-300 p-3"
+                  placeholder="Ej: Pedro González"
+                />
+              </label>
+
+              <label className="space-y-1 text-sm font-medium">
+                <span>Teléfono *</span>
+                <input
+                  required
+                  type="tel"
+                  value={formulario.telefono}
+                  onChange={(e) =>
+                    setFormulario({ ...formulario, telefono: e.target.value })
                   }
                   className="w-full rounded-lg border border-slate-300 p-3"
                 />
               </label>
+
+              <label className="space-y-1 text-sm font-medium">
+                <span>Comercio (opcional)</span>
+                <input
+                  value={formulario.comercio}
+                  onChange={(e) =>
+                    setFormulario({ ...formulario, comercio: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-slate-300 p-3"
+                  placeholder="Ej: Almacén Don Pedro"
+                />
+              </label>
+
+              <label className="space-y-1 text-sm font-medium">
+                <span>Dirección (opcional)</span>
+                <input
+                  value={formulario.direccion}
+                  onChange={(e) =>
+                    setFormulario({ ...formulario, direccion: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-slate-300 p-3"
+                />
+              </label>
+            </div>
+
+            {clienteEditando === null && !permisos.puedeValidar && (
+              <p className="mt-4 text-sm text-slate-500">
+                El cliente queda pendiente hasta que el dueño o el encargado lo
+                validen.
+              </p>
             )}
 
-            <label className="flex items-center gap-3 self-end rounded-lg border border-slate-200 p-3">
-              <input
-                type="checkbox"
-                checked={formulario.activo}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    activo: e.target.checked,
-                  })
-                }
-                className="h-5 w-5"
-              />
-              <span className="text-sm font-medium">
-                Cliente activo
-              </span>
-            </label>
-          </div>
+            {/* Acciones del formulario */}
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="submit"
+                disabled={!disponible || enviando}
+                className="min-h-11 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {clienteEditando !== null
+                  ? "Guardar cambios"
+                  : "Guardar cliente"}
+              </button>
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              type="submit"
-              disabled={estadoOperacion.bloqueado}
-              className="min-h-11 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white"
-            >
-              {clienteEditando === null
-                ? "Guardar cliente"
-                : "Guardar cambios"}
-            </button>
-
-            <button
-              type="button"
-              onClick={cancelarFormulario}
-              className="min-h-11 rounded-lg border border-slate-300 px-5 py-3"
-            >
-              Cancelar
-            </button>
-          </div>
-        </form>
-      )}
+              <button
+                type="button"
+                onClick={cancelarFormulario}
+                className="min-h-11 rounded-lg border border-slate-300 px-5 py-3 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+        )}
 
       {/* Buscador y filtro */}
       <div className="flex flex-col gap-3 sm:flex-row">
@@ -432,7 +386,7 @@ export default function Clientes() {
           <input
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar comercio, titular o zona..."
+            placeholder="Buscar por nombre, comercio, teléfono o dirección..."
             aria-label="Buscar clientes"
             className="w-full outline-none"
           />
@@ -447,60 +401,73 @@ export default function Clientes() {
           <option value="todos">Todos</option>
           <option value="activos">Activos</option>
           <option value="inactivos">Inactivos</option>
-          <option value="cuenta_corriente">Cuenta corriente</option>
+          <option value="pendientes">Pendientes de validar</option>
         </select>
       </div>
 
-      {/* Tabla */}
+      {/* Tabla de clientes */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[900px] text-left">
+        <table className="w-full min-w-[820px] text-left">
           <thead className="bg-slate-50 text-sm text-slate-500">
             <tr>
-              <th className="px-5 py-4">Comercio</th>
-              <th className="px-5 py-4">Contacto</th>
-              <th className="px-5 py-4">Zona</th>
-              <th className="px-5 py-4">Condición</th>
+              <th className="px-5 py-4">Cliente</th>
+              <th className="px-5 py-4">Teléfono</th>
+              <th className="px-5 py-4">Dirección</th>
+              <th className="px-5 py-4">Validación</th>
               <th className="px-5 py-4">Estado</th>
-              <th className="px-5 py-4">Acciones</th>
+              {mostrarAcciones && <th className="px-5 py-4">Acciones</th>}
             </tr>
           </thead>
 
           <tbody className="divide-y divide-slate-100">
             {clientesFiltrados.map((cliente) => (
               <tr key={cliente.id} className="hover:bg-slate-50">
+                {/* Nombre y comercio */}
                 <td className="px-5 py-4">
                   <p className="font-semibold text-slate-800">
-                    {cliente.nombreComercio}
+                    {cliente.nombre}
                   </p>
-                  <p className="flex items-center gap-1 text-xs text-slate-500">
-                    <MapPin size={13} />
-                    {cliente.direccion}
-                  </p>
-                </td>
-
-                <td className="px-5 py-4">
-                  <p>{cliente.titular}</p>
-                  <p className="flex items-center gap-1 text-xs text-slate-500">
-                    <Phone size={13} />
-                    {cliente.telefono || "Sin teléfono"}
-                  </p>
-                </td>
-
-                <td className="px-5 py-4">{cliente.zona}</td>
-
-                <td className="px-5 py-4">
-                  <p className="text-sm">
-                    {cliente.condicionPago === "contado"
-                      ? "Contado"
-                      : "Cuenta corriente"}
-                  </p>
-                  {cliente.condicionPago === "cuenta_corriente" && (
-                    <p className="text-xs text-slate-500">
-                      Límite: {formatoMoneda(cliente.limiteCredito)}
-                    </p>
+                  {cliente.comercio && (
+                    <p className="text-xs text-slate-500">{cliente.comercio}</p>
                   )}
                 </td>
 
+                {/* Teléfono */}
+                <td className="px-5 py-4 text-slate-700">
+                  <span className="flex items-center gap-1">
+                    <Phone size={13} className="text-slate-400" />
+                    {cliente.telefono}
+                  </span>
+                </td>
+
+                {/* Dirección */}
+                <td className="px-5 py-4 text-slate-700">
+                  {cliente.direccion ? (
+                    <span className="flex items-center gap-1">
+                      <MapPin size={13} className="text-slate-400" />
+                      {cliente.direccion}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">Sin dirección</span>
+                  )}
+                </td>
+
+                {/* Validación */}
+                <td className="px-5 py-4">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-medium ${
+                      cliente.estadoValidacion === "validado"
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {cliente.estadoValidacion === "validado"
+                      ? "Validado"
+                      : "Pendiente"}
+                  </span>
+                </td>
+
+                {/* Estado */}
                 <td className="px-5 py-4">
                   <span
                     className={`rounded-full px-3 py-1 text-xs font-medium ${
@@ -513,32 +480,78 @@ export default function Clientes() {
                   </span>
                 </td>
 
-                <td className="px-5 py-4">
-                  <button
-                    type="button"
-                    onClick={() => editarCliente(cliente)}
-                    className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 px-3 text-blue-600 hover:bg-blue-50"
-                  >
-                    <Pencil size={16} />
-                    Editar
-                  </button>
-                </td>
+                {/* Acciones (según rol) */}
+                {mostrarAcciones && (
+                  <td className="px-5 py-4">
+                    <div className="flex flex-wrap gap-2">
+                      {permisos.puedeEditar && (
+                        <button
+                          type="button"
+                          onClick={() => editarCliente(cliente)}
+                          disabled={enviando}
+                          aria-label={`Editar ${cliente.nombre}`}
+                          className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 px-3 text-blue-600 hover:bg-blue-50 disabled:opacity-60"
+                        >
+                          <Pencil size={16} />
+                          Editar
+                        </button>
+                      )}
+
+                      {permisos.puedeValidar &&
+                        cliente.estadoValidacion === "pendiente" && (
+                          <button
+                            type="button"
+                            onClick={() => void validarCliente(cliente)}
+                            disabled={enviando}
+                            aria-label={`Validar ${cliente.nombre}`}
+                            className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 px-3 text-green-700 hover:bg-green-50 disabled:opacity-60"
+                          >
+                            <BadgeCheck size={16} />
+                            Validar
+                          </button>
+                        )}
+
+                      {permisos.puedeCambiarEstado && (
+                        <button
+                          type="button"
+                          onClick={() => void alternarEstado(cliente)}
+                          disabled={enviando}
+                          aria-label={`${
+                            cliente.activo ? "Desactivar" : "Activar"
+                          } ${cliente.nombre}`}
+                          className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 px-3 text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                        >
+                          <Power size={16} />
+                          {cliente.activo ? "Desactivar" : "Activar"}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
 
-        {clientesFiltrados.length === 0 && (
+        {catalogo.estado === "cargando" && (
+          <p role="status" className="p-8 text-center text-slate-500">
+            Cargando clientes…
+          </p>
+        )}
+
+        {disponible && clientesFiltrados.length === 0 && (
           <p className="p-8 text-center text-slate-500">
             No se encontraron clientes.
           </p>
         )}
       </div>
 
+      {/* Alcance del catálogo real */}
       <p className="text-sm text-slate-500">
-        Datos de demostración guardados solamente en este navegador.
-        Las ventas, los saldos y las cuentas corrientes se incorporarán
-        en próximos módulos.
+        Catálogo guardado en la base de datos. Autoventa, cuentas corrientes y
+        movimientos todavía usan clientes de demostración guardados en este
+        navegador; no se actualizan con este catálogo. Las ventas, los saldos y
+        las cuentas corrientes reales se incorporarán en módulos posteriores.
       </p>
     </div>
   );

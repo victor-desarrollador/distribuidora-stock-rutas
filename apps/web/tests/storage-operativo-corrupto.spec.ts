@@ -22,12 +22,15 @@ const casos = [
     semilla: null,
   },
   {
+    // /clientes ya no usa el catálogo demo (lee Supabase); el catálogo demo
+    // dañado se sigue detectando en las pantallas operativas que lo usan. En
+    // Movimientos el botón de registro no se muestra sin una jornada abierta.
     nombre: "clientes",
     clave: "distribuidora_clientes_demo_v2",
-    ruta: "/clientes",
+    ruta: "/movimientos",
     aviso: "Los datos de clientes guardados están dañados.",
-    accion: "Nuevo cliente",
-    semilla: "Almacén Don Pedro",
+    accion: null,
+    semilla: null,
   },
   {
     nombre: "jornadas",
@@ -70,7 +73,9 @@ for (const caso of casos) {
     await page.goto(caso.ruta);
 
     await expect(page.getByText(caso.aviso, { exact: false })).toBeVisible();
-    await expect(page.getByRole("button", { name: caso.accion })).toBeDisabled();
+    if (caso.accion) {
+      await expect(page.getByRole("button", { name: caso.accion })).toBeDisabled();
+    }
     if (caso.semilla) {
       await expect(page.getByText(caso.semilla, { exact: false })).toHaveCount(0);
     }
