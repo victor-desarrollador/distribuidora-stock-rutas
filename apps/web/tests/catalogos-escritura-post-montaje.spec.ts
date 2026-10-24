@@ -3,24 +3,14 @@
 // ausente), abortar si la clave se corrompe después del montaje y fallar sin
 // alterar el estado React si setItem lanza. Raw corrupto nunca se sobrescribe.
 //
-// Productos ya no se escribe en localStorage: /productos usa el catálogo de
-// Supabase (tests/productos-catalogo.spec.ts). Quedan camiones y clientes.
+// Productos y camiones ya no se escriben en localStorage: /productos y
+// /camiones usan el catálogo de Supabase (tests/productos-catalogo.spec.ts y
+// tests/camiones-catalogo.spec.ts). Queda clientes.
 import { expect, test, type Page } from "@playwright/test";
 
 const claves = {
-  camiones: "distribuidora_camiones_demo_v4",
   clientes: "distribuidora_clientes_demo_v2",
 } as const;
-
-const camionEdicion = {
-  id: 7,
-  nombre: "Camión Edición E",
-  patente: "ED999BB",
-  marca: "Iveco",
-  modelo: "Daily",
-  estado: "disponible",
-  observaciones: "",
-};
 
 const clienteEdicion = {
   id: 7,
@@ -60,18 +50,6 @@ function registrarDialogos(page: Page) {
 const rawCorrupto = "{catalogo dañado después del montaje";
 
 for (const caso of [
-  {
-    nombre: "Camiones",
-    clave: claves.camiones,
-    ruta: "/camiones",
-    semilla: camionEdicion,
-    semillaClave: "distribuidora_camiones_demo_v4",
-    abrirEdicion: async (page: Page) => {
-      await page.getByRole("button", { name: "Editar" }).first().click();
-    },
-    textoExito: "Camión actualizado correctamente.",
-    textoFallo: "No se pudo guardar el camión en este navegador.",
-  },
   {
     nombre: "Clientes",
     clave: claves.clientes,
