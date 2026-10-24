@@ -1,4 +1,70 @@
 ---
+## 24/10/2026 — Cierre de staging: catálogo de camiones (validación controlada) — PASS
+
+**Entorno:** staging, project ref `rtsncntppghdynzhezzg` · **Código:** `main` = `37250de56c73f82aca5a6db3f7cbdbcffdc571ab` (merge del PR #13) · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y ejecutar esta validación con fixtures controlados y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, migraciones nuevas, cambios de código, commit, push, PR, merge ni deploy en la validación. Esta entrada complementa la del slice («Slice Etapa 1: catálogo de camiones»), cuya línea «STAGING: NO TOCADO» refleja el momento de aquella entrada y queda superada por esta.
+
+**STAGING VALIDATION: PASS.**
+
+### Migración e historial
+- Migración aplicada: `20261024144459_catalogo_camiones.sql`. `supabase migration list --linked`: **5/5 migraciones alineadas** local/remoto (`20261022120000`, `20261023120000`, `20261023140000`, `20261024010921`, `20261024144459`). No se volvió a aplicar nada.
+
+### Método
+- Estado inicial de staging: **0** empresas, perfiles, camiones y usuarios Auth (y 0 filas de `auth.audit_log_entries`). Sólo se usaron fixtures controlados: dos empresas temporales (A y B, B sólo como fixture adversarial de aislamiento) y seis usuarios Auth temporales (dueño A, encargado A, vendedor/piloto A con `user_metadata` engañosa, perfil inactivo A, sin perfil, dueño B), identificables como temporales (`camiones_staging_*`, `cams-stg-*`). Contraseña aleatoria por corrida, no impresa.
+- Permisos probados con `STAGING_PUBLISHABLE_KEY` + JWT reales de los usuarios fixture contra la Data API (REST/RPC). La secret key no se usó para afirmar RLS; sólo para probar que `service_role` no tiene acceso. SQL administrativo por `TEST_DATABASE_URL` (estructura, estado y cleanup). Ni credenciales ni JWT se imprimieron.
+- Script temporal fuera del repo (no versionado).
+
+### Corridas
+- **Primera corrida: 93/94.** El único fallo fue un **error de aserción del script de prueba** (comparaba `true` con `t` al concatenar un booleano), no un defecto del producto.
+- **Segunda corrida (tras corregir la aserción, corrida completa repetida): 94/94 PASS.**
+
+### Resultado por gate
+| Gate | Resultado |
+|---|---|
+| TABLE | PASS |
+| RLS | PASS |
+| GRANTS | PASS |
+| RPC TOPOLOGY | PASS |
+| OWNER WRITE | PASS |
+| ENCARGADO READ-ONLY | PASS |
+| VENDEDOR READ-ONLY | PASS |
+| INACTIVE PROFILE | PASS |
+| NO PROFILE | PASS |
+| ANON | PASS |
+| SERVICE_ROLE | PASS |
+| CROSS-COMPANY | PASS |
+| METADATA SPOOF | PASS |
+| HEADER SPOOF | PASS |
+| VALIDATIONS | PASS |
+| ATOMICITY | PASS |
+| CLEANUP | PASS |
+
+### Hechos relevantes comprobados
+- **Estructura:** `public.camiones` con 7 columnas (`patente`, `nombre`, `activo` del Blueprint §8, más `id`, `empresa_id` y auditoría mínima `creado_en`/`creado_por`), claves únicas `(empresa_id, id)` y `(empresa_id, patente)`, FK compuesta `(empresa_id, creado_por)` a `perfiles` y CHECK de normalización de patente y nombre. RLS habilitada sin `FORCE`, con 4 policies. `authenticated` sólo SELECT; `propietario_rpc` SELECT, INSERT y UPDATE por columna. Fachadas `public` SECURITY INVOKER (dueño `postgres`) e implementaciones `privado` SECURITY DEFINER (dueño `propietario_rpc`), todas con `search_path` vacío; EXECUTE sólo a `authenticated`.
+- **Escrituras directas** (INSERT/PATCH/DELETE por REST) denegadas a dueño, encargado, vendedor, anon y `service_role`. Dueño crea, edita y activa/desactiva sólo por RPC; `empresa_id` y `creado_por` los deriva el servidor.
+- **Encargado y vendedor/piloto:** leen los camiones de su empresa; las tres RPC de escritura devuelven `PT403`; datos sin cambios (hash antes/después). **Perfil inactivo** (aun con rol dueño) y **usuario sin perfil:** lectura vacía y `PT403`.
+- **`service_role` no tiene privilegios sobre la tabla ni sobre las RPC de camiones** (HTTP y ACL), coherente con la decisión del slice.
+- **Aislamiento cross-company:** cada dueño ve sólo su empresa; actualizar o cambiar el estado de un camión de otra empresa devuelve `PT404`, **indistinguible** de un id inexistente. Misma patente permitida en empresas distintas.
+- **`user_metadata` falso no otorga privilegios** (rol `dueno`/`empresa_id` de otra empresa, también tras editarla por Auth y reiniciar sesión). **Headers falsos** (`x-empresa-id`, `x-user-id`, `x-rol`, `request.jwt.claims`, etc.) **no alteran empresa ni identidad.** `Accept-Profile`/`Content-Profile: privado` rechazados (`PGRST106`).
+- **Validaciones:** `PT400` (patente/nombre vacíos, con espacios o null; estado null), `PT401` (JWT sin `sub`, probado por SQL con rol `authenticated`), `PT403`, `PT404`, `PT409` (patente duplicada, también tras `btrim` y al actualizar). Un parámetro `empresa_id` extra en la firma es rechazado.
+- **Atomicidad y concurrencia:** los 8 alta fallidos no dejaron filas parciales y la actualización fallida no alteró la fila. **6 altas simultáneas con la misma patente → 1 éxito + 5 `PT409`**, 1 sola fila.
+- **GraphQL:** `pg_graphql` **no está habilitado**; no hay mutaciones GraphQL sobre `camiones`.
+- **Cleanup:** al terminar, **0 fixtures y 0 residuos Auth relacionados** (camiones, perfiles, empresas, `auth.users`, `auth.identities`, `auth.sessions`, `auth.refresh_tokens` y `auth.audit_log_entries`: todos en 0, igual que al inicio). Verificado de nuevo en una consulta independiente posterior.
+
+### Advisors de seguridad (`supabase db advisors --linked --type security`)
+- **NO BLOQUEANTE / PREEXISTENTE:** 2 WARN, ambos sobre `public.rls_auto_enable()`: **0028** (`anon_security_definer_function_executable`) y **0029** (`authenticated_security_definer_function_executable`). La función es `SECURITY DEFINER`, owner `postgres`, ejecutable por `anon` y `authenticated`, asociada al event trigger `ensure_rls` y **no está definida en las migraciones del repo**. Corresponde al pendiente **O-4** ya registrado. **No se modificó.**
+- Sin hallazgos sobre `public.camiones` ni sobre `privado.*`.
+
+### Riesgos y pendientes (se mantienen)
+- La patente es **sensible a mayúsculas y formato** (`cs-001` y `CS-001` conviven; confirmado en staging). Requiere decisión humana si el negocio quiere unicidad insensible a formato.
+- **P11 global** (privilegios de `service_role`) sigue pendiente.
+- **O-3** (membresía `postgres` → `propietario_rpc`) y **O-4** (`public.rls_auto_enable()`) siguen abiertas.
+- **Producción bloqueada.** Esta validación no la habilita.
+- Jornadas, movimientos y demás pantallas operativas **siguen usando el catálogo demo de camiones** (`localStorage`); un camión creado en la base no aparece ahí (M-03).
+- Superficie sensible (RLS, RPC, roles, `SECURITY DEFINER`): **corresponde security review** y auditoría independiente del hash que se commitee; esta validación de staging no las reemplaza.
+
+**PRODUCTION: NOT TOUCHED · VERCEL: NOT TOUCHED · CODE CHANGES: NONE · SECRETS EXPOSED: NO.**
+
+---
 ## 24/10/2026 — Slice Etapa 1: catálogo de camiones (local; sin commit)
 
 **Rama:** `feat/catalogo-camiones` desde `main` = `3d57fb18fc31127ab923aa964e86c3dd4d7e54a3` · **Autorización humana explícita:** diseñar e implementar el slice en rama, con migración local, RLS, RPC, pgTAP, frontend, Vitest, documentación y ejecución local de tests. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. Las operaciones remotas las hace el humano.
