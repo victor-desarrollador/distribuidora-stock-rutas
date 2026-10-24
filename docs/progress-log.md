@@ -1,4 +1,88 @@
 ---
+## 24/10/2026 — Cierre de staging: catálogo de clientes (validación controlada) — PASS
+
+**Entorno:** staging, project ref `rtsncntppghdynzhezzg` · **Código:** `main` = `06ff42309d95a59ca306fe796df1e012c062ee19` (merge del PR #15) · **Commit funcional auditado:** `c8e6e770753b4907fa9dbcf52e3f4aa70990b847` · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y ejecutar esta validación con fixtures controlados y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, migraciones nuevas, cambios de código, commit, push, PR, merge ni deploy en la validación. Esta entrada complementa la del slice («Slice Etapa 1: catálogo de clientes»), cuya línea «STAGING: NOT TOUCHED» refleja el momento de aquella entrada y queda superada por ésta **sólo en cuanto al estado de staging**.
+
+**STAGING VALIDATION: PASS.**
+
+### Migración e historial
+- Migración aplicada: `20261024180000_catalogo_clientes.sql`. `supabase migration list --linked`: **6/6 migraciones alineadas** local/remoto (`20261022120000`, `20261023120000`, `20261023140000`, `20261024010921`, `20261024144459`, `20261024180000`). No se volvió a aplicar nada.
+- Verificado por el humano: `supabase db lint --linked` → «No schema errors found»; `supabase db push --linked --dry-run` → «Remote database is up to date.».
+
+### Método
+- Estado inicial de staging: **0** clientes, perfiles, empresas, usuarios Auth, identities, sessions, refresh tokens y filas de `auth.audit_log_entries`. Sólo se usaron fixtures controlados de esta corrida: dos empresas temporales (A y B; B sólo como fixture adversarial de aislamiento) y seis usuarios Auth temporales (dueño A, encargado A, vendedor/piloto A, perfil inactivo A con rol dueño, usuario A sin perfil, dueño B), identificables como temporales (`clientes_staging_<run>_*`, `cli-stg-<run>-*`). Ids y contraseña aleatorios por corrida, no impresos. El vendedor A tenía `user_metadata` engañosa (`rol = dueno`, `empresa_id` = empresa B). Los clientes de prueba (activo validado, inactivo validado, pendiente creado por el vendedor y cliente de B) se crearon por las propias RPC, sin depender de datos preexistentes.
+- Permisos probados con `STAGING_PUBLISHABLE_KEY` + JWT reales de los usuarios fixture contra la Data API (REST/RPC). La secret key no se usó para afirmar RLS; sólo para probar que `service_role` no tiene acceso. SQL administrativo por `TEST_DATABASE_URL` (estructura, ACL, huellas de atomicidad y cleanup). El runner aborta si la URL de la API o la conexión SQL no corresponden al ref de staging; no imprime claves, JWT, contraseñas ni URLs (salida revisada: sin secretos).
+- Runner temporal fuera del repo (no versionado). El cleanup corre en `finally` y borra sólo los fixtures de la corrida.
+
+### Corridas
+- **Ensayo local previo (no cuenta como validación de staging):** tres corridas contra el Supabase local para depurar el runner. Las dos primeras fallaron por **errores del runner** (tipo `"char"` sin `::text` en una consulta de catálogo; una expectativa que no contaba el alta creada por la ronda anterior de metadata), no del producto; la tercera dio 209/209.
+- **Staging: una única corrida, 209/209 PASS.**
+
+### Resultado por gate
+| Gate | Aserciones | Resultado |
+|---|---|---|
+| TABLE | 14 | PASS |
+| RLS | 3 | PASS |
+| GRANTS | 5 | PASS |
+| RPC TOPOLOGY | 10 | PASS |
+| OWNER (propiedad de objetos) | 4 | PASS |
+| DUEÑO (alta, lectura, edición) | 14 | PASS |
+| ENCARGADO | 9 | PASS |
+| VENDEDOR ACTIVE-ONLY | 5 | PASS |
+| VENDEDOR CREATE PENDING | 2 | PASS |
+| VENDEDOR MANAGEMENT DENIED | 6 | PASS |
+| METADATA SPOOF | 17 | PASS |
+| VALIDATION IDEMPOTENCY | 7 | PASS |
+| ACTIVE/INACTIVE | 11 | PASS |
+| DUPLICATES | 7 | PASS |
+| CROSS-COMPANY | 17 | PASS |
+| INACTIVE PROFILE | 7 | PASS |
+| NO PROFILE | 5 | PASS |
+| ANON | 7 | PASS |
+| SERVICE_ROLE | 6 | PASS |
+| DIRECT WRITES | 16 | PASS |
+| PRIVATE SCHEMA | 5 | PASS |
+| VALIDATIONS | 23 | PASS |
+| ATOMICITY | 3 | PASS |
+| GRAPHQL | 4 | PASS (deshabilitado) |
+| CLEANUP | 2 | PASS |
+| **Total** | **209** | **209/209** |
+
+### Hechos relevantes comprobados
+- **Estructura:** `public.clientes` con las 12 columnas del modelo (`id`, `empresa_id`, `nombre`, `comercio`, `direccion`, `telefono`, `activo`, `estado_validacion`, `creado_en`, `creado_por`, `validado_en`, `validado_por`), PK `id`, FK a `empresas`, FK compuestas `(empresa_id, creado_por)` y `(empresa_id, validado_por)` a `perfiles`, CHECK de normalización (`btrim`) de nombre/teléfono/comercio/dirección, CHECK de estado (`pendiente`/`validado`) y de coherencia pendiente/validado. El único UNIQUE además de la PK es `(empresa_id, id)`: sin unicidad comercial. Nadie operativo (`anon`, `authenticated`, `service_role`, `propietario_rpc`) tiene DELETE ni TRUNCATE. RLS habilitada sin `FORCE`, con 4 policies; la policy `clientes_select_empresa` exige empresa, `auth.uid()`, perfil activo y (`dueno`/`encargado` o `clientes.activo`). Tabla del owner de migraciones, no de `propietario_rpc`.
+- **Topología RPC:** las cuatro fachadas `public` (`crear_cliente`, `actualizar_cliente`, `validar_cliente`, `cambiar_estado_cliente`) son SECURITY INVOKER, `search_path=''`, no son de `propietario_rpc` y sólo las ejecuta `authenticated`; las cuatro implementaciones `privado` son SECURITY DEFINER, de `propietario_rpc`, con `search_path=''` y sin EXECUTE para PUBLIC/anon/`service_role`; sin sobrecargas; los cuatro auxiliares privados sólo los ejecuta `propietario_rpc`. `propietario_rpc` es NOLOGIN/NOSUPERUSER/NOBYPASSRLS, sin CREATE sobre `privado` y sin tablas propias. `Accept-Profile`/`Content-Profile: privado` rechazados (`PGRST106`); `anon` sin USAGE sobre `privado`.
+- **Lectura:** dueño y encargado leen exactamente los clientes de su empresa, **activos e inactivos**; el vendedor/piloto lee **sólo los activos**: el inactivo no aparece en el listado, pedido por id devuelve `[]` y el filtro `activo=eq.false` devuelve `[]`.
+- **Altas:** dueño y encargado crean clientes `validado` con `creado_por = validado_por = auth.uid()`, `validado_en` del servidor y empresa derivada del perfil (con `btrim`; comercio/dirección omitidos → NULL). El vendedor/piloto crea `pendiente` con `validado_por`/`validado_en` NULL y lo puede leer.
+- **Vendedor sin gestión:** `actualizar_cliente` (ficha ajena y su propia alta), `validar_cliente` y `cambiar_estado_cliente` → `PT403 cliente_no_autorizado`; huella antes/después idéntica.
+- **Edición:** dueño y encargado editan los cuatro campos con `btrim`; comercio/dirección vacíos, de espacios o null → NULL; editar un pendiente no lo valida. La edición no altera `empresa_id`, `creado_por`, `creado_en`, `validado_por`, `validado_en`, `estado_validacion` ni `activo`; los parámetros protegidos extra se rechazan (`PGRST202`) sin tocar la fila.
+- **Validación idempotente:** el encargado valida un pendiente del vendedor (`validado_por` = encargado, `validado_en` del servidor, autor intacto); revalidar (dueño y encargado) no falla y **conserva el primer validador y el timestamp**. Validar un inactivo no lo reactiva.
+- **Activo/inactivo:** al desactivar, dueño y encargado lo siguen viendo y el vendedor deja de verlo (listado y por id); al reactivar, el vendedor vuelve a verlo.
+- **Duplicados permitidos:** mismo nombre, mismo teléfono, duplicado completo (también repetido y por el vendedor) y mismos datos en otra empresa: 200, sin `PT409`.
+- **Aislamiento cross-company:** dueño, encargado y vendedor de A no leen el cliente de B; B no lee A. Las operaciones de gestión de A sobre un id de B devuelven `PT404 cliente_no_encontrado` con respuesta **idéntica** a la de un id inexistente; el vendedor sobre B recibe `PT403` (sin gestión). Filas de A y B intactas.
+- **`user_metadata` falso no otorga privilegios:** con la metadata engañosa en el JWT, y también tras editarla por Auth (`rol=dueno`, `empresa_id`=B, `role=service_role`) y renovar el token, el vendedor sigue siendo vendedor/piloto de A según `perfiles`: sólo activos de A, sin acceso a B, `PT403` en gestión y sus altas quedan `pendiente` en A. Headers inventados (`x-empresa-id`, `x-user-id`, `x-rol`, `request.jwt.claims`, etc.) no alteran identidad ni empresa.
+- **Perfil inactivo y sin perfil:** lectura vacía; las cuatro RPC → `PT403`; sin escrituras.
+- **`anon`:** sin lectura (HTTP y SQL) ni ejecución de las cuatro RPC; sin acceso a `privado`.
+- **`service_role` sin acceso** (HTTP y ACL): sin SELECT, INSERT, UPDATE, DELETE (ni por columna) ni EXECUTE de las ocho firmas, coherente con la decisión del slice. P11 global sigue pendiente.
+- **Escrituras directas** (INSERT/PATCH/DELETE por REST) rechazadas para dueño, encargado, vendedor, anon y `service_role`; huella idéntica.
+- **Validaciones:** `PT400` (nombre/teléfono null, vacíos o de espacios en alta y edición; estado null), `PT401 cliente_no_autenticado` (JWT sin `sub`, probado por SQL con rol `authenticated`), `PT403`, `PT404` (inexistente y otra empresa). Parámetros extra (`p_empresa_id`, `p_creado_por`, `p_validado_por`, `p_estado_validacion`) rechazados (`PGRST202`); id con formato inválido → 4xx.
+- **Atomicidad:** ningún intento inválido o rechazado dejó escrituras parciales (huella de A y B idéntica); nada escapó de las empresas fixture.
+- **GraphQL:** `pg_graphql` **no está habilitado** (`/graphql/v1` → «pg_graphql extension is not enabled.»); sin mutación GraphQL sobre `clientes`.
+- **Cleanup:** **0 residuos** de los fixtures de la corrida (clientes, perfiles, empresas, `auth.users`, `auth.identities`, `auth.sessions`, `auth.refresh_tokens` y `auth.audit_log_entries`) y **conteos finales iguales a los iniciales** (todos en 0).
+
+### Advisors de seguridad (`supabase db advisors --linked --type security`)
+- **NO BLOQUEANTE / PREEXISTENTE:** 2 WARN, ambos sobre `public.rls_auto_enable()`: **0028** (`anon_security_definer_function_executable`) y **0029** (`authenticated_security_definer_function_executable`). Corresponde al pendiente **O-4** ya registrado. **No se modificó.**
+- Sin hallazgos sobre `public.clientes`, sus RPC, `privado.*`, grants ni RLS.
+
+### Riesgos y pendientes (se mantienen)
+- **ADR-001** sigue **APROBADA PARA VALIDACIÓN CONTROLADA**; P8–P17 sin resolver.
+- **P11 global** (privilegios de `service_role`), **O-3** (membresía `postgres` → `propietario_rpc`) y **O-4** (`public.rls_auto_enable()`) siguen abiertos.
+- **Política de duplicados** pendiente de decisión humana (hoy se permiten todos).
+- `Autoventa`, `Cuentas corrientes` y `Movimientos` siguen con el catálogo demo de clientes; un cliente real no aparece ahí.
+- **Producción bloqueada.** Esta validación no la habilita. La security review del commit se hizo por separado; esta validación de staging no la reemplaza ni la sustituye.
+
+**PRODUCTION: NOT TOUCHED · VERCEL: NOT TOUCHED · CODE CHANGES: NONE · RUNNER OUTPUT: NO SECRETS PRINTED.**
+
+---
 ## 24/10/2026 — Slice Etapa 1: catálogo de clientes (local; sin commit)
 
 **Rama:** `feat/catalogo-clientes` desde `origin/main` = `5ec2ada240a15f24307e0cb078f705ef78e907c6` (merge del PR #14) · **Autorización humana explícita:** diseñar e implementar el slice en rama, con migración local, RLS, RPC, pgTAP, frontend, Vitest, Playwright, documentación y ejecución local de las verificaciones. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. Las operaciones remotas las hace el humano.
