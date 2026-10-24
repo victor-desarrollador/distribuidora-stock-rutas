@@ -1,4 +1,109 @@
 ---
+## 23/10/2026 — Hardening de grants y privilegios por defecto (O-1 / O-2)
+
+**Rama:** `feat/hardening-grants-default-privileges` · **Base:** `main` en `33bd6722c499082d9826f99a38f2cbc3d5774dd6` · **Estado:** commit local autorizado por decisión humana; sin push, merge ni deploy. **Staging NO tocado por este cambio** (la migración nueva no se aplicó fuera de la base local). **Producción NO tocada.** Requiere **security review** (grants, `ALTER DEFAULT PRIVILEGES`, `service_role`) y **auditoría independiente** del hash del commit.
+
+### Objetivo
+
+Corregir los hallazgos O-1 y O-2 de la validación de staging (entrada siguiente) y fijar los privilegios por defecto de `postgres` para objetos futuros, de modo que el modelo RPC + mínimo privilegio (Blueprint §10; ADR-001 §12) no dependa de lo que cada entorno conceda por defecto.
+
+### Decisión O-1 — CONFIRMADO
+
+`service_role` **debe** conservar `SELECT` sobre `public.productos`: lo dice ADR-001 §18.1 (P11-productos, «Conserva `SELECT`»), el pgTAP de productos (`service_role puede leer productos`) y la entrada de H-01 de este log. En local lo daba el privilegio por defecto de la plataforma; la migración `20261023140000` sólo revocó la escritura y nunca concedió el `SELECT`, por eso en staging (donde el default de `postgres` ya no incluye `arwd`) faltaba. Ahora se concede de forma explícita. Sin `EXECUTE` sobre las RPC (sin cambios).
+
+### Causa común de O-1 y O-2: local ≠ staging
+
+Defaults de `postgres` en `public`, medidos antes del cambio:
+
+| Objeto futuro | Local | Staging |
+|---|---|---|
+| Tablas (anon, authenticated, service_role) | `arwdDxtm` | `Dxtm` |
+| Secuencias | `rwU` | `w` |
+| Funciones | `X` a los tres roles | sin `X` para los roles |
+| Funciones en `privado` | `PUBLIC` implícito | `PUBLIC` implícito |
+
+### Migración nueva
+
+`supabase/migrations/20261024010921_hardening_grants_default_privileges.sql` (creada con `supabase migration new`; las tres migraciones aplicadas no se editaron):
+
+- Guarda: aborta si `current_user <> 'postgres'` (los defaults se definen por rol creador, ADR-001 §12.6).
+- `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES / ON SEQUENCES FROM anon, authenticated, service_role` y `REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated, service_role`.
+- `ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` en **forma global** (sin `IN SCHEMA`): verificado en local que con `IN SCHEMA privado` la ACL de una función nueva sigue siendo `NULL` (PUBLIC implícito), tal como anticipa ADR-001 §12.6.
+- Tablas existentes, explícito: `anon` sin nada; `authenticated` sólo `SELECT` en `empresas`, `perfiles` y `productos`; `service_role` sin `TRUNCATE`/`REFERENCES`/`TRIGGER` en `empresas` y `perfiles`; `service_role` con `SELECT` (y sin `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`/`REFERENCES`/`TRIGGER`) en `productos`.
+- Idempotente: aplicada dos veces sobre una base local con el estado de staging reproducido (ACL `Dxtm` y `m`), sin errores; converge al mismo resultado.
+
+### Fuera de alcance / sin cambios
+
+RLS, Topología D, fachadas e implementaciones, `propietario_rpc` y su membresía (O-3), `rls_auto_enable()` (O-4), `MAINTAIN`, defaults de `supabase_admin` y del esquema `storage`, frontend, auth.
+
+### Decisiones pendientes que esta tarea NO resuelve
+
+- **P11 global:** el `SELECT/INSERT/UPDATE/DELETE` de `service_role` sobre `empresas` y `perfiles` sigue **distinto entre entornos** (local `arwd`, staging ninguno). No se normalizó porque ADR-001 §18.1 dice que no cambia sus privilegios sobre `perfiles` y la política global no está aprobada. Las pruebas no lo evalúan.
+- **Secuencias:** los defaults de secuencias (`anon`/`authenticated` podían hacer `nextval`) quedaron incluidos por consistencia con tablas y funciones; no estaban nombrados en la autorización. Revertible sin efecto: no existe ninguna secuencia en el esquema.
+- **Efecto del `REVOKE` global de `EXECUTE` a PUBLIC:** toda función que cree `postgres` desde ahora (incluidas las de extensiones instaladas por migración o funciones temporales de tests) no es ejecutable por otros roles hasta concederlo. Cada migración futura debe conceder `EXECUTE` de forma explícita.
+
+### Tests
+
+- Nuevo `supabase/tests/grants_default_privileges.test.sql` (**32 pruebas**): matriz exacta por rol y tabla (los 7 privilegios y los de columna), `service_role` con `SELECT` y nada más en `productos`, sin `TRUNCATE`/`REFERENCES`/`TRIGGER` en ninguna tabla de `public`, sin `INSERT`/`UPDATE`/`DELETE` de `authenticated`, `anon` sin nada, secuencias, funciones sin `EXECUTE` para PUBLIC/`anon`/`service_role`, `authenticated` ejecuta exactamente las seis firmas aprobadas, inspección de `pg_default_acl` (tablas, secuencias, funciones en `public` y entrada global) y prueba de comportamiento: una tabla, secuencia y función nuevas (en `public` y `privado`) creadas como `postgres` no heredan privilegios, y `authenticated` no ejecuta una función privada nueva aunque tenga `USAGE`.
+- Modificado `supabase/tests/productos_catalogo.test.sql`: `grant execute … to public` sobre los helpers `pg_temp.como_usuario` y `pg_temp.como_anon`. Antes de este cambio heredaban `EXECUTE` de PUBLIC; con el hardening el test fallaba (`permission denied for function como_usuario`) al invocarlos con rol `authenticated`. Es un efecto del test, no del producto. Sin cambio de aserciones ni de plan (125).
+
+### Mutation tests (transacción revertida contra la base local; la base quedó intacta, verificado por catálogo)
+
+Control sin mutación: 0 `not ok`. Cada mutación fue detectada: `TRUNCATE` a `service_role` en `empresas` (2 fallas) y `REFERENCES` en `perfiles` (2); `TRIGGER` en `productos` (2); quitar `SELECT` a `service_role` en `productos` (2); `INSERT` (2), `UPDATE(precio)` por columna (1) y `DELETE` (1) a `service_role` en `productos`; `INSERT` a `authenticated` en `productos` (3); `TRUNCATE` a `authenticated` en `empresas` (2); `SELECT` a `anon` (3); default de tablas `ALL` a `authenticated` (3) y a `service_role` (3); default de funciones `EXECUTE` a `authenticated` (3); default global `EXECUTE` a PUBLIC (7); default de secuencias `USAGE` a `anon` (2); `EXECUTE` de `authenticated` sobre un auxiliar privado (1); restauración completa del estado previo (13). Arnés ad hoc, no versionado (misma práctica que el slice productos).
+
+### Cómo se verificó (desde `apps/web`, Supabase CLI 2.120.0, Docker local, PostgreSQL 17)
+
+- `supabase db reset --workdir ../..`: aplica las cuatro migraciones y el seed sin errores.
+- `supabase test db --workdir ../..`: `Files=3, Tests=212, Result: PASS` (55 Auth + 32 nuevos + 125 productos; antes 180).
+- `supabase db lint --local`: `No schema errors found`. `supabase db advisors --local`: `No issues found`.
+- `npm run typecheck` exit 0 · `npm run lint` exit 0 · `npm test` 23 archivos / **716** pruebas · `npx playwright test` **60** passed (incluye las pruebas HTTP del catálogo contra la Data API local) · `npm run build` exit 0.
+- Security review por catálogo (`information_schema.role_table_grants`, `has_table_privilege`, `has_function_privilege`, `pg_default_acl`): `anon` sin privilegios; `authenticated` sólo `SELECT`; `service_role` sin `TRUNCATE`/`REFERENCES`/`TRIGGER`, y en `productos` sólo `SELECT`; RLS activa en las tres tablas, 7 policies, sin `FORCE`; exactamente 3 funciones `SECURITY DEFINER` (las implementaciones de `privado`, owner `propietario_rpc`, `search_path` vacío); fachadas `SECURITY INVOKER` ejecutables sólo por `authenticated`; ninguna función de `public`/`privado` con `EXECUTE` para PUBLIC, `anon` ni `service_role`. **Topología D sin regresión.**
+
+### Riesgos y pendientes
+
+1. **Aplicar a staging** requiere autorización humana expresa (`supabase db push`); no se hizo. Tras aplicarlo, repetir la verificación de privilegios y el estado de `pg_default_acl` en staging.
+2. **M-04 DEFINITIVO sigue INCONCLUSO** hasta ejecutar las pruebas negativas con fixtures contra la Data API de staging (entrada siguiente, «Pendiente»).
+3. Security review obligatoria (grants, defaults, `service_role`) y auditoría independiente del hash.
+4. Producción y migraciones remotas siguen bloqueadas.
+
+---
+## 23/10/2026 — Validación post-migración en staging (solo lectura)
+
+**Entorno:** staging, project ref `rtsn…hezzg` · **Alcance:** verificación **read-only** de las tres migraciones ya aplicadas por el humano con `supabase db push` (no se volvió a ejecutar). **Producción no tocada.** Sin commit, merge ni deploy. Las migraciones no se modificaron.
+
+### Evidencia manual del humano (no verificada por Claude)
+
+- Dashboard → Data API → Exposed schemas: `public`, `graphql_public`. `privado` **no** expuesto.
+
+### Evidencia obtenida por Claude (SQL de solo lectura contra staging)
+
+- **Migration history:** `supabase_migrations.schema_migrations` existe y contiene `20261022120000 auth_base_empresas_perfiles`, `20261023120000 perfiles_usuario_formato_estricto`, `20261023140000 catalogo_productos`. Sin otras filas.
+- **Objetos:** schemas `public` y `privado` (owner `postgres`); tablas `empresas`, `perfiles`, `productos` (owner `postgres`); rol `propietario_rpc`; 11 funciones (8 en `privado`, 3 fachadas en `public`). El cuerpo (`prosrc`) de las 11 es **idéntico** al de la migración. Constraints y tipos de las tres tablas coinciden con la migración (`precio numeric(14,2)`, formato estricto de `usuario`, `perfiles_empresa_usuario_unico`).
+- **`propietario_rpc`:** `NOLOGIN`, no superuser, sin `CREATEDB`, sin `CREATEROLE`, sin `BYPASSRLS`, sin `REPLICATION`; no es dueño de ninguna tabla ni de relaciones. Único miembro: `postgres` (SET e INHERIT por el `grant … to current_user` de la migración; ADMIN OPTION otorgado automáticamente por `supabase_admin`). ADR-001 no regula las opciones de membresía: **no hay desviación respecto de ADR-001**, queda como observación (O-3).
+- **Funciones privadas:** las 8 con `search_path=""` y owner `propietario_rpc`. Las 3 implementaciones (`crear_producto`, `actualizar_producto`, `cambiar_estado_producto`) son `SECURITY DEFINER`; EXECUTE sólo para `authenticated` (requerido por Topología D) y `propietario_rpc`. Los 5 auxiliares son `SECURITY INVOKER` y sólo `propietario_rpc` los ejecuta. `PUBLIC`, `anon` y `service_role`: sin EXECUTE en ninguna. (`postgres` figura con EXECUTE efectivo por heredar `propietario_rpc`.)
+- **Fachadas públicas:** `SECURITY INVOKER`, owner `postgres`, `search_path=""`, EXECUTE sólo `authenticated` (y `postgres`). **Topología D: PASS estructural** (Data API → fachada INVOKER → implementación DEFINER en `privado`).
+- **RLS:** activada en las tres tablas, `FORCE` desactivado (conforme a ADR-001 P4). 7 policies: `empresas_select_propia`, `perfiles_select_propio`, `productos_select_empresa` (`authenticated`, aislan por `empresa_id`/perfil activo propio) y cuatro para `propietario_rpc` (select de perfil propio; select/insert/update de productos con perfil activo `dueno`/`encargado` y misma `empresa_id`). No hay policies de INSERT/UPDATE/DELETE para `anon`, `authenticated` ni `service_role`.
+- **Grants efectivos sobre `public.productos`:** `anon` ninguno; `authenticated` sólo SELECT; `service_role` ningún privilegio de lectura/escritura (sólo `MAINTAIN`, PG17); `propietario_rpc` SELECT + INSERT/UPDATE por columnas. `empresas` y `perfiles`: `anon` ninguno, `authenticated` sólo SELECT.
+- **Direct write bypass (metadata, grants, RLS):** no existe camino directo de escritura sobre `public.productos` para `anon`, `authenticated` ni `service_role`; sin triggers, rules ni vistas. `postgres` (owner, `BYPASSRLS`) sí escribe, pero no es un rol de la Data API. **PASS estructural.**
+- **Data API / GraphQL:** `privado` existe sin tablas; `anon` y `service_role` sin USAGE sobre `privado`; `authenticated` con USAGE (requerido por Topología D). `pg_graphql` **no está habilitada** en staging: `graphql_public.graphql` es el placeholder que responde «pg_graphql extension is not enabled» y no hay objetos en el schema `graphql`. No se observa bypass GraphQL estructural.
+
+### Observaciones para decisión humana (no resueltas ni modificadas)
+
+- **O-1.** `service_role` **no** tiene SELECT sobre `productos` (el comentario de la migración dice «Conserva SELECT»); queda sólo `MAINTAIN`. Más restrictivo de lo documentado, no inseguro. Aclarar si es intencional.
+- **O-2.** `service_role` conserva `TRUNCATE`, `REFERENCES` y `TRIGGER` sobre `empresas` y `perfiles` (la migración base sólo revocó a `public`, `anon` y `authenticated`). El default ACL de `postgres` en `public` otorga `Dxtm` a `anon`, `authenticated` y `service_role` en toda tabla futura: cada migración debe revocar explícitamente. Relacionado con P11 global (pendiente; no se resolvió acá). Un `TRUNCATE … CASCADE` quedaría bloqueado por la falta de TRUNCATE sobre `productos`; es razonamiento, **no se probó**.
+- **O-3.** `postgres` sigue siendo miembro de `propietario_rpc` con SET e INHERIT. Es lo que habilita ALTER OWNER y queda tras la migración.
+- **O-4.** `public.rls_auto_enable()` (`SECURITY DEFINER`, event trigger `ensure_rls`, owner `postgres`) es del proyecto, no de nuestras migraciones. Devuelve `event_trigger`, por lo que no es invocable como RPC; igual conviene revisarla con advisors.
+
+### Pendiente
+
+- **Advisors de Supabase: PENDIENTE.** La Management API respondió 401 («JWT could not be decoded») con el token del entorno de la sesión; no se obtuvieron resultados.
+- **M-04 DEFINITIVO: INCONCLUSO.** La estructura es correcta, pero faltan pruebas negativas con fixtures que ejecuten mutaciones reales vía Data API: (1) `POST/PATCH/DELETE /rest/v1/productos` como `anon`, `authenticated` y `service_role` rechazados por permisos; (2) `/rest/v1/rpc/*` como `anon` rechazado; (3) acceso con `Accept-Profile`/`Content-Profile: privado` rechazado; (4) `/graphql/v1` sin mutaciones; (5) fachadas con dueño y encargado OK, con vendedor/piloto, perfil inactivo y sin perfil → `PT403`/`PT401`; (6) `actualizar_producto` y `cambiar_estado_producto` sobre producto de otra `empresa_id` → `PT404`; (7) precio con más de 2 decimales, negativo, NaN e Infinity → `producto_precio_invalido`; (8) código duplicado → `PT409`; categoría/forma de venta inválida o combinación incorrecta; (9) `empresa_id` nunca tomado del cliente; (10) con un JWT real de PostgREST, `privado.usuario_actual()` = `auth.uid()`. Requieren crear fixtures en staging, lo cual es escritura y necesita autorización explícita.
+
+### Deuda de proceso
+
+- La primera tanda de consultas se ejecutó **sin** forzar solo lectura (`transaction_read_only = off`, pues el pooler ignora `PGOPTIONS`); todas fueron `SELECT` y el catálogo no cambió. El resto se ejecutó dentro de `BEGIN READ ONLY … ROLLBACK`.
+
+---
 ## 23/10/2026 — Aclaración documental: empresa única y aislamiento por `empresa_id`
 
 **Rama:** `chore/aclarar-empresa-unica` · **Base:** `main` en `12707516fd6a861efd02e0280f9c7ee1fd9fae4e` · **Estado:** cambio documental local, sin push, merge ni deploy; pendiente de commit autorizado. Sin cambios de código, SQL, migraciones ni tests.

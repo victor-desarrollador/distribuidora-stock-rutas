@@ -81,6 +81,12 @@ begin
   execute 'set local role anon';
 end $$;
 
+-- Los privilegios por defecto de postgres ya no dan EXECUTE a PUBLIC en
+-- funciones nuevas (migración de hardening): los helpers se invocan también
+-- desde los roles simulados, así que lo conceden de forma explícita.
+grant execute on function pg_temp.como_usuario(uuid, jsonb) to public;
+grant execute on function pg_temp.como_anon() to public;
+
 -- Firmas exactas (P14-productos: sin sobrecargas).
 create temp table firmas (firma text, expuesta boolean);
 insert into firmas values
