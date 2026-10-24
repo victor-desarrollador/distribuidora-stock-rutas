@@ -147,7 +147,7 @@ Esto incluye, según lo marcado en el Blueprint (ver Blueprint §15 y las seccio
 - Prohibición de descuentos / esquema de precio de lista vs aplicado (sección 7.5).
 - Retiro de efectivo que supera el saldo registrado sin bloqueo (sección 7.6).
 - Vencimientos por partida de ingreso / tabla `partidas_ingreso` (secciones 2, 4, 8).
-- **ADR-001, P8–P17:** decisiones técnicas todavía pendientes para completar la validación controlada (`docs/decisions/001-rpc-privilegiadas.md`). P18 sigue como decisión futura separada. P1/P19/P20, P2–P4 y P5–P7 están resueltas y no integran esta prohibición.
+- **ADR-001, P8–P10 y P12–P17:** decisiones técnicas todavía pendientes para completar la validación controlada (`docs/decisions/001-rpc-privilegiadas.md`). P18 sigue como decisión futura separada. P1/P19/P20, P2–P4, P5–P7 y P11 (esta última, para validación controlada; §4.5) están resueltas y no integran esta prohibición. Una excepción nueva para `service_role` no está cubierta por P11: requiere aprobación humana explícita.
 
 "Implementar" incluye: código de aplicación, migraciones SQL, funciones RPC, políticas RLS, tipos, pruebas que asuman la regla como vigente y cambios de UI que la reflejen.
 
@@ -189,6 +189,14 @@ Registradas en ADR-001 §7 y §18:
 - **P3:** el rol técnico `propietario_rpc` (`NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`) es propietario sólo de las funciones privilegiadas privadas necesarias, nunca de tablas de negocio.
 - **P4:** las tablas de negocio quedan bajo el owner de migraciones/Supabase; toda tabla expuesta lleva RLS obligatoria; no se impone `FORCE ROW LEVEL SECURITY` global (cualquier uso futuro se justifica y se prueba específicamente); las funciones `SECURITY DEFINER` viven en `privado`, no son propietarias de tablas y validan explícitamente `auth.uid()`, empresa, rol, permisos, estado e integridad.
 - **No se crean objetos vacíos por anticipado:** el esquema `privado` y el rol `propietario_rpc` se crean recién con el primer objeto que los necesite.
+
+### 4.5 P11, O-3 y O-4: resueltas para validación controlada (24/10/2026)
+
+Registradas en ADR-001 §18.2. No autorizan producción.
+
+- **P11 global:** `service_role` queda **denegado por defecto** sobre los objetos de negocio: sin privilegios de tabla ni `EXECUTE` sobre las RPC de negocio. La única excepción vigente es `SELECT` sobre `public.productos`, que no autoriza ningún otro privilegio. **No se generalizan excepciones:** cualquier privilegio nuevo para `service_role` requiere una excepción explícita, nominada y aprobada por decisión humana.
+- **O-3:** `postgres` conserva `SET ROLE propietario_rpc` (`set_option = true`) sin heredar sus privilegios (`inherit_option = false`). Las migraciones que necesiten actuar como owner técnico de funciones de `privado` usan `SET ROLE propietario_rpc` explícitamente.
+- **O-4:** se conservan `public.rls_auto_enable()` y el event trigger `ensure_rls`, sin `EXECUTE` para PUBLIC, `anon`, `authenticated` ni `service_role`; no se cambia el comportamiento del trigger.
 
 ## 5. Reglas obligatorias
 

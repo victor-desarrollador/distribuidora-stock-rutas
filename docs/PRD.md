@@ -13,7 +13,7 @@
 - **Fuente de verdad:** `BLUEPRINT.md` v2.0, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR vigentes y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
 - **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
 - **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
-- **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.5, **APROBADA PARA VALIDACIÓN CONTROLADA**), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (estado `aprobada`). ADR-001 resolvió P1/P19/P20, P2–P4 y P5–P7; P8–P17 siguen pendientes y P18 es una decisión futura separada. Su estado permite validación sólo local/staging y no autoriza producción. ADR-002 es histórica y superada; ADR-003 establece que el precio de media pieza se deriva del de pieza completa (mitad, redondeada al peso entero, `.50` sube) y no es configurable.
+- **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.5, **APROBADA PARA VALIDACIÓN CONTROLADA**), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (estado `aprobada`). ADR-001 resolvió P1/P19/P20, P2–P4, P5–P7 y, para validación controlada, P11 (§18.2); P8–P10 y P12–P17 siguen pendientes y P18 es una decisión futura separada. Su estado permite validación sólo local/staging y no autoriza producción. ADR-002 es histórica y superada; ADR-003 establece que el precio de media pieza se deriva del de pieza completa (mitad, redondeada al peso entero, `.50` sube) y no es configurable.
 - **Fase 2:** lo listado en Blueprint §5 permanece fuera de Fase 1.
 - Este documento **no inventa** decisiones ausentes: donde falta definición, remite a «Decisiones pendientes» (§21), a «Dependencias de ADR» (§22) y al Blueprint §15.
 
@@ -23,7 +23,7 @@
 |---|---|---|
 | **Aprobado por el Blueprint** | Regla vigente de Fase 1. | Requisitos de §7 a §11 y §14. |
 | **PROPUESTA NO APROBADA / PROPUESTA TÉCNICA NO APROBADA** | Regla del Blueprint marcada como propuesta; **no es requisito**. **No se implementa** (AGENTS.md §3). | Avisos en §7, §9, §10, §14 y §20. |
-| **Decisión pendiente de ADR** | Punto **P8–P17** de ADR-001 v1.5; requiere **decisión humana**. P18 es futura y separada. | §11, §18, §21 y §22. |
+| **Decisión pendiente de ADR** | Punto **P8–P10** o **P12–P17** de ADR-001 v1.5 (P11 está resuelta, §18.2); requiere **decisión humana**. P18 es futura y separada. | §11, §18, §21 y §22. |
 | **Fase 2 / fuera de alcance** | Postergado por decisión confirmada; no integra la primera entrega. | §20. |
 
 ---
@@ -155,7 +155,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 | RNF-10 | **Dependencias.** Versión exacta, preferentemente publicadas hace al menos dos semanas. | AGENTS.md §6.8 |
 | RNF-11 | **Una migración por cambio de base**, versionada en `supabase/migrations/`; nunca cambios manuales. Regla **aplicable cuando exista autorización de migraciones** (ver la nota de esta sección y §22); **no** implica que hoy corresponda generar migraciones. | Blueprint §13, regla 4; AGENTS.md §6.4 |
 
-> **Dependencia de arquitectura:** ADR-001 v1.5 aprobó para validación controlada la Topología D y la gobernanza P19/P20. Las migraciones necesarias se permiten sólo local/staging, una vez resueltas las decisiones requeridas por el alcance (P2–P7 ya resueltas; P8–P17 pendientes); producción permanece bloqueada hasta pruebas, auditoría independiente y aceptación humana final. El detalle operativo está en `docs/quality/security-review.md`.
+> **Dependencia de arquitectura:** ADR-001 v1.5 aprobó para validación controlada la Topología D y la gobernanza P19/P20. Las migraciones necesarias se permiten sólo local/staging, una vez resueltas las decisiones requeridas por el alcance (P2–P7 y P11 ya resueltas; P8–P10 y P12–P17 pendientes); producción permanece bloqueada hasta pruebas, auditoría independiente y aceptación humana final. El detalle operativo está en `docs/quality/security-review.md`.
 
 ---
 
@@ -209,7 +209,7 @@ Reglas:
 - **El frontend nunca mueve stock ni dinero** y nunca usa credenciales administrativas en el navegador (Blueprint §6; AGENTS.md §5).
 - **Auditoría (Fase 1):** **no se crea una tabla genérica `auditoria`**. La trazabilidad surge de `operaciones`, los ledgers (`movimientos_stock`), los documentos, el actor, los timestamps, los motivos, la jornada y las relaciones (Blueprint §8, §10).
 
-> **DEPENDENCIA — ADR-001 v1.5, APROBADA PARA VALIDACIÓN CONTROLADA:** P1 seleccionó la Topología D: Data API → fachada expuesta `SECURITY INVOKER` → implementación privada/no expuesta `SECURITY DEFINER` → validaciones completas → transacción. La implementación privada es la frontera real de seguridad. P2–P7 están resueltas, P8–P17 continúan pendientes y P18 es futura/separada; sólo se permiten migraciones de validación local/staging y producción no está autorizada.
+> **DEPENDENCIA — ADR-001 v1.5, APROBADA PARA VALIDACIÓN CONTROLADA:** P1 seleccionó la Topología D: Data API → fachada expuesta `SECURITY INVOKER` → implementación privada/no expuesta `SECURITY DEFINER` → validaciones completas → transacción. La implementación privada es la frontera real de seguridad. P2–P7 y P11 están resueltas, P8–P10 y P12–P17 continúan pendientes y P18 es futura/separada; sólo se permiten migraciones de validación local/staging y producción no está autorizada.
 
 ---
 
@@ -283,7 +283,7 @@ Un módulo se considera terminado cuando cumple las **pruebas obligatorias** de 
 - **Ventas en papel:** número duplicado en cualquier jornada de la misma empresa/serie se rechaza; un salto de numeración genera aviso.
 - **Seguridad:** la fachada expuesta `SECURITY INVOKER` y la implementación privada `SECURITY DEFINER` rechazan `anon`, usuario sin perfil activo, usuario/perfil con `empresa_id` distinto y vendedor intentando cerrar jornada o retirar; sin escrituras directas en el ledger; un usuario sin rol no ve datos; ningún rol hace UPDATE/DELETE en movimientos; usuario de otra `empresa_id` no ve ni opera; transferencia declarada no figura verificada hasta intervención habilitada; vendedor crea cliente pero no edita existente; sólo dueño/encargado inician un retiro y sólo ambos participantes lo confirman.
 
-> **Nota (P1 resuelta).** Los criterios de Seguridad prueban la Topología D aprobada para validación controlada. No resuelven P8–P17 ni autorizan producción (ver §11 y §22; ADR-001 §4 y §5).
+> **Nota (P1 resuelta).** Los criterios de Seguridad prueban la Topología D aprobada para validación controlada. No resuelven P8–P10 ni P12–P17 ni autorizan producción (ver §11 y §22; ADR-001 §4 y §5).
 
 ---
 
@@ -294,11 +294,11 @@ Niveles previstos (AGENTS.md §9; Blueprint §12):
 | Nivel | Herramienta | Qué cubre |
 |---|---|---|
 | Unitario | Vitest (`npm test`) | Lógica de dominio pura. |
-| Integración / base | pgTAP sobre las RPC (`supabase test db`) — local/staging, tras resolver las P8–P17 necesarias | Reglas de stock, dinero, jornada y seguridad. |
+| Integración / base | pgTAP sobre las RPC (`supabase test db`) — local/staging, tras resolver las P8–P10 y P12–P17 necesarias | Reglas de stock, dinero, jornada y seguridad. |
 | End-to-end | Playwright (E2E versionado) | Recorridos críticos de UI. |
 | Exploración funcional | Playwright CLI | Apoyo manual para validar y depurar (ver `docs/quality/browser-testing.md`). |
 
-- Las pruebas que dependan de **RPC privilegiadas** pueden prepararse y ejecutarse sólo en local/staging después de resolver las P8–P17 necesarias; no habilitan producción (`docs/quality/security-review.md`).
+- Las pruebas que dependan de **RPC privilegiadas** pueden prepararse y ejecutarse sólo en local/staging después de resolver las P8–P10 y P12–P17 necesarias; no habilitan producción (`docs/quality/security-review.md`).
 - Antes de pedir revisión: `lint`, `typecheck`, `test`, Playwright y `build` deben pasar; `npm run lint` debe terminar con exit 0 (AGENTS.md §9).
 - El proceso de revisión y auditoría se documenta en `docs/quality/review-process.md`.
 
@@ -348,7 +348,7 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 2. **Venta con stock insuficiente** — negativo transitorio solo camión en jornada abierta, venta `excede_stock`, cierre bloqueado hasta regularización. *(PROPUESTA NO APROBADA.)*
 3. **Anulaciones** — vendedor anula sus ventas antes de finalizar, con motivo; luego solo dueño/encargado. *(PROPUESTA NO APROBADA.)*
 4. **Descuentos** — prohibidos para el vendedor en Fase 1. *(PROPUESTA NO APROBADA.)*
-5. **ADR-001** — Topología D y gobernanza aprobadas para validación controlada; resolver P8–P17 y probar revocaciones/permisos antes de la aceptación productiva. P18 queda separada.
+5. **ADR-001** — Topología D y gobernanza aprobadas para validación controlada; resolver P8–P10 y P12–P17 y probar revocaciones/permisos antes de la aceptación productiva. P18 queda separada.
 6. **Ventas con pagos combinados** — confirmar medios exactos (efectivo, transferencia, débito/QR, a cuenta) y si una misma venta admite saldo impago.
 7. **Alta de clientes por vendedor** — campos mínimos, manejo de duplicados y cuándo el encargado valida.
 8. **Talonarios** — por vendedor o camión, serie, numeración, asignación y control de duplicados.
@@ -361,13 +361,13 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 
 **Prioridad media — antes de entrega:** verificación de transferencias en Fase 1; manejo de cobros de deudas anteriores (cuenta corriente integral es Fase 2); valuación de faltantes y responsabilidades; cantidad exacta de camiones/usuarios/catálogo y conectividad.
 
-**Decisiones de ADR-001 (v1.5).** P1, P19, P20, P2–P4 y P5–P7 están resueltas. **P8–P17 continúan PENDIENTES DE APROBACIÓN HUMANA** y deben resolverse según el alcance de validación; P18 es una decisión futura separada y no es requisito previo.
+**Decisiones de ADR-001 (v1.5).** P1, P19, P20, P2–P4 y P5–P7 están resueltas, y P11 lo está para validación controlada (§18.2). **P8–P10 y P12–P17 continúan PENDIENTES DE APROBACIÓN HUMANA** y deben resolverse según el alcance de validación; P18 es una decisión futura separada y no es requisito previo.
 
 ---
 
 ## 22. Dependencias de ADR
 
-- **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (`docs/decisions/001-rpc-privilegiadas.md`): **versión 1.5**, estado **APROBADA PARA VALIDACIÓN CONTROLADA** (`docs/decisions/README.md`). P1 seleccionó Topología D; P19/P20 fijaron dos etapas y migraciones sólo local/staging; P5–P7 (22/10/2026) y P2–P4 (23/10/2026) quedaron resueltas por decisión humana. P8–P17 siguen pendientes, P18 es futura/separada y producción continúa bloqueada.
+- **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (`docs/decisions/001-rpc-privilegiadas.md`): **versión 1.5**, estado **APROBADA PARA VALIDACIÓN CONTROLADA** (`docs/decisions/README.md`). P1 seleccionó Topología D; P19/P20 fijaron dos etapas y migraciones sólo local/staging; P5–P7 (22/10/2026), P2–P4 (23/10/2026) y P11 (24/10/2026, para validación controlada) quedaron resueltas por decisión humana. P8–P10 y P12–P17 siguen pendientes, P18 es futura/separada y producción continúa bloqueada.
 - **Otras reglas con estado de propuesta** (no son ADR, pero bloquean implementación): stock negativo transitorio, anulación de ventas, prohibición de descuentos, retiro que excede el saldo y vencimientos por partida (Blueprint §7.4–§7.6, §15).
 - **Regla de estado:** una ADR `aprobada para validación controlada` sólo se implementa en local/staging y dentro de sus decisiones resueltas; producción requiere estado `aprobada` tras aceptación humana final. Un agente no puede aprobar una ADR (`docs/decisions/README.md`; AGENTS.md §3).
 

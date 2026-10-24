@@ -1,4 +1,71 @@
 ---
+## 24/10/2026 — Hardening transversal ADR-001: P11 global, O-3 y O-4 (local; sin commit)
+
+**Rama:** `chore/hardening-adr-001` desde `main` = `f01bad12dc253de94b4be305075a85f1b3d38cd2` · **Autorización humana explícita:** implementar sólo el hardening aprobado, con una migración local, pgTAP, mutation tests y verificaciones locales; por separado, una lectura read-only de catálogo en staging para O-4. **No autorizado y no realizado:** escrituras en staging (la migración no se aplicó allí), producción, push, PR, merge, deploy ni commit.
+
+### Decisiones humanas aplicadas
+- **P11 global:** `service_role` queda **denegado por defecto** en los objetos de negocio. Las excepciones son explícitas y nominadas; la única vigente es **SELECT sobre `public.productos`** (P11-productos). Sin EXECUTE sobre las RPC de negocio y sin MAINTAIN.
+- **O-3:** `postgres` conserva **SET ROLE `propietario_rpc`** pero **no hereda** sus privilegios (`INHERIT = false`).
+- **O-4:** se conservan `public.rls_auto_enable()` y el event trigger `ensure_rls`; se revoca EXECUTE a PUBLIC, `anon`, `authenticated` y `service_role`. Sin cambiar el comportamiento del trigger.
+- **Registro en ADR-001:** las tres decisiones quedaron registradas en ADR-001 §18.2 (y P11 en la tabla de decisiones resueltas de §18), con la evidencia de staging de O-4. P8–P10 y P12–P17 siguen pendientes; ADR-001 sigue **APROBADA PARA VALIDACIÓN CONTROLADA**; no autoriza producción.
+
+### Estado de staging (distinguir)
+- **Lectura read-only de staging para O-4: YA REALIZADA** (24/10/2026, ver abajo).
+- **Migración de hardening en staging: NO REALIZADA.**
+- **Validación post-migración en staging: PENDIENTE** (requiere autorización humana).
+
+### Evidencia read-only de staging que fundamentó O-4 (24/10/2026)
+Inspección de catálogo ejecutada por el humano con un script temporal fuera del repo (`BEGIN TRANSACTION READ ONLY … ROLLBACK`; el wrapper abortaba si la conexión no correspondía al ref). Salida revisada: sin URL, credenciales ni tokens.
+- Proyecto `rtsncntppghdynzhezzg`; PostgreSQL 17.11; `transaction_read_only = on` (el `default_transaction_read_only` de la sesión quedó en `off` porque la opción de conexión no se aplicó; la transacción sí fue read-only); terminada con `ROLLBACK`; exit 0; **cero escrituras**. 6 migraciones, incluida `20261024180000`.
+- `public.rls_auto_enable()`: owner `postgres`, `SECURITY DEFINER`, `search_path=pg_catalog`, retorno `event_trigger`; ACL `{=X/postgres, postgres=X/postgres, anon=X/postgres, authenticated=X/postgres, service_role=X/postgres}`: EXECUTE **explícito** (entradas directas) para PUBLIC, `anon`, `authenticated` y `service_role`; `propietario_rpc` lo obtiene vía PUBLIC. El cuerpo habilita RLS en tablas nuevas de `public` (`CREATE TABLE`, `CREATE TABLE AS`, `SELECT INTO`) y registra en LOG.
+- `ensure_rls`: owner `postgres`, habilitado (`O`), `ddl_command_end`, tags `CREATE TABLE` / `CREATE TABLE AS` / `SELECT INTO`, función `rls_auto_enable()`; es la única dependencia de event trigger y ningún trigger de tabla la usa.
+- Default privileges de funciones: `postgres` (global y `public`) sólo `postgres=X`; `supabase_admin` en `public` da X a `anon`, `authenticated` y `service_role` (no explica esta ACL, cuyo grantor es `postgres`). `anon` y `authenticated` tienen USAGE sobre `public`: condición de los lints 0028/0029.
+- **Producción no tocada.**
+
+### Migración `20261024232059_hardening_adr001_p11_o3_o4.sql`
+- **P11:** `revoke all` (incluye MAINTAIN) a `service_role` sobre `empresas`, `perfiles`, `productos`, `camiones` y `clientes`; `grant select` sobre `productos`; `revoke all` a `service_role` sobre las 20 firmas de negocio (las 10 de `privado` con `set role propietario_rpc`: sin INHERIT, un REVOKE de `postgres` sobre funciones de `propietario_rpc` no revoca nada y sólo emite WARNING).
+- **O-3:** `grant propietario_rpc to postgres with inherit false, set true` (modifica la fila con grantor `postgres` de `20261023140000`; la fila ADMIN que crea PostgreSQL, grantor `supabase_admin`, no se toca).
+- **O-4:** si `public.rls_auto_enable()` existe, `revoke execute … from public, anon, authenticated, service_role`; si no existe (local), no hace nada. No borra ni modifica la función ni el trigger.
+- **Fail-closed:** bloques finales que abortan la migración si O-3, P11 u O-4 no quedaron en el estado aprobado (por ejemplo, si `rls_auto_enable()` tuviera otro owner y el REVOKE no surtiera efecto). La verificación de funciones de `public` se limita a las 10 fachadas nombradas, para no fallar por funciones de plataforma.
+- Idempotente; exige `current_user = postgres`.
+
+### Evidencia técnica obtenida en local (transacciones revertidas)
+- `postgres` puede pasar su membresía a SET/sin INHERIT; después `pg_has_role(…, USAGE) = f`, `SET = t`, y `ALTER FUNCTION … OWNER TO propietario_rpc` sigue funcionando (con CREATE temporal sobre `privado`).
+- `postgres` conserva EXECUTE efectivo sobre las implementaciones privadas, pero **vía su membresía en `authenticated`** (gestionada por la plataforma), no vía `propietario_rpc`.
+- **Event triggers:** un rol sin EXECUTE sobre la función dispara igual el event trigger y la función corre como su owner (SECURITY DEFINER): el disparo no chequea EXECUTE. Una función `event_trigger` no puede invocarse directamente (`0A000`, «trigger functions can only be called as triggers»).
+
+### Tests
+- **Nuevo** `supabase/tests/hardening_adr001.test.sql` (49 aserciones): P11 por catálogo y por comportamiento (`set local role service_role`: 42501 en `empresas`/`perfiles`/`camiones`/`clientes`, SELECT de `productos` permitido, sin INSERT/UPDATE ni RPC); O-3 (fila SET/sin INHERIT, `pg_has_role`, sin EXECUTE heredado sobre un auxiliar, sin actuar como owner sin SET ROLE, owners de `privado`, SET ROLE y ALTER OWNER posibles, ningún rol de la Data API alcanza `propietario_rpc`); runtime de las tres fachadas y PT403 del vendedor; O-4: 8 aserciones condicionales (en local salen como **SKIP** explícito, no como PASS), coherencia función/trigger, invariante «ninguna DEFINER de `public` ejecutable por PUBLIC/anon/authenticated/service_role» y una réplica local que prueba que el trigger se dispara sin EXECUTE.
+- **`grants_default_privileges.test.sql`:** la matriz deja de dejar sin evaluar a `service_role` sobre `empresas`/`perfiles` y suma MAINTAIN (plan sin cambios, 32).
+- **`productos_catalogo.test.sql`:** la comparación `privado.usuario_actual()` vs `auth.uid()` llamaba a `usuario_actual()` como `postgres` y dependía del EXECUTE heredado (consecuencia directa de O-3). Ahora `auth.uid()` se evalúa como `postgres` y `usuario_actual()` como `propietario_rpc` (su owner); mismos cuatro casos (plan sin cambios, 125).
+
+### Verificación (local)
+| Verificación | Resultado |
+|---|---|
+| `git diff --check` | exit 0 |
+| `npx supabase db reset` | OK, 7 migraciones + seed |
+| `npx supabase test db` | **PASS, 556/556** en 6 archivos (hardening 49 con 8 SKIP, clientes 183, productos 125, camiones 112, auth 55, grants 32) |
+| `npx supabase db lint` | «No schema errors found» |
+| `npx supabase db advisors --local` | «No issues found» |
+| `npm run typecheck` / `npm run lint` | exit 0 / exit 0 |
+| `npm test` | 25 archivos / 805 tests |
+| `npx playwright test` | 76/76 |
+| `npm run build` | exit 0 |
+
+**Mutation tests** (arnés ad hoc no versionado; cada mutación dentro de la transacción del test y revertida; sobre `hardening_adr001` + `grants_default_privileges`). Control: 81 `ok`, 0 `not ok`, 8 SKIP. Detectadas: INSERT de `service_role` en `empresas` → 4; MAINTAIN en `clientes` → 3; SELECT en `camiones` → 5; EXECUTE sobre `crear_cliente` → 4; INHERIT = true → 5; réplica de `rls_auto_enable` con EXECUTE a `anon` → 3; owner de `privado.crear_cliente` cambiado a `postgres` → 7. Sin falsos positivos: réplica endurecida → 0 `not ok` y 0 SKIP; réplica sin endurecer + el bloque O-4 tomado textualmente de la migración → 0 `not ok`. Después, `supabase test db` 556/556.
+
+### Riesgos y pendientes
+- **Migraciones futuras:** sin INHERIT, `postgres` no puede `CREATE OR REPLACE`, `ALTER` ni `DROP` funciones de `propietario_rpc` sin `set role propietario_rpc` (y CREATE temporal sobre `privado`). Las migraciones que modifiquen implementaciones existentes deben usar ese patrón.
+- **O-4 en staging:** las aserciones condicionales no corren en staging (pgTAP es local); sus valores esperados (owner `postgres`, `search_path=pg_catalog`, `ensure_rls` habilitado) coinciden con la lectura read-only del 24/10. Si al aplicar el estado difiriera y el REVOKE no surtiera efecto, la migración aborta (fail-closed). La plataforma podría volver a conceder EXECUTE si se reconfigura la opción: repetir advisors después de aplicar.
+- **Staging:** al aplicar, verificar por catálogo P11/O-3/O-4, advisors sin 0028/0029 y repetir los runners Data API de productos, camiones y clientes.
+- **Producción bloqueada.** Superficie sensible (grants, `service_role`, roles, membresía, SECURITY DEFINER, RLS): **corresponde security review** y auditoría independiente del hash que se commitee.
+
+### Desviación de proceso
+El preámbulo formal de `AGENTS.md` §1.3 no se presentó antes de modificar archivos en esta tarea; el diagnóstico read-only previo contenía la información equivalente (objetivo, Blueprint, ADR-001, estado, fuera de alcance, decisiones y plan). Se detectó antes del commit y no afectó permisos, staging ni producción. En el siguiente slice el preámbulo se presenta antes del primer cambio.
+
+**STAGING WRITES: NONE (sólo la lectura read-only de O-4) · PRODUCTION: NOT TOUCHED · REMOTE ACTIONS: NONE (de Claude) · SECRETS EXPOSED: NO.**
+
+---
 ## 24/10/2026 — Cierre de staging: catálogo de clientes (validación controlada) — PASS
 
 **Entorno:** staging, project ref `rtsncntppghdynzhezzg` · **Código:** `main` = `06ff42309d95a59ca306fe796df1e012c062ee19` (merge del PR #15) · **Commit funcional auditado:** `c8e6e770753b4907fa9dbcf52e3f4aa70990b847` · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y ejecutar esta validación con fixtures controlados y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, migraciones nuevas, cambios de código, commit, push, PR, merge ni deploy en la validación. Esta entrada complementa la del slice («Slice Etapa 1: catálogo de clientes»), cuya línea «STAGING: NOT TOUCHED» refleja el momento de aquella entrada y queda superada por ésta **sólo en cuanto al estado de staging**.

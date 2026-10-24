@@ -35,12 +35,13 @@ Claude `/security-review` es **opcional/pendiente**: la obligación es la revisi
 ## Decisiones y alcance
 
 - No conviertas **ADR-001** en `aprobada` productivamente ni cambies su estado: está **APROBADA PARA VALIDACIÓN CONTROLADA**.
-- No resuelvas por cuenta propia los puntos **P8–P17** de ADR-001. P18 sigue como decisión futura separada; P1/P19/P20, P2–P4 y P5–P7 ya fueron resueltas por decisión humana.
+- No resuelvas por cuenta propia los puntos **P8–P10 y P12–P17** de ADR-001. P18 sigue como decisión futura separada; P1/P19/P20, P2–P4, P5–P7 y P11 (esta última, para validación controlada) ya fueron resueltas por decisión humana.
 - **No introduzcas reglas funcionales nuevas**: si una regla del Blueprint parece incorrecta, se propone una decisión en `docs/decisions/` con estado `propuesta` (AGENTS.md §6.5).
 - Recordá el propósito de Fase 1: controlar qué mercadería sale en cada camión, qué se vende, qué vuelve y las diferencias de mercadería y dinero por camión, jornada y vendedor. Los roles vigentes son dueño, encargado y vendedor/piloto; no inventes otros.
 - No sobrearquitectes: no agregues SaaS genérico, workspaces, organizaciones gestionables, suscripciones, planes, invitaciones, selector multiempresa, múltiples membresías, microservicios, event bus ni infraestructura adicional sin una necesidad del Blueprint/PRD y una decisión humana explícita. `empresa_id` no convierte el producto en una plataforma SaaS.
 - P5–P7 (decisión humana del 22/10/2026, ADR-001 §18): un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario. No agregues tabla de membresías, tabla `roles`, múltiples empresas por usuario ni selector de empresa.
 - P2–P4 (decisión humana del 23/10/2026, ADR-001 §7 y §18; `AGENTS.md` §4.4): `public` expuesto y `privado` no expuesto; rol `propietario_rpc` sólo para funciones privilegiadas privadas; tablas del owner de migraciones con RLS obligatoria y sin `FORCE` global. No crees `privado` ni `propietario_rpc` hasta que exista el primer objeto que los necesite, y no agregues `FORCE ROW LEVEL SECURITY` sin una justificación y una prueba específicas.
+- P11, O-3 y O-4 (decisión humana del 24/10/2026, ADR-001 §18.2; `AGENTS.md` §4.5): `service_role` **denegado por defecto** sobre objetos de negocio; la única excepción vigente es `SELECT` sobre `public.productos`. No generalices excepciones de `service_role` ni le concedas privilegios nuevos sin una excepción nominada y aprobada por el humano. `postgres` conserva `SET ROLE propietario_rpc` sin `INHERIT`: para actuar como owner técnico de funciones de `privado`, usá `SET ROLE propietario_rpc` explícitamente. `public.rls_auto_enable()` y `ensure_rls` se conservan sin `EXECUTE` para PUBLIC, `anon`, `authenticated` ni `service_role`.
 
 ## Permisos y acciones
 
