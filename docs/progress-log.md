@@ -1,4 +1,214 @@
 ---
+## 23/10/2026 — Gate final de staging, retoma: pruebas funcionales de M-04 (Gates 3–18) — ENTRADA DEFINITIVA VIGENTE
+
+> **Estado vigente de la validación de staging: M-04 DEFINITIVO = PASS.** Esta es la entrada definitiva. La entrada «Gate final de staging: default privileges + M-04 funcional (PARCIAL)» que sigue más abajo es **histórica y supersedida** por esta.
+
+### Resumen final M-04 (commit funcional `5abdc57023513afeb79424193b53cd7b16b3f03e`)
+
+| Criterio | Resultado |
+|---|---|
+| DEFAULT PRIVILEGES BEHAVIOR (Gate 2, entrada histórica) | PASS |
+| DIRECT REST WRITES (Gate 7) | PASS |
+| RPC ROLE MATRIX (Gate 8) | PASS |
+| AISLAMIENTO `empresa_id` (Gate 9) | PASS |
+| PRODUCT VALIDATIONS (Gate 10) | PASS |
+| IDENTIDAD `auth.uid` / `usuario_actual` (Gate 11) | PASS |
+| PRIVATE SCHEMA (Gate 12) | PASS |
+| GRAPHQL BYPASS (Gate 13) | PASS, condicionado a `pg_graphql` deshabilitada |
+| SERVICE_ROLE HTTP (Gate 14) | PASS |
+| ATOMICIDAD (Gate 15) | PASS |
+| CLEANUP (Gate 16) | PASS |
+| POST-CLEANUP (Gate 17) | PASS |
+| **M-04 DEFINITIVO** | **PASS** |
+
+**STAGING: VALIDADO · PRODUCCIÓN: NO TOCADA · MERGE: NO REALIZADO · DEPLOY: NO REALIZADO.**
+
+**Default privileges:** la prueba material en staging se ejecutó con autorización humana (tabla, secuencia y función en `public`, función en `privado`, creadas por `postgres`; sin privilegios inesperados para `anon`/`authenticated`/`service_role`; funciones sin EXECUTE para PUBLIC y los tres roles; `ensure_rls` activó RLS en la tabla nueva; los cuatro objetos se eliminaron y quedaron 0 objetos temporales). Detalle en el Gate 2 de la entrada histórica. **No queda ninguna prueba de default privileges pendiente.**
+
+**Security review independiente del commit `5abdc57`:** OpenCode: APPROVED (0 BLOCKERS, 0 SECURITY, 0 CORRECTNESS). Codex: APPROVED (0 BLOCKERS, 0 SECURITY, 0 CORRECTNESS). El detalle vive en `AUDITORIA_5abdc57.md` (sin trackear); no se copia acá.
+
+**Riesgos residuales (pendientes, no bloqueantes; no se resuelven en esta tarea):** O-3 (membresía `postgres` → `propietario_rpc`); O-4 (`public.rls_auto_enable()`); P11 global (privilegios de `service_role` sobre `empresas`/`perfiles`, distintos entre local y staging); `MAINTAIN` de `service_role`; `PT401`/`PT500` cubiertos sólo por pgTAP; el `22P02` de PostgREST refleja el input; `pg_graphql` hoy deshabilitada (repetir Gate 13 si se habilita); advisors de Supabase pendientes.
+
+La secret key temporal `m04-validation` fue sólo un instrumento de validación y no forma parte del sistema; ningún valor de key se registra en este log.
+
+**Entorno:** staging, project ref `rtsn…hezzg` (URL verificada exacta; `TEST_DATABASE_URL` por pooler con usuario `postgres.<ref>` del mismo proyecto) · **HEAD:** `5abdc57023513afeb79424193b53cd7b16b3f03e` · **Autorización humana explícita:** fixtures, usuarios Auth de prueba, pruebas REST/RPC/Auth/GraphQL reales, una segunda empresa sólo como fixture adversarial de aislamiento por `empresa_id`, cleanup y esta documentación. **Producción no tocada.** Sin `db push`, migraciones, migration repair, cambios de configuración de Data API/Auth/GraphQL, commit, merge ni deploy. Gates 1 y 2 y el cleanup de `__m04_tmp_*` ya estaban en PASS y no se repitieron.
+
+### Gate 3–4 — Fixtures y usuarios Auth: PASS
+
+- Previo: 0 empresas, perfiles, productos, usuarios, identities, sesiones y filas de `audit_log_entries`; 0 fixtures `m04_staging_`; sin triggers sobre `auth.users`.
+- Creados (SQL administrativo en una transacción, con la misma forma que `supabase/seed.sql`: `auth.users` + `auth.identities` con hash `crypt`/`gen_salt('bf')` de `extensions`; las 19 columnas existían en el esquema real): empresas `m04_staging_empresa_a` y `m04_staging_empresa_b` (B sólo como fixture adversarial de aislamiento); usuarios `m04_staging_dueno_a`, `_encargado_a`, `_vendedor_a` (con `user_metadata.rol = "dueno"` deliberadamente engañoso), `_inactivo_a` (perfil `activo = false`), `_sinperfil` (cuenta Auth sin perfil) y `_dueno_b`. Roles reales del CHECK: `dueno`, `encargado`, `vendedor_piloto`. Contraseña aleatoria por corrida, nunca impresa y borrada al final. No se usó `user_metadata` para autorizar.
+- Gate 6: los 6 logins por `/auth/v1/token` dieron HTTP 200 y `sub` del JWT = `auth.users.id` en los 6.
+
+### Gate 5 — Productos base sólo por RPC: PASS
+
+`crear_producto` por JWT real: A1 (dueño A, código `m04_staging_A1`), A2 (encargado A, sin código) y B1 (dueño B). `empresa_id` correcto en los tres y `creado_por` = `sub` del llamador. **Ninguna firma recibe `empresa_id`**: lo deriva el servidor del perfil (evidencia positiva de DE-11 modificada).
+
+### Gate 7 — Escrituras REST directas a `/rest/v1/productos`: PASS
+
+`anon`: POST/PATCH/DELETE → HTTP 401 `42501`. `authenticated` (dueño A): POST/PATCH (precio y activo)/DELETE → HTTP 403 `42501`. `anon` SELECT → 401 `42501`. Hash de la tabla (md5 de todas las filas) idéntico antes y después. Dueño A lee sólo productos y empresa de A.
+
+### Gate 8 — Matriz RPC por rol: PASS
+
+| Actor | crear | actualizar | cambiar_estado |
+|---|---|---|---|
+| dueño A | 200 | 204 | 204 |
+| encargado A | 200 | 204 | 204 |
+| vendedor/piloto A (metadata `rol=dueno`) | 403 `PT403` | 403 `PT403` | 403 `PT403` |
+| perfil inactivo A | 403 `PT403` | 403 `PT403` | 403 `PT403` |
+| Auth sin perfil | 403 `PT403` | 403 `PT403` | 403 `PT403` |
+| anon | 401 `42501` | 401 `42501` | 401 `42501` |
+
+Los denegados no modificaron la tabla (hash idéntico). Lectura por Data API: dueño, encargado y vendedor ven los 4 productos de A; inactivo y sin perfil ven 0. `PT401` (sin `sub`) no es alcanzable por HTTP con JWT válido y no se probó; `PT500` tampoco se provocó.
+
+### Gate 9 — Aislamiento por `empresa_id` (B es sólo fixture adversarial): PASS
+
+Con JWT de A sobre B1: `actualizar_producto` y `cambiar_estado_producto` → 404 `PT404` (dueño y encargado); lectura por id y por `empresa_id=B` → 200 con 0 filas; PATCH directo → 403. Parámetro extra `p_empresa_id` (B) → 404 `PGRST202` (la firma no lo admite); header `X-Empresa-Id: B` ignorado (el producto quedó en A). Inverso (dueño B sobre A1) → 404 `PT404`. Por SQL: B1 y A1 idénticos fila a fila y B1 sigue en B. Mismo código de A1 creado en B: 200 (consistente con `unique (empresa_id, codigo)` ya existente; no se derivó ninguna regla nueva).
+
+### Gate 10 — Validaciones de producto por RPC: PASS (con una corrección de mi script)
+
+- Precio: 20, 20.90, 20.990 (persistido 20.99, DE-15) → 200; 20.999, -1, `"NaN"`, `"Infinity"`, `"-Infinity"`, `null` y 10^12 → 400 `PT400 producto_precio_invalido`.
+- Código: se normaliza con `btrim`; `""`, `"   "` y `null` se guardan como NULL; duplicado (también con espacios) → 409 `PT409`.
+- Nombre vacío/espacios, categoría, forma y combinaciones inválidas → 400 `PT400` con mensaje estable. Stock mínimo -1 y `null` → `PT400`; 1.5 → 400 `22P02` generado por PostgREST al castear el parámetro (no por nuestra función; el mensaje repite el valor enviado por el cliente).
+- Actualizar: seis fallos (precio, nombre, stock, código duplicado) dejaron A2 intacto; 20.990 válido → 204. `categoria`/`forma_venta` no son editables (`p_categoria` → `PGRST202`; PATCH directo → 403).
+- **Corrección:** en la primera pasada, 5 casos de éxito dieron `409` porque mi script reutilizó el código `V1` (el contador no avanzaba en un subshell). Fue un error de la prueba, no del sistema. Se repitieron con códigos únicos y dieron 200 con delta de +5 filas y valores correctos.
+- Cada caso fallido verificó por SQL que el conteo de filas no cambió (atomicidad).
+
+### Gate 11 — Identidad: PASS
+
+Con JWT reales: `sub` = `auth.users.id` en los 6. Con los claims reales del JWT en la sesión SQL: `auth.uid() = privado.usuario_actual()` → `true` (dueño, vendedor, sin perfil). Empresa, rol y `activo` salen de `perfiles`. `creado_por` de A1, A2 y B1 coincide con el `sub` de cada llamador. El JWT del vendedor lleva `user_metadata.rol = "dueno"` y aun así las tres RPC le dieron `PT403`: `user_metadata` no participa en la autorización. `privado.usuario_actual()` no es invocable por HTTP, así que la comparación directa se hizo por SQL.
+
+### Gate 12 — Esquema `privado` por Data API: PASS
+
+`anon` y `authenticated`: `Accept-Profile: privado` y `Content-Profile: privado` (GET productos y RPC `usuario_actual`, `crear_producto`, `exigir_gestor_productos`) → 406 `PGRST106 Invalid schema: privado`. Sin perfil, `usuario_actual`, `exigir_gestor_productos` y `validar_campos_producto` → 404 `PGRST202` en `public`. `pg_catalog` también 406. La raíz OpenAPI responde 401 con la publishable key, por lo que no sirvió para listar esquemas.
+
+### Gate 13 — GraphQL: PASS (condicionado a que `pg_graphql` siga sin habilitar)
+
+`pg_graphql` no está instalada; `graphql_public.graphql` es el placeholder. `/graphql/v1` (anon y authenticated): introspección y una mutación inventada → HTTP 200 con `pg_graphql extension is not enabled.`; GET → 404 `PGRST202`. 0 productos creados. **Si en el futuro se habilita `pg_graphql`, este gate debe repetirse.**
+
+### Gate 14 — `service_role` HTTP: PASS
+
+Precondiciones verificadas sin imprimir secretos: `STAGING_SUPABASE_URL` exacta (`rtsn…hezzg`), `STAGING_SECRET_KEY` definida con formato `sb_secret_*` y `TEST_DATABASE_URL` del mismo project ref. La key se envió **sólo** como `apikey: <key>` (sin `Authorization: Bearer`). No se recrearon fixtures: staging empezó y terminó con 0 empresas, 0 perfiles, 0 productos y 0 usuarios Auth.
+
+| Prueba | Resultado |
+|---|---|
+| `GET /rest/v1/productos` | 200 `[]` (SELECT funciona) |
+| `POST` / `PATCH` / `DELETE /rest/v1/productos` | 403 `42501 permission denied for table productos` (los tres) |
+| RPC `crear_producto`, `actualizar_producto`, `cambiar_estado_producto` | 403 `42501 permission denied for function …` (las tres) |
+| `Accept-Profile: privado` | 406 `PGRST106 Invalid schema: privado` |
+
+Semántica observada: una secret key `sb_secret_*` mapea al rol Postgres `service_role`, que **no** tiene BYPASSRLS efectivo sobre privilegios de tabla/función: se rige por los grants (sólo SELECT en `productos`, sin EXECUTE en las fachadas). Verificación SQL con `TEST_DATABASE_URL` antes/después: `public.productos` sigue con 0 filas (md5 `vacio`), y los hashes de ACL de tablas, ACL de funciones (`public` y `privado`) y `pg_default_acl` son **idénticos** (`diff` vacío); `service_role` sigue con sólo `SELECT` sobre `productos`. La key no se imprimió ni se guardó en archivos.
+
+### Gate 15 — Atomicidad y efectos: PASS
+
+Todo caso exitoso creó exactamente la fila esperada (17 productos al final: 15 en A, 2 en B) y todo caso fallido no dejó filas parciales. Sin códigos duplicados por empresa, sin precios con más de 2 decimales o negativos, sin combinaciones inválidas, sin productos con nombres de pruebas fallidas y sin productos fuera de las empresas fixture. No se tocaron stock ni libros.
+
+### Gate 16 — Cleanup: PASS
+
+`cleanup.sh` borró 17 productos, 5 perfiles, 6 usuarios Auth (cascada a identities, sesiones y refresh tokens) y 2 empresas. Verificado: 0 empresas, perfiles, productos, usuarios, identities, sesiones, refresh tokens y filas de `audit_log_entries` `m04_staging_`; 0 objetos temporales `m04`; los totales vuelven al baseline (0/0/0/0). Credenciales y JWT borrados del scratchpad.
+
+### Gate 17 — Post-cleanup: PASS
+
+Foto estructural read-only antes y después: **idéntica** (`diff` vacío). Cubre migration history (exactamente 4), 12 funciones de `public`/`privado` con owner, `SECURITY DEFINER`, `search_path`, ACL y `md5(prosrc)`, las 7 policies (hash), RLS activa sin FORCE, ACL de tablas (grants O-1/O-2), `pg_default_acl`, ACL de `privado` (0 relaciones), atributos de `propietario_rpc`, 0 triggers/rules en `public` y `pg_graphql` sin instalar.
+
+### Gate 18 — M-04 DEFINITIVO: **PASS**
+
+Con el Gate 14 en PASS (SELECT permitido; POST/PATCH/DELETE y las 3 RPC rechazados para `service_role` por HTTP) y todos los demás gates en PASS, la lista original de pruebas de M-04 queda cubierta con evidencia material. No hay bypass. La decisión (a)/(b) que había quedado pendiente se resolvió por la opción (b) (prueba con la secret key de staging).
+
+### Observaciones
+
+- El 22P02 de `stock_minimo` no entero repite el valor enviado; es un mensaje de PostgREST, no de nuestras funciones. No se cambia nada.
+- `PT401` y `PT500` no se alcanzan por HTTP con JWT válido; siguen cubiertos sólo por pgTAP local.
+- La verificación de Auth no habilitó signup ni cambió configuración; `/auth/v1/settings` indica `disable_signup = false`, que es el estado preexistente.
+- La superficie sigue siendo sensible (Supabase, RLS, RPC, `SECURITY DEFINER`, grants, `service_role`): estas pruebas fueron evidencia para el **security review**, ya resuelto por OpenCode y Codex (APPROVED, ver resumen arriba). Sigue pendiente la decisión humana de commit documental, merge y deploy.
+
+---
+## 23/10/2026 — [HISTÓRICA / SUPERSEDIDA] Gate final de staging: default privileges + M-04 funcional (PARCIAL)
+
+> **SUPERSEDIDA.** Esta entrada se conserva sólo por trazabilidad. Su estado «M-04 INCONCLUSO» y «Gates 3–16 no ejecutados» **ya no rige**: los Gates 3–18 se ejecutaron después y están en la entrada definitiva inmediatamente anterior («Gates 3–18 — ENTRADA DEFINITIVA VIGENTE»), con **M-04 DEFINITIVO = PASS**. Los Gates 1, 2 y 17 parcial de esta entrada siguen siendo válidos y son parte de la evidencia final.
+
+**Entorno:** staging, project ref `rtsn…hezzg` · **HEAD:** `5abdc57023513afeb79424193b53cd7b16b3f03e` (sólo cambia localmente este archivo; `AUDITORIA_5abdc57.md` sin trackear) · **Autorización humana explícita:** objetos temporales para default privileges y fixtures/pruebas funcionales de M-04 en staging, con limpieza posterior. **Producción no tocada.** Sin `db push`, migration repair, commit, merge ni deploy.
+
+### Gate 1 — Identidad y baseline: PASS
+
+- `TEST_DATABASE_URL` apunta al pooler con usuario `postgres.<ref>` igual a `SUPABASE_PROJECT_REF`. `current_database = postgres` y `current_user = postgres`.
+- Migration history: exactamente las 4 migraciones, en orden.
+- **Baseline de datos:** 0 usuarios en `auth.users`, 0 empresas, 0 perfiles, 0 productos, 0 filas en `auth.audit_log_entries` y 0 objetos `__m04_tmp_*`. Staging no contiene datos reales.
+
+### Gate 2 — Comportamiento real de default privileges: PASS
+
+Se crearon como `postgres`, en una transacción confirmada: `public.__m04_tmp_tabla`, `public.__m04_tmp_seq`, `public.__m04_tmp_fn()` y `privado.__m04_tmp_fn()`. Se verificaron desde otra sesión:
+
+- **Tabla:** `relacl` NULL, que equivale al default de owner: sólo `postgres`. `anon`, `authenticated` y `service_role` no tienen SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ni MAINTAIN, y no hay privilegios por columna. `postgres` tiene todos.
+- **Secuencia:** `relacl` NULL. Los tres roles no tienen USAGE, SELECT ni UPDATE; `postgres` sí.
+- **Funciones en `public` y `privado`:** `proacl = {postgres=X/postgres}`. PUBLIC, `anon`, `authenticated` y `service_role` no tienen EXECUTE; `postgres` sí.
+- Dato observado: el event trigger de plataforma `ensure_rls` (`rls_auto_enable`) activó RLS en la tabla nueva.
+- Los cuatro objetos se borraron con `DROP` explícito. Verificado: 0 relaciones y 0 funciones `__m04_tmp_*`.
+
+### Gate 17 parcial — integridad después del Gate 2: PASS
+
+Se repitió toda la consulta de la validación post-hardening (migraciones, grants O-1/O-2, `pg_default_acl`, Topología D, RLS, `privado`, bypass): salida idéntica. Los hashes de `prosrc` de las 11 funciones y de las 7 policies son idénticos al baseline. Siguen 0 usuarios, empresas, perfiles, productos y objetos temporales.
+
+### [Histórico] Gates 3–16 — no ejecutados en esta tanda (bloqueo de credencial; ejecutados después)
+
+Las pruebas HTTP necesitan la publishable/anon key de staging, para obtener JWT reales por `/auth/v1/token` y llamar a `/rest/v1` y `/graphql/v1`.
+- La key no está en el entorno de la sesión, y `.env*` no se lee por regla.
+- El humano indicó que había creado un archivo con la key, pero no existe en el filesystem visible para la sesión: no está ni en el scratchpad, ni en `/home/tuculandia/m04_staging_keys.sh`, ni en una búsqueda por nombre en todo el disco.
+- Por eso **no se crearon fixtures, usuarios Auth ni productos**. Sin JWT reales no habría prueba funcional, y crear datos sin poder probarlos sólo agregaba riesgo de residuos.
+- **Cleanup:** no hubo nada que limpiar además de los objetos temporales del Gate 2, que ya están eliminados.
+
+### Estado (histórico, supersedido: M-04 DEFINITIVO = PASS en la entrada definitiva)
+
+- ~~M-04 DEFINITIVO: INCONCLUSO~~ — al cierre de esta tanda faltaban las pruebas materiales con JWT reales y la Data API: escrituras REST directas, matriz de roles por RPC, aislamiento por `empresa_id`, validaciones de producto, `usuario_actual()`/`auth.uid()`, `Accept-Profile: privado`, GraphQL y `service_role` HTTP (luego ejecutadas y en PASS).
+- **Para retomar (ya cumplido):** la publishable key en un archivo legible por la sesión, o en una variable de entorno del perfil de shell. La service_role key es opcional y sólo se usa para el Gate 14.
+
+---
+## 23/10/2026 — Validación post-hardening en staging (solo lectura)
+
+**Entorno:** staging, project ref `rtsn…hezzg` · **Commit auditado:** `5abdc57023513afeb79424193b53cd7b16b3f03e` (OpenCode y Codex: APPROVED) · **Alcance:** verificación **read-only** de la migración `20261024010921_hardening_grants_default_privileges.sql`, aplicada manualmente en staging por el humano con autorización explícita. Claude **no** ejecutó `db push` ni ninguna escritura. **Producción no tocada.** Sin commit, merge ni deploy.
+
+### Cómo se obtuvo la evidencia
+
+`psql` contra el pooler de staging (modo sesión, usuario `postgres`), todo dentro de `BEGIN TRANSACTION READ ONLY … ROLLBACK`, con `transaction_read_only = on` comprobado en cada tanda. Sólo `SELECT` sobre catálogo. No se crearon objetos de prueba.
+
+### Resultados
+
+- **Migration history: PASS.** `supabase_migrations.schema_migrations` tiene exactamente cuatro filas y en orden: `20261022120000`, `20261023120000`, `20261023140000` y `20261024010921 hardening_grants_default_privileges`.
+- **O-1: PASS.** `service_role` sobre `public.productos`: SELECT `t`; INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES y TRIGGER `f`. ACL `service_role=rm/postgres`. **MAINTAIN** (`m`) presente: está en la ACL de la tabla con grantor `postgres` (viene del default de creación), no de `pg_maintain` (`service_role` no es miembro de ningún rol). Queda fuera del alcance del hardening, como estaba documentado.
+- **O-2: PASS.** `service_role` sobre `empresas` y `perfiles`: TRUNCATE, REFERENCES y TRIGGER `f`. **Estado observado, sin decidir P11 global:** `service_role` tampoco tiene SELECT, INSERT, UPDATE ni DELETE sobre `empresas` ni `perfiles` (ACL `service_role=m/postgres`, sólo MAINTAIN). Sigue siendo distinto de local (`arwd`).
+- **Grants del resto de roles:** `anon` no tiene ningún privilegio sobre las tres tablas; `authenticated` sólo tiene SELECT; no hay privilegios por columna para `anon`, `authenticated`, `service_role` ni PUBLIC.
+- **Privilegios por defecto (`pg_default_acl`, rol creador `postgres`): PASS.**
+  - `public`, tablas: `{postgres=arwdDxtm/postgres}`. Ni `anon`, ni `authenticated`, ni `service_role`.
+  - `public`, secuencias: `{postgres=rwU/postgres}`. Ninguno de los tres.
+  - `public`, funciones: `{postgres=X/postgres}`. Ninguno de los tres.
+  - **Global** (sin esquema), funciones: `{postgres=X/postgres}`. Cuando existe la entrada global, reemplaza el default de fábrica (que incluye `=X` a PUBLIC): las funciones nuevas que cree `postgres` en cualquier esquema sin entrada propia (incluido `privado`) no dan EXECUTE a PUBLIC. En `public` la ACL efectiva es la global más la del esquema, y ninguna incluye PUBLIC, `anon`, `authenticated` ni `service_role`.
+  - **Alcance exacto:** estas entradas aplican sólo a objetos **creados por `postgres`**. Fuera del alcance de la migración y sin cambios: (a) `postgres` en `storage` sigue dando `arwdDxtm`, `rwU` y `X` a `anon`, `authenticated` y `service_role`; (b) `supabase_admin` en `public` sigue dando `arwdDxtm`, `rwU` y `X` a los tres roles para los objetos que cree `supabase_admin` (no las migraciones); (c) las entradas de `supabase_admin` en `extensions`, `graphql`, `graphql_public` y `realtime`, y las de `supabase_auth_admin` en `auth`.
+- *(Supersedido: ejecutada y en PASS, ver Gate 2.)* **Prueba de comportamiento de los defaults: PENDIENTE** al momento de esta entrada. No se crearon tabla, secuencia ni función de prueba porque la ronda era read-only. El catálogo es consistente con el resultado esperado, y el comportamiento se probó en local (pgTAP `grants_default_privileges`), pero en staging no se demostró con objetos reales.
+- **Topología D: PASS, sin regresión.**
+  - Las 3 fachadas de `public` son `SECURITY INVOKER`, tienen owner `postgres` y `search_path=""`, y sólo `authenticated` tiene EXECUTE.
+  - Las 3 implementaciones de `privado` son `SECURITY DEFINER`, tienen owner `propietario_rpc` y `search_path=""`, y EXECUTE sólo para `authenticated` y `propietario_rpc`.
+  - Los 5 auxiliares son `SECURITY INVOKER` y sólo los ejecuta `propietario_rpc`.
+  - `md5(prosrc)` de las 11 funciones es **idéntico** al de la base local construida desde `5abdc57`.
+  - `propietario_rpc` sigue sin cambios: `NOLOGIN`, sin superuser, `CREATEROLE`, `CREATEDB`, `REPLICATION` ni `BYPASSRLS`. Membresía de `postgres`: SET + INHERIT (grantor `postgres`) y ADMIN (grantor `supabase_admin`). Es la observación O-3, sin cambios.
+- **RLS: PASS.** RLS activa en `empresas`, `perfiles` y `productos`, con `FORCE` desactivado en las tres. Siguen las mismas 7 policies, y el hash de nombre, comando, roles, `qual` y `with_check` es **idéntico** al de local.
+- **Esquema privado: PASS.** `privado` existe, tiene owner `postgres` y no contiene relaciones.
+  - ACL: `{postgres=UC, authenticated=U, propietario_rpc=U}`.
+  - `anon` y `service_role` no tienen USAGE. `authenticated` tiene sólo USAGE, sin CREATE, como requiere Topología D.
+  - Ninguna función privada es ejecutable por `anon`, `service_role` ni PUBLIC.
+- **Direct write bypass: PASS (estructural).** `anon`, `authenticated` y `service_role` no tienen privilegios de escritura, ni por tabla ni por columna, sobre las tres tablas. No hay triggers, rules, vistas ni secuencias en `public`/`privado`. No hay policies de escritura para los roles de la Data API. `pg_graphql` no está instalada y el esquema `graphql` no tiene objetos.
+
+### Observaciones (sin cambios; no resueltas acá)
+
+- **O-4 sigue abierta.** `public.rls_auto_enable()` es `SECURITY DEFINER`, tiene `search_path=pg_catalog` y da EXECUTE a PUBLIC, `anon`, `authenticated` y `service_role`. Es del proyecto, no de nuestras migraciones, y es anterior al hardening (los defaults sólo afectan objetos futuros). Devuelve `event_trigger`, así que no es invocable como RPC. Conviene revisarla con advisors.
+- MAINTAIN de `service_role` en las tres tablas (ver O-1/O-2).
+
+### Pendiente (histórico: la prueba de defaults y M-04 quedaron en PASS en la entrada definitiva; advisors siguen pendientes)
+
+- **Advisors de Supabase: PENDIENTE.** La Management API vuelve a responder 401 («JWT could not be decoded») con el token de la sesión.
+- *(Supersedido: ejecutada y en PASS, ver Gate 2.)* Prueba de comportamiento de los defaults en staging (crear y eliminar una tabla, una secuencia y una función de prueba). Es escritura y requiere autorización explícita.
+- *(Supersedido: M-04 DEFINITIVO = PASS.)* **M-04 DEFINITIVO: INCONCLUSO** al momento de esta entrada. La estructura es correcta, pero siguían pendientes las pruebas negativas con fixtures, JWT reales y la Data API de staging (lista de 10 casos en la entrada «Validación post-migración en staging»). **Fixtures remotos: PENDIENTES.**
+- Security review: la revisión por catálogo está hecha. El cierre formal sigue sujeto a la revisión humana.
+
+---
 ## 23/10/2026 — Hardening de grants y privilegios por defecto (O-1 / O-2)
 
 **Rama:** `feat/hardening-grants-default-privileges` · **Base:** `main` en `33bd6722c499082d9826f99a38f2cbc3d5774dd6` · **Estado:** commit local autorizado por decisión humana; sin push, merge ni deploy. **Staging NO tocado por este cambio** (la migración nueva no se aplicó fuera de la base local). **Producción NO tocada.** Requiere **security review** (grants, `ALTER DEFAULT PRIVILEGES`, `service_role`) y **auditoría independiente** del hash del commit.
@@ -62,7 +272,7 @@ Control sin mutación: 0 `not ok`. Cada mutación fue detectada: `TRUNCATE` a `s
 ### Riesgos y pendientes
 
 1. **Aplicar a staging** requiere autorización humana expresa (`supabase db push`); no se hizo. Tras aplicarlo, repetir la verificación de privilegios y el estado de `pg_default_acl` en staging.
-2. **M-04 DEFINITIVO sigue INCONCLUSO** hasta ejecutar las pruebas negativas con fixtures contra la Data API de staging (entrada siguiente, «Pendiente»).
+2. *(Supersedido: M-04 DEFINITIVO = PASS, ver entrada definitiva.)* M-04 DEFINITIVO seguía INCONCLUSO hasta ejecutar las pruebas negativas con fixtures contra la Data API de staging (entrada siguiente, «Pendiente»).
 3. Security review obligatoria (grants, defaults, `service_role`) y auditoría independiente del hash.
 4. Producción y migraciones remotas siguen bloqueadas.
 
@@ -94,10 +304,10 @@ Control sin mutación: 0 `not ok`. Cada mutación fue detectada: `TRUNCATE` a `s
 - **O-3.** `postgres` sigue siendo miembro de `propietario_rpc` con SET e INHERIT. Es lo que habilita ALTER OWNER y queda tras la migración.
 - **O-4.** `public.rls_auto_enable()` (`SECURITY DEFINER`, event trigger `ensure_rls`, owner `postgres`) es del proyecto, no de nuestras migraciones. Devuelve `event_trigger`, por lo que no es invocable como RPC; igual conviene revisarla con advisors.
 
-### Pendiente
+### Pendiente (histórico: los 10 casos de M-04 se ejecutaron después y están en PASS en la entrada definitiva; advisors siguen pendientes)
 
 - **Advisors de Supabase: PENDIENTE.** La Management API respondió 401 («JWT could not be decoded») con el token del entorno de la sesión; no se obtuvieron resultados.
-- **M-04 DEFINITIVO: INCONCLUSO.** La estructura es correcta, pero faltan pruebas negativas con fixtures que ejecuten mutaciones reales vía Data API: (1) `POST/PATCH/DELETE /rest/v1/productos` como `anon`, `authenticated` y `service_role` rechazados por permisos; (2) `/rest/v1/rpc/*` como `anon` rechazado; (3) acceso con `Accept-Profile`/`Content-Profile: privado` rechazado; (4) `/graphql/v1` sin mutaciones; (5) fachadas con dueño y encargado OK, con vendedor/piloto, perfil inactivo y sin perfil → `PT403`/`PT401`; (6) `actualizar_producto` y `cambiar_estado_producto` sobre producto de otra `empresa_id` → `PT404`; (7) precio con más de 2 decimales, negativo, NaN e Infinity → `producto_precio_invalido`; (8) código duplicado → `PT409`; categoría/forma de venta inválida o combinación incorrecta; (9) `empresa_id` nunca tomado del cliente; (10) con un JWT real de PostgREST, `privado.usuario_actual()` = `auth.uid()`. Requieren crear fixtures en staging, lo cual es escritura y necesita autorización explícita.
+- *(Supersedido: M-04 DEFINITIVO = PASS.)* **M-04 DEFINITIVO: INCONCLUSO** al momento de esta entrada. La estructura es correcta, pero faltaban pruebas negativas con fixtures que ejecuten mutaciones reales vía Data API: (1) `POST/PATCH/DELETE /rest/v1/productos` como `anon`, `authenticated` y `service_role` rechazados por permisos; (2) `/rest/v1/rpc/*` como `anon` rechazado; (3) acceso con `Accept-Profile`/`Content-Profile: privado` rechazado; (4) `/graphql/v1` sin mutaciones; (5) fachadas con dueño y encargado OK, con vendedor/piloto, perfil inactivo y sin perfil → `PT403`/`PT401`; (6) `actualizar_producto` y `cambiar_estado_producto` sobre producto de otra `empresa_id` → `PT404`; (7) precio con más de 2 decimales, negativo, NaN e Infinity → `producto_precio_invalido`; (8) código duplicado → `PT409`; categoría/forma de venta inválida o combinación incorrecta; (9) `empresa_id` nunca tomado del cliente; (10) con un JWT real de PostgREST, `privado.usuario_actual()` = `auth.uid()`. Requieren crear fixtures en staging, lo cual es escritura y necesita autorización explícita.
 
 ### Deuda de proceso
 
