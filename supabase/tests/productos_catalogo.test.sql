@@ -200,10 +200,13 @@ select is(
          where p.prosecdef
            and p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
          order by 1),
-  array['privado.actualizar_producto(uuid,text,text,numeric,integer)',
+  array['privado.actualizar_camion(uuid,text,text)',
+        'privado.actualizar_producto(uuid,text,text,numeric,integer)',
+        'privado.cambiar_estado_camion(uuid,boolean)',
         'privado.cambiar_estado_producto(uuid,boolean)',
+        'privado.crear_camion(text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)'],
-  'sólo las tres implementaciones privadas son SECURITY DEFINER');
+  'sólo las seis implementaciones privadas (productos y camiones) son SECURITY DEFINER');
 
 select is(
   (select count(*)::int from pg_proc p
@@ -289,6 +292,9 @@ select is(
   (select count(*)::int from pg_proc p
     where p.pronamespace = 'privado'::regnamespace
       and p.oid::regprocedure::text not in (select firma from firmas)
+      -- Las implementaciones del slice camiones las cubre camiones_catalogo.test.sql.
+      and p.proname not in ('crear_camion', 'actualizar_camion',
+                            'cambiar_estado_camion')
       and (has_function_privilege('authenticated', p.oid, 'execute')
            or has_function_privilege('anon', p.oid, 'execute')
            or p.proacl is null

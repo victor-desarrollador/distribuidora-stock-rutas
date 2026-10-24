@@ -12,12 +12,14 @@ const casos = [
     semilla: null,
   },
   {
+    // /camiones ya no usa el catálogo demo (lee Supabase); el catálogo demo
+    // dañado se sigue detectando en las pantallas operativas que lo usan.
     nombre: "camiones",
     clave: "distribuidora_camiones_demo_v4",
-    ruta: "/camiones",
+    ruta: "/jornadas",
     aviso: "Los datos de camiones guardados están dañados.",
-    accion: "Nuevo camión",
-    semilla: "Camión 01",
+    accion: "Nueva jornada",
+    semilla: null,
   },
   {
     nombre: "clientes",
