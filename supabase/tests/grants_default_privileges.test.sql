@@ -31,7 +31,8 @@ select t.tabla, r.rol, p.privilegio,
          and p.privilegio in ('TRUNCATE', 'REFERENCES', 'TRIGGER') then false
     else null
   end
-from (values ('public.empresas'), ('public.perfiles'), ('public.productos')) t(tabla),
+from (values ('public.empresas'), ('public.perfiles'), ('public.productos'),
+             ('public.camiones')) t(tabla),
      (values ('anon'), ('authenticated'), ('service_role')) r(rol),
      (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
              ('REFERENCES'), ('TRIGGER')) p(privilegio);
@@ -43,13 +44,13 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'anon' and esperado is not null
        and has_table_privilege('anon', tabla, privilegio) <> esperado$$,
-  'anon no tiene ningún privilegio de tabla sobre empresas, perfiles ni productos');
+  'anon no tiene ningún privilegio de tabla sobre empresas, perfiles, productos ni camiones');
 
 select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'authenticated' and esperado is not null
        and has_table_privilege('authenticated', tabla, privilegio) <> esperado$$,
-  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) en las tres tablas');
+  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) en las cuatro tablas');
 
 select is_empty(
   $$select tabla, privilegio from matriz
@@ -65,20 +66,22 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'service_role' and tabla <> 'public.productos' and esperado is not null
        and has_table_privilege('service_role', tabla, privilegio) <> esperado$$,
-  'O-2: service_role no tiene TRUNCATE/REFERENCES/TRIGGER sobre empresas ni perfiles');
+  'O-2: service_role no tiene TRUNCATE/REFERENCES/TRIGGER sobre empresas, perfiles ni camiones');
 
 -- Privilegios por columna (un GRANT por columna no aparece en la ACL de tabla).
 select ok(
   not has_any_column_privilege('anon', 'public.empresas', 'select, insert, update, references')
   and not has_any_column_privilege('anon', 'public.perfiles', 'select, insert, update, references')
-  and not has_any_column_privilege('anon', 'public.productos', 'select, insert, update, references'),
-  'anon no tiene privilegios por columna en las tres tablas');
+  and not has_any_column_privilege('anon', 'public.productos', 'select, insert, update, references')
+  and not has_any_column_privilege('anon', 'public.camiones', 'select, insert, update, references'),
+  'anon no tiene privilegios por columna en las cuatro tablas');
 
 select ok(
   not has_any_column_privilege('authenticated', 'public.empresas', 'insert, update, references')
   and not has_any_column_privilege('authenticated', 'public.perfiles', 'insert, update, references')
-  and not has_any_column_privilege('authenticated', 'public.productos', 'insert, update, references'),
-  'authenticated no tiene INSERT/UPDATE/REFERENCES por columna en las tres tablas');
+  and not has_any_column_privilege('authenticated', 'public.productos', 'insert, update, references')
+  and not has_any_column_privilege('authenticated', 'public.camiones', 'insert, update, references'),
+  'authenticated no tiene INSERT/UPDATE/REFERENCES por columna en las cuatro tablas');
 
 select ok(
   not has_any_column_privilege('service_role', 'public.productos', 'insert, update, references'),
@@ -88,9 +91,9 @@ select ok(
   not exists (
     select 1 from pg_class c, aclexplode(c.relacl) a
      where c.oid in ('public.empresas'::regclass, 'public.perfiles'::regclass,
-                     'public.productos'::regclass)
+                     'public.productos'::regclass, 'public.camiones'::regclass)
        and a.grantee = 0),
-  'PUBLIC no tiene privilegios sobre las tres tablas');
+  'PUBLIC no tiene privilegios sobre las cuatro tablas');
 
 -- ---------------------------------------------------------------------------
 -- Catálogo genérico: cualquier tabla futura de public que se salga del modelo
@@ -159,13 +162,19 @@ select is(
          where p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
            and has_function_privilege('authenticated', p.oid, 'execute')
          order by 1),
-  array['actualizar_producto(uuid,text,text,numeric,integer)',
+  array['actualizar_camion(uuid,text,text)',
+        'actualizar_producto(uuid,text,text,numeric,integer)',
+        'cambiar_estado_camion(uuid,boolean)',
         'cambiar_estado_producto(uuid,boolean)',
+        'crear_camion(text,text)',
         'crear_producto(text,text,text,text,numeric,integer)',
+        'privado.actualizar_camion(uuid,text,text)',
         'privado.actualizar_producto(uuid,text,text,numeric,integer)',
+        'privado.cambiar_estado_camion(uuid,boolean)',
         'privado.cambiar_estado_producto(uuid,boolean)',
+        'privado.crear_camion(text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)'],
-  'authenticated ejecuta únicamente las seis firmas aprobadas (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las doce firmas aprobadas: productos y camiones (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)

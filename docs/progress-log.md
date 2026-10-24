@@ -1,4 +1,61 @@
 ---
+## 24/10/2026 — Slice Etapa 1: catálogo de camiones (local; sin commit)
+
+**Rama:** `feat/catalogo-camiones` desde `main` = `3d57fb18fc31127ab923aa964e86c3dd4d7e54a3` · **Autorización humana explícita:** diseñar e implementar el slice en rama, con migración local, RLS, RPC, pgTAP, frontend, Vitest, documentación y ejecución local de tests. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. Las operaciones remotas las hace el humano.
+
+### Objetivo y alcance
+Catálogo real de camiones como dato maestro de Etapa 1 (Blueprint §8: `camiones` = patente, nombre, activo, aprobada conceptualmente), con la Topología D ya auditada de productos (fachada `public` SECURITY INVOKER → implementación `privado` SECURITY DEFINER de `propietario_rpc` → tabla con RLS).
+
+**Fuera de alcance (no implementado):** ubicaciones, stock por camión, `movimientos_stock`, jornadas, asignación de vendedor, estado `en_reparto`, mantenimiento, marca, modelo, observaciones, chofer, rutas, GPS, P11 global / `service_role` global, producción. Marca, modelo, estado y observaciones del prototipo **no** pasan a `public.camiones`; `en_reparto` se resolverá con la jornada.
+
+### Decisión humana (matriz de permisos, 24/10/2026)
+Dueño: SELECT, crear, editar, activar/desactivar. Encargado: SELECT únicamente. Vendedor/piloto: SELECT únicamente (uso futuro). Anon y otra empresa: nada. No se amplió la matriz.
+
+### Decisiones técnicas aplicadas (no son reglas de negocio nuevas)
+- `UNIQUE (empresa_id, patente)` **sensible a mayúsculas**, patente sólo con `btrim`; sin regex, sin normalizar mayúsculas/espacios/guiones, sin formato Mercosur/legacy, sin `citext` (indicado en el pedido).
+- `empresa_id` y `creado_por` los deriva el servidor del perfil; ninguna firma recibe `empresa_id`. Rol, empresa y `activo` salen de `perfiles`, nunca de `user_metadata`.
+- Sin `idempotency_key` ni locks explícitos (CRUD maestro simple, igual que productos).
+- Errores: `PT401 camion_no_autenticado`, `PT403 camion_no_autorizado`, `PT404 camion_no_encontrado` (otra empresa e id inexistente, indistinguibles), `PT400 camion_patente_invalida | camion_nombre_invalido | camion_estado_invalido`, `PT409 camion_patente_duplicada`, `PT500 camion_error_interno`. Sin nombre de restricción, SQL ni UUID ajeno.
+- **`service_role` sin ningún privilegio sobre `camiones`**: no hay fuente aprobada que defina su comportamiento para esta tabla y P11 global sigue pendiente. No se generaliza P11-productos.
+
+### Archivos
+- Migración nueva `supabase/migrations/20261024144459_catalogo_camiones.sql` (generada con `npx supabase migration new catalogo_camiones`; no se tocaron migraciones históricas).
+- `supabase/tests/camiones_catalogo.test.sql` (nuevo, 112 aserciones).
+- `supabase/tests/grants_default_privileges.test.sql`: la matriz y los chequeos por columna/PUBLIC incluyen `public.camiones` (sin `service_role`, decisión pendiente) y la lista de funciones ejecutables por `authenticated` pasa de 6 a 12 firmas. Sin debilitar aserciones; el plan sigue en 32.
+- `supabase/tests/productos_catalogo.test.sql`: dos aserciones genéricas se adaptan a que ahora existen seis implementaciones `SECURITY DEFINER` (productos + camiones) y a excluir las implementaciones de camiones del chequeo de auxiliares (las cubre el test de camiones). Sin cambios de plan (125).
+- `apps/web/src/lib/camiones.ts` y `camiones.test.ts` (nuevos), `apps/web/src/hooks/useCatalogoCamiones.ts` (nuevo), `apps/web/src/pages/Camiones.tsx` (reescrita sobre Supabase).
+- Playwright: `tests/camiones-catalogo.spec.ts` (nuevo, 6 pruebas); `tests/storage-operativo-corrupto.spec.ts` (el caso «camiones» pasa a `/jornadas`, igual que se hizo con productos) y `tests/catalogos-escritura-post-montaje.spec.ts` (se retira el caso demo de camiones; queda clientes).
+- `App.tsx` **sin cambios**: `/camiones` sigue para `ROLES_GESTION` (dueño + encargado); no se amplió al vendedor. La base igualmente permite su SELECT. La UI sólo muestra/oculta acciones por rol y no es frontera de seguridad.
+
+### Seguridad (superficie sensible → corresponde **security review**; no queda cerrada por este log)
+- Tabla con RLS habilitada y sin FORCE. `authenticated`: sólo SELECT; `anon` y `service_role`: nada; `propietario_rpc`: SELECT, INSERT de `empresa_id, patente, nombre, creado_por` y UPDATE de `patente, nombre, activo`.
+- Policies de `propietario_rpc` exigen perfil activo de la empresa y, para escribir, rol `dueno` e identidad del llamador. FK compuesta `(empresa_id, creado_por)` → `perfiles`.
+- Fachadas: SECURITY INVOKER, `search_path=''`, EXECUTE sólo a `authenticated`. Implementaciones y auxiliares en `privado`: SECURITY DEFINER sólo las tres implementaciones, owner `propietario_rpc`, sin EXECUTE para PUBLIC/anon/service_role (las implementaciones sí para `authenticated`, necesario para que la fachada INVOKER delegue, igual que productos).
+
+### Pruebas (resultados reales, ejecutados sobre el árbol final tras `db reset`)
+- `git diff --check`: PASS.
+- `npx supabase db reset`: PASS (5 migraciones). `npx supabase test db`: **324/324 PASS** (4 archivos: auth 55, camiones 112, grants 32, productos 125). `db lint`: sin errores de esquema. `db advisors --local`: sin hallazgos.
+- `typecheck`: PASS. `lint`: exit 0. Vitest: **768/768** (24 archivos; +52 de `camiones.test.ts` sobre 716). `build`: PASS. Playwright: **65/65** (60 previos −1 caso demo de camiones +6 nuevos).
+
+### Mutation tests de seguridad (temporales, sobre la base local, revertidos; no commiteados)
+Se aplicó cada mutación, se corrió `supabase test db` y se revirtió; tras revertir, 324/324 PASS. **8/8 detectadas:** (1) INSERT directo a `authenticated` (4 aserciones fallidas); (2) EXECUTE a `anon` en una RPC (2); (3) encargado permitido en `exigir_dueno_camiones` (4); (4) quitar el aislamiento por `empresa_id` (7, ver nota); (5) lectura de otra empresa (6); (6) EXECUTE a `service_role` en una RPC (2); (7) sin RLS (15); (8) fachada `public` en SECURITY DEFINER (4).
+Nota sobre (4): quitar sólo el filtro `empresa_id` de la función, o ese filtro más la condición de empresa de la policy UPDATE, **no** altera el comportamiento observable porque la policy SELECT de `propietario_rpc` (que UPDATE también aplica) sigue aislando: son tres capas independientes. La mutación se detecta cuando se quitan las tres. Es defensa en profundidad, no un hueco; queda registrado para que el auditor no lo lea como una mutación no cubierta.
+
+### Riesgos
+- La patente distingue mayúsculas y no se normaliza: `abc123` y `ABC123` (o `AB 123 CD` y `AB123CD`) conviven como patentes distintas. Requiere decisión humana si el negocio quiere unicidad insensible a formato.
+- `Jornadas`, `Movimientos` y las demás pantallas operativas siguen con el catálogo demo de camiones de `localStorage` (convivencia temporal, igual que productos); un camión creado en la base no aparece ahí. La pantalla lo avisa. Bloquea producción (M-03).
+- El vendedor/piloto lee camiones por la base pero no tiene la pantalla `/camiones` (sin cambios de rutas).
+- Los residuos de camiones creados por Playwright quedan en la base local, no en los tests de pgTAP (usan su propia empresa y rollback).
+
+### Pendientes (no resueltos acá)
+- Decisión humana sobre unicidad/normalización de patente y sobre privilegios de `service_role` en `camiones` (P11 global).
+- Security review y auditoría independiente del hash que se commitee.
+- Aplicar la migración en staging y validarla (O-3, O-4, advisors remotos y demás pendientes anteriores siguen abiertos).
+- Reemplazar el consumo demo de camiones en jornadas cuando exista el módulo.
+
+**STAGING: NO TOCADO · PRODUCCIÓN: NO TOCADA · COMMIT: NO CREADO · PUSH/PR/MERGE/DEPLOY: NO REALIZADOS.**
+
+---
 ## 24/10/2026 — Desviación de proceso: PR #11 mergeado antes del gate humano de merge
 
 **Clasificación:** PROCESS DEVIATION: YES · TECHNICAL DEFECT: NO · SECURITY DEFECT: NO · CORRECTNESS DEFECT: NO · **DECISIÓN: ACCEPT MERGE.**
