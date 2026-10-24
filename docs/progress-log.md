@@ -1,4 +1,18 @@
 ---
+## 24/10/2026 — Desviación de proceso: PR #11 mergeado antes del gate humano de merge
+
+**Clasificación:** PROCESS DEVIATION: YES · TECHNICAL DEFECT: NO · SECURITY DEFECT: NO · CORRECTNESS DEFECT: NO · **DECISIÓN: ACCEPT MERGE.**
+
+- **Qué pasó:** el gate humano autorizado cubría únicamente push y apertura del PR #11, explícitamente sin merge (AGENTS.md §2.2.1, §2.3.7 y §2.3.8). GitHub registra igualmente el merge del PR #11 con el merge commit `a6bc6ff2ec90918c3bfcd225bdc80024cdd9732a`.
+- **Revisión posterior (solo lectura):** el merge contiene únicamente `5abdc57023513afeb79424193b53cd7b16b3f03e` y `2741a8c98073b4d1f8df1efab6f9a6eea0608633`; `git diff` entre la rama auditada y el merge commit es vacío; 0 cambios inesperados; migración y tests idénticos a lo auditado; sin secretos; recomendación independiente: ACCEPT MERGE.
+- **Validación sobre `main` post-merge:** typecheck PASS · lint PASS · Vitest 716/716 PASS · build PASS · `supabase db reset` PASS · pgTAP 212/212 PASS · `supabase db lint` PASS. M-04 continúa en PASS; staging validado.
+- **Decisión:** no existe motivo técnico para revertir. Se acepta el merge como estado integrado de `main`.
+- **Trazabilidad:** la desviación se registra para no repetirla; el merge y el deploy requieren cada uno autorización humana explícita previa y la autorización de un paso no se extiende al siguiente.
+- **Esto NO autoriza:** deploy, producción, nuevas migraciones ni nuevos cambios funcionales.
+
+**Producción: NO TOCADA · DEPLOY: NO REALIZADO.** Cambios funcionales de esta entrada: 0 (sólo documentación).
+
+---
 ## 23/10/2026 — Gate final de staging, retoma: pruebas funcionales de M-04 (Gates 3–18) — ENTRADA DEFINITIVA VIGENTE
 
 > **Estado vigente de la validación de staging: M-04 DEFINITIVO = PASS.** Esta es la entrada definitiva. La entrada «Gate final de staging: default privileges + M-04 funcional (PARCIAL)» que sigue más abajo es **histórica y supersedida** por esta.
