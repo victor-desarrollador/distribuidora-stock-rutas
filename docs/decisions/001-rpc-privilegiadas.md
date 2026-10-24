@@ -1,10 +1,10 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 23/10/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 24/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026)
 
-> **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; y el 23/10/2026, P2, P3 y P4 (§18). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
+> **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; el 23/10/2026, P2, P3 y P4 (§18); y el 24/10/2026, P11 global y las observaciones O-3 y O-4, para validación controlada (§18.2). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P10 y P12–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P10 ni P12–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
 ---
 
@@ -24,6 +24,7 @@
 | v1.5 + anexo | Claude Code | Agrega §18.1: decisiones humanas del 23/10/2026 **acotadas al slice productos** (P10/P11/P12/P13/P14/P15/P16/P17-productos, DE-2, DE-3, DE-11, DE-15 y el helper `privado.usuario_actual()`). No resuelve P10–P17 globalmente, no cambia el estado de la ADR ni autoriza producción. |
 | v1.5 + anexo (complemento P11-productos) | Claude Code | Amplía P11-productos en §18.1: `service_role` tampoco escribe directamente `public.productos` (hallazgo H-01 de The Architect). Acotado al slice productos; P11 global sigue pendiente. El estado de la ADR no cambia y no autoriza producción. |
 | v1.5 (corrección terminológica) | Claude Code | Corrección terminológica: el producto es de empresa única; `empresa_id` es una frontera técnica de aislamiento y no una capacidad multiempresa. Renombra el encabezado de §8 a «Invariante de aislamiento por `empresa_id`» y alinea las referencias normativas de membresía (§3.1, §3.2, §8, §9, T2, T3 y la nota sobre inicio de sesión anónimo) al modelo aprobado de perfil 1:1, una empresa y un rol; sin cambio de comportamiento. Las garantías, T4/T5/T15 y el estado de la ADR (**APROBADA PARA VALIDACIÓN CONTROLADA**) no cambian. |
+| v1.5 + anexo §18.2 | Claude Code | Registra las decisiones humanas del 24/10/2026, para validación controlada: **P11 global** (`service_role` denegado por defecto en objetos de negocio; única excepción vigente, SELECT sobre `public.productos`), **O-3** (`postgres` → `propietario_rpc` con SET true e INHERIT false) y **O-4** (`public.rls_auto_enable()` y `ensure_rls` se conservan, sin EXECUTE para PUBLIC/`anon`/`authenticated`/`service_role`), con la evidencia read-only de staging que fundamentó O-4. El estado de la ADR no cambia; P8–P10 y P12–P17 siguen pendientes y P18 separada; no autoriza producción. |
 
 ---
 
@@ -31,7 +32,7 @@
 
 El sistema nuevo **está previsto** sobre Supabase (Auth, PostgreSQL, RLS, RPC) con frontend React (`BLUEPRINT.md` §6). Hoy el repositorio contiene un prototipo frontend sin backend que persiste en `localStorage` (`INVENTARIO_ETAPA_0.md` §1); **todavía no existe** integración con Supabase ni con su Data API.
 
-Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST). Los usuarios `authenticated` no deberán poder escribir directamente en los libros de movimientos de stock y dinero (`BLUEPRINT.md` §3, §6, §10). Un enfoque `SECURITY INVOKER` puro sobre esas tablas exigiría conceder escritura directa a `authenticated`, lo que abriría rutas capaces de saltar las reglas de negocio y la auditoría. Esta ADR define la topología de la puerta de entrada para validación controlada; P2–P7 están resueltas (§18) y P8–P17 siguen pendientes.
+Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST). Los usuarios `authenticated` no deberán poder escribir directamente en los libros de movimientos de stock y dinero (`BLUEPRINT.md` §3, §6, §10). Un enfoque `SECURITY INVOKER` puro sobre esas tablas exigiría conceder escritura directa a `authenticated`, lo que abriría rutas capaces de saltar las reglas de negocio y la auditoría. Esta ADR define la topología de la puerta de entrada para validación controlada; P2–P7 y P11 están resueltas (§18 y §18.2) y P8–P10 y P12–P17 siguen pendientes.
 
 ---
 
@@ -41,7 +42,7 @@ Cuando exista, la interfaz React **usará** la Data API de Supabase (PostgREST).
 - `AGENTS.md` traslada esas reglas a instrucciones operativas para agentes; no las relaja. `INVENTARIO_ETAPA_0.md` está subordinado a ambos (su propia nota de precedencia).
 - Una ADR en estado `APROBADA PARA VALIDACIÓN CONTROLADA`, como esta, modifica el Blueprint únicamente dentro de las decisiones resueltas y habilita sólo validación local/staging; no habilita producción ni completa decisiones pendientes.
 
-**Alcance resuelto (P20).** Antes de la aprobación para validación controlada no podían generarse migraciones dependientes de ADR-001. Con el estado actual se permiten las migraciones necesarias para probar la ADR exclusivamente en local/staging. Producción permanece bloqueada hasta completar las pruebas requeridas, la auditoría independiente y la aceptación humana final. Esta autorización no alcanza a decisiones P8–P17 todavía pendientes ni a otras migraciones fuera del alcance de validación.
+**Alcance resuelto (P20).** Antes de la aprobación para validación controlada no podían generarse migraciones dependientes de ADR-001. Con el estado actual se permiten las migraciones necesarias para probar la ADR exclusivamente en local/staging. Producción permanece bloqueada hasta completar las pruebas requeridas, la auditoría independiente y la aceptación humana final. Esta autorización no alcanza a decisiones P8–P10 y P12–P17 todavía pendientes ni a otras migraciones fuera del alcance de validación.
 
 ---
 
@@ -150,7 +151,7 @@ Para facilitar la trazabilidad con la ronda 1 se conservan las letras A, B y C, 
 - PostgREST ejecuta **cada solicitud HTTP en su propia transacción** (`START TRANSACTION; … END;`, *PostgREST v14, Transactions*). Por eso **varias llamadas independientes a la Data API**, ya sea desde el navegador o desde una Edge Function, **no forman una sola transacción**: si falla la segunda, la primera ya quedó confirmada.
 - Si una Edge Function llama a **una única RPC transaccional**, esa RPC sigue siendo la **unidad atómica**. La Edge Function no agrega atomicidad ni la reemplaza.
 - Una Edge Function para operaciones de usuario debería llamar a la base **con el JWT del usuario** (`Authorization`), de modo que se apliquen su rol y sus políticas RLS (*Supabase, Securing Edge Functions*).
-- **`service_role` no se asume** para operaciones de usuarios. Según Supabase, ese rol tiene `bypassrls` y elude RLS (*Row Level Security: Bypassing RLS*). Usarlo sería una **alternativa excepcional** que exige justificación documentada y aprobación humana, porque toda la validación quedaría a cargo del código. Además, `auth.uid()` no identificaría al usuario final salvo que se pase su token. **PENDIENTE DE APROBACIÓN HUMANA (P11).**
+- **`service_role` no se asume** para operaciones de usuarios. Según Supabase, ese rol tiene `bypassrls` y elude RLS (*Row Level Security: Bypassing RLS*). Usarlo sería una **alternativa excepcional** que exige justificación documentada y aprobación humana, porque toda la validación quedaría a cargo del código. Además, `auth.uid()` no identificaría al usuario final salvo que se pase su token. **RESUELTO PARA VALIDACIÓN CONTROLADA (P11 global, 24/10/2026, §18.2):** `service_role` queda denegado por defecto sobre los objetos de negocio; toda excepción es explícita, nominada y aprobada.
 - Las RPC de escritura deben ser `VOLATILE` y llamarse por POST: PostgREST ejecuta GET/HEAD en una transacción READ ONLY y una escritura falla con 405 (*PostgREST v14, Transactions → Access Mode on Functions*).
 
 ---
@@ -187,6 +188,8 @@ Texto original de las opciones, conservado como registro:
 4. **¿O la función privilegiada elude RLS deliberadamente** y depende de validaciones internas completas, aceptando que RLS no la protege?
 
 Relaciones de propiedad: tablas de negocio y esquemas, del rol que ejecuta las migraciones (§12.6 y §17.2 siguen exigiendo confirmar ese rol en cada entorno); funciones privilegiadas privadas, de `propietario_rpc` (P3).
+
+**Membresía del rol de migraciones en `propietario_rpc` (O-3, decisión humana del 24/10/2026, §18.2):** `postgres` conserva SET ROLE `propietario_rpc` (`set_option = true`), necesario para `ALTER FUNCTION … OWNER TO propietario_rpc`, pero no hereda sus privilegios (`inherit_option = false`).
 
 ---
 
@@ -281,7 +284,7 @@ Requisitos de diseño propuestos (concretan §10:277-278; ninguno se ejecuta tod
 6. **`ALTER DEFAULT PRIVILEGES` sobre el rol creador real:** los privilegios por defecto se definen por rol creador (`FOR ROLE`). Hay que aplicarlos al rol que **realmente** ejecuta las migraciones; según Supabase, las funciones creadas por migración son de `postgres`, pero se confirma en el entorno (sección 17.2).
    - **Corrección técnica respecto de v1.1:** en PostgreSQL un `REVOKE` por esquema (`IN SCHEMA ...`) **no elimina** un privilegio concedido globalmente, como el `EXECUTE` de `PUBLIC`. Solo deshace un `GRANT` previo hecho por esquema (*ALTER DEFAULT PRIVILEGES*: "This command has no effect, unless it is undoing a matching GRANT"). Para `PUBLIC` corresponde la forma **global**, sin `IN SCHEMA`. La guía *Hardening the Data API* de Supabase muestra la forma por esquema para `PUBLIC`; **las dos fuentes difieren** y se resuelve con una prueba de catálogo (sección 17.1).
 7. **Sin DML directo** de `anon` ni `authenticated` sobre los libros (§10:276).
-8. **`service_role` y roles operativos internos:** sin `EXECUTE` sobre las RPC de negocio salvo una necesidad operativa justificada y aprobada (sección 6, P11).
+8. **`service_role` y roles operativos internos:** sin `EXECUTE` sobre las RPC de negocio salvo una necesidad operativa justificada y aprobada (sección 6, P11). P11 global resuelto para validación controlada el 24/10/2026 (§18.2).
 
 ---
 
@@ -332,7 +335,7 @@ Las pruebas necesitan un esquema; el esquema necesita migraciones; y las migraci
 | P5, P6, P7 | Modelo de membresía y roles para los datos de prueba (T2–T6). **Resueltas el 22/10/2026 (§18).** |
 | P8, P9 | Separación de funciones (T13) |
 | P10 | Catálogo de operaciones a ensayar (puede acotarse a un subconjunto representativo) |
-| P11 | Grants de `service_role` y roles internos (T16, sección 17.3) |
+| P11 | Grants de `service_role` y roles internos (T16, sección 17.3). **Resuelta el 24/10/2026 (§18.2).** |
 | P12, P15 | Contrato y ubicación de la idempotencia (T10–T12) |
 | P13 | Aislamiento, bloqueos y reintentos (T12) |
 | P14 | Sobrecargas (T16) |
@@ -341,7 +344,7 @@ Las pruebas necesitan un esquema; el esquema necesita migraciones; y las migraci
 
 Si el dueño acota la validación a un subconjunto de operaciones, solo hacen falta las decisiones que ese subconjunto requiera. **P18 no es requisito previo:** es una decisión futura separada (sección 14). Esa aprobación **no** autoriza producción.
 
-**Paso 2 — Implementación exclusivamente local o en staging.** Una vez resueltas las P2–P17 necesarias (P2–P7 ya lo están; quedan P8–P17) para el alcance elegido, se permiten migraciones, roles, schemas y grants sólo en entornos aislados (§10). Nada de `supabase db push`, `supabase migration up` ni comandos contra producción (`AGENTS.md` §5).
+**Paso 2 — Implementación exclusivamente local o en staging.** Una vez resueltas las P2–P17 necesarias (P2–P7 y P11 ya lo están; quedan P8–P10 y P12–P17) para el alcance elegido, se permiten migraciones, roles, schemas y grants sólo en entornos aislados (§10). Nada de `supabase db push`, `supabase migration up` ni comandos contra producción (`AGENTS.md` §5).
 
 **Paso 3 — Pruebas.** Toda la matriz de la sección 16 y las verificaciones de la sección 17, con evidencia citada y auditoría independiente (`AGENTS.md` §2).
 
@@ -353,7 +356,7 @@ Si el dueño acota la validación a un subconjunto de operaciones, solo hacen fa
 
 ## 16. Matriz de pruebas obligatorias
 
-Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabase test db` en un entorno aislado, más pruebas HTTP contra la Data API local y un arnés concurrente. Su implementación depende de resolver las decisiones P8–P17 necesarias de la sección 15, paso 1 (P2–P7 ya están resueltas).
+Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabase test db` en un entorno aislado, más pruebas HTTP contra la Data API local y un arnés concurrente. Su implementación depende de resolver las decisiones P8–P10 y P12–P17 necesarias de la sección 15, paso 1 (P2–P7 y P11 ya están resueltas).
 
 | # | Caso | Resultado esperado |
 |---|---|---|
@@ -430,7 +433,6 @@ Aserciones de catálogo que se repiten siempre:
 | P8 | Definición de "participación real en la jornada" | 9 |
 | P9 | Huecos de separación de funciones (aprobación por quien contó, receptor = iniciador, verificación de transferencias) | 9 |
 | P10 | Catálogo de operaciones y permisos por RPC | 9 |
-| P11 | Uso excepcional de `service_role` y de roles operativos internos | 6, 12 |
 | P12 | Contrato de idempotencia I1–I8 | 10 |
 | P13 | Aislamiento, orden de bloqueos, restricciones de respaldo y política de reintentos | 11 |
 | P14 | Política de sobrecargas | 12 |
@@ -439,7 +441,7 @@ Aserciones de catálogo que se repiten siempre:
 | P17 | Mecanismo de auditoría de operaciones exitosas | 14 |
 | P18 | Registro de intentos rechazados (**decisión futura separada**) | 14 |
 
-**P8–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.** Para el slice productos rigen las decisiones acotadas de §18.1, que no cambian este estado global.
+**P8–P10 y P12–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.** P11 global quedó resuelta el 24/10/2026 para validación controlada (§18.2). Para el slice productos rigen además las decisiones acotadas de §18.1, que no cambian este estado global.
 
 | # | Decisión resuelta | Resultado | Sección |
 |---|---|---|---|
@@ -452,15 +454,16 @@ Aserciones de catálogo que se repiten siempre:
 | P2 | Esquemas expuesto y privado | **`public`** es el esquema expuesto para las tablas que la aplicación necesita; **`privado`** será el esquema no expuesto para las futuras implementaciones privilegiadas. `privado` no se crea hasta que exista la primera implementación que viva allí (decisión humana, 23/10/2026) | 5 |
 | P3 | Rol propietario técnico | **`propietario_rpc`**: `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`; propietario sólo de las funciones privilegiadas privadas necesarias, nunca de tablas de negocio. Se crea junto con el primer objeto que dependa de él (decisión humana, 23/10/2026) | 7 |
 | P4 | Ownership, `FORCE RLS` y frontera de seguridad | Tablas de negocio del owner de migraciones/Supabase; RLS obligatoria en toda tabla expuesta; **sin `FORCE ROW LEVEL SECURITY` global** (todo uso futuro, justificado y probado); funciones `SECURITY DEFINER` en `privado`, sin ser propietarias de tablas y con validación explícita de `auth.uid()`, empresa, rol, permisos, estado e integridad (decisión humana, 23/10/2026) | 7 |
+| P11 | Uso excepcional de `service_role` y de roles operativos internos | **Denegado por defecto** sobre objetos de negocio; excepciones explícitas, nominadas y aprobadas; única vigente: SELECT sobre `public.productos` (decisión humana, 24/10/2026; **aprobada para validación controlada**, no productiva) | 6, 12, 18.2 |
 
 ### 18.1 Decisiones de validación acotadas al slice productos (23/10/2026)
 
-> **Alcance estricto.** Estas decisiones humanas aplican **únicamente** al slice «catálogo de productos» (`public.productos` y sus RPC). **No resuelven P10–P17 globalmente**: para cualquier otra operación siguen pendientes. **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, y **no autorizan producción**. Se registran como ensayo de la Topología D dentro del alcance local/staging que permite P20.
+> **Alcance estricto.** Estas decisiones humanas aplican **únicamente** al slice «catálogo de productos» (`public.productos` y sus RPC). **No resuelven P10–P17 globalmente**: para cualquier otra operación siguen pendientes (P11 global se resolvió después, el 24/10/2026, en §18.2). **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, y **no autorizan producción**. Se registran como ensayo de la Topología D dentro del alcance local/staging que permite P20.
 
 | # | Decisión acotada a productos | Estado global |
 |---|---|---|
 | P10-productos | `dueno` y `encargado` pueden crear, actualizar y cambiar el estado (baja lógica/reactivación) de productos; `vendedor_piloto` sólo lee. RPC: `crear_producto`, `actualizar_producto`, `cambiar_estado_producto`. | P10 global pendiente |
-| P11-productos | `service_role` no recibe `EXECUTE` sobre estas RPC (ni sobre sus fachadas ni sobre sus implementaciones privadas) y **no escribe directamente `public.productos`**: sin `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES` ni `TRIGGER`. Conserva `SELECT`. Complemento del 23/10/2026 tras el hallazgo H-01 de The Architect (por defecto Supabase le concedía todos los privilegios y `BYPASSRLS` habría permitido saltear la validación del precio). No cambia los privilegios de `service_role` sobre `perfiles` ni sobre Auth. | P11 global pendiente |
+| P11-productos | `service_role` no recibe `EXECUTE` sobre estas RPC (ni sobre sus fachadas ni sobre sus implementaciones privadas) y **no escribe directamente `public.productos`**: sin `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES` ni `TRIGGER`. Conserva `SELECT`. Complemento del 23/10/2026 tras el hallazgo H-01 de The Architect (por defecto Supabase le concedía todos los privilegios y `BYPASSRLS` habría permitido saltear la validación del precio). No cambia los privilegios de `service_role` sobre `perfiles` ni sobre Auth. | P11 global resuelta (§18.2); este SELECT es su única excepción vigente |
 | P12/P15-productos | El ABM de productos no usa idempotencia ni `idempotency_key`: no figura entre los comandos críticos de `BLUEPRINT.md` §7.9.6. | P12/P15 globales pendientes |
 | P13-productos | Sin bloqueos explícitos; la actualización de un solo producto se resuelve con «gana la última escritura». | P13 global pendiente |
 | P14-productos | Sin sobrecargas de estas funciones, ni en `public` ni en `privado`. | P14 global pendiente |
@@ -477,6 +480,40 @@ Aserciones de catálogo que se repiten siempre:
 
 Implementación y evidencia: `supabase/migrations/20261023140000_catalogo_productos.sql`, `supabase/tests/productos_catalogo.test.sql` y la entrada «Catálogo de productos en Supabase (slice productos)» de `docs/progress-log.md`.
 
+### 18.2 Decisiones transversales: P11 global, O-3 y O-4 (24/10/2026)
+
+> **Alcance.** Decisiones humanas **aprobadas para validación controlada** (local/staging). **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, **no autorizan producción** y no resuelven P8–P10 ni P12–P17. O-3 y O-4 son observaciones de las validaciones de staging del 23–24/10/2026 (`docs/progress-log.md`).
+
+**P11 global — `service_role` y roles internos.**
+
+- `service_role` queda **denegado por defecto** sobre los objetos de negocio: no recibe privilegios de tabla ni `EXECUTE` sobre las RPC de negocio (fachadas de `public` ni implementaciones de `privado`) salvo una excepción **explícita, nominada y aprobada**.
+- **Excepción vigente:** `SELECT` sobre `public.productos` (P11-productos, §18.1). No autoriza `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER`, `MAINTAIN` ni `EXECUTE`.
+- Toda decisión futura que necesite `service_role` debe documentar y aprobar su excepción.
+- Esta decisión global reemplaza el estado «P11 global pendiente», sin invalidar la excepción específica aprobada para productos.
+
+**O-3 — membresía `postgres` → `propietario_rpc`.**
+
+- `postgres` conserva la capacidad de `SET ROLE propietario_rpc` (`set_option = true`), necesaria para `ALTER FUNCTION … OWNER TO propietario_rpc`.
+- `inherit_option = false`: no se requiere la herencia permanente de los privilegios de `propietario_rpc`.
+- Las migraciones futuras que necesiten actuar como owner técnico (por ejemplo, redefinir, alterar o revocar privilegios sobre funciones de `privado`) usan `SET ROLE propietario_rpc` explícitamente cuando corresponda.
+- El runtime de las RPC no depende de esta membresía: la implementación `SECURITY DEFINER` corre como su owner.
+- La fila de membresía con ADMIN OPTION que PostgreSQL crea automáticamente al crear el rol (grantor `supabase_admin`, sin SET ni INHERIT) no forma parte de esta decisión.
+
+**O-4 — `public.rls_auto_enable()`.**
+
+- Se conservan `public.rls_auto_enable()` y el event trigger `ensure_rls` (objetos del proyecto alojado, no definidos en las migraciones del repositorio).
+- Se revoca `EXECUTE` sobre `public.rls_auto_enable()` a PUBLIC, `anon`, `authenticated` y `service_role`.
+- No se modifica el comportamiento funcional del event trigger. Verificado en local con una réplica: el disparo de un event trigger no chequea `EXECUTE` del rol que ejecuta el DDL y la función `SECURITY DEFINER` corre como su owner; una función `event_trigger` no puede invocarse directamente.
+
+**Evidencia read-only de staging que fundamentó O-4 (24/10/2026).**
+
+- Proyecto de staging `rtsncntppghdynzhezzg`; PostgreSQL 17.11; sesión en `BEGIN TRANSACTION READ ONLY` con `transaction_read_only = on`, terminada con `ROLLBACK`; cero escrituras. 6 migraciones presentes, incluida `20261024180000`.
+- `public.rls_auto_enable()`: owner `postgres`; `SECURITY DEFINER`; `search_path=pg_catalog`; retorno `event_trigger`; ACL `{=X/postgres, postgres=X/postgres, anon=X/postgres, authenticated=X/postgres, service_role=X/postgres}`: EXECUTE **explícito** para PUBLIC, `anon`, `authenticated` y `service_role` (entradas directas en la ACL, no heredadas). Su cuerpo habilita RLS en las tablas nuevas de `public` creadas con `CREATE TABLE`, `CREATE TABLE AS` o `SELECT INTO`.
+- `ensure_rls`: owner `postgres`; habilitado; evento `ddl_command_end`; tags `CREATE TABLE`, `CREATE TABLE AS`, `SELECT INTO`; es la **única** dependencia de event trigger sobre esa función (ningún trigger de tabla la usa).
+- Causa de los lints 0028/0029: función `SECURITY DEFINER` en `public` (esquema expuesto, con USAGE para `anon` y `authenticated`) y EXECUTE explícito para esos roles.
+
+Implementación y evidencia local: `supabase/migrations/20261024232059_hardening_adr001_p11_o3_o4.sql`, `supabase/tests/hardening_adr001.test.sql`, `supabase/tests/grants_default_privileges.test.sql` y la entrada «Hardening transversal ADR-001: P11 global, O-3 y O-4» de `docs/progress-log.md`. La aplicación de la migración en staging y su validación posterior quedan pendientes de autorización humana.
+
 ---
 
 ## 19. Consecuencias sobre `BLUEPRINT.md`
@@ -486,7 +523,7 @@ La alineación documental aplica estos cambios:
 - **D:** Blueprint §10 define la fachada expuesta `SECURITY INVOKER`, la implementación privada/no expuesta `SECURITY DEFINER` y la implementación privada como frontera real de seguridad; §12 prueba esa cadena; §15 registra el estado intermedio.
 - **A, B y C:** A queda descartada, B reservada para lógica externa y C no elegida.
 - **Gobernanza:** `docs/decisions/README.md` incorpora `APROBADA PARA VALIDACIÓN CONTROLADA`; las migraciones dependientes de ADR-001 quedan habilitadas sólo local/staging.
-- **Modelo de datos y decisiones técnicas:** P8–P17 siguen pendientes; P18 permanece separada. P2–P4 fijan los esquemas `public`/`privado`, el rol `propietario_rpc` y el ownership/RLS sin `FORCE` global. P5–P7 fijan un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario, sin membresías. `auditoria`, `idempotency_key` y restricciones no quedan aprobadas por P1/P19/P20.
+- **Modelo de datos y decisiones técnicas:** P8–P10 y P12–P17 siguen pendientes; P11 global quedó resuelta para validación controlada (§18.2); P18 permanece separada. P2–P4 fijan los esquemas `public`/`privado`, el rol `propietario_rpc` y el ownership/RLS sin `FORCE` global. P5–P7 fijan un perfil 1:1 con `auth.users`, una sola empresa y un único rol por usuario, sin membresías. `auditoria`, `idempotency_key` y restricciones no quedan aprobadas por P1/P19/P20.
 - **Producción:** continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final.
 
 ---

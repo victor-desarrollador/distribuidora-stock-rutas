@@ -4,9 +4,9 @@
 --
 -- Falla si reaparece O-1 (service_role sin SELECT sobre productos) u O-2
 -- (privilegios de tabla innecesarios o privilegios por defecto amplios para
--- objetos futuros). Se dejan sin evaluar, a propósito, el SELECT/INSERT/
--- UPDATE/DELETE de service_role sobre empresas y perfiles (P11 global
--- pendiente; hoy difiere entre local y staging) y MAINTAIN.
+-- objetos futuros), o si service_role se sale de P11 global (denegado por
+-- defecto; única excepción nominada: SELECT sobre productos), incluido
+-- MAINTAIN.
 
 begin;
 
@@ -17,7 +17,8 @@ select plan(32);
 -- ---------------------------------------------------------------------------
 -- Matriz esperada de privilegios de tabla
 -- ---------------------------------------------------------------------------
--- `esperado` nulo = no se evalúa (decisión pendiente).
+-- P11 global: service_role sólo tiene la excepción nominada SELECT sobre
+-- productos. MAINTAIN (PostgreSQL 17) también se evalúa.
 create temp table matriz (tabla text, rol text, privilegio text, esperado boolean);
 
 insert into matriz
@@ -27,15 +28,13 @@ select t.tabla, r.rol, p.privilegio,
     when r.rol = 'authenticated' then p.privilegio = 'SELECT'
     when r.rol = 'service_role' and t.tabla = 'public.productos'
       then p.privilegio = 'SELECT'
-    when r.rol = 'service_role'
-         and p.privilegio in ('TRUNCATE', 'REFERENCES', 'TRIGGER') then false
-    else null
+    when r.rol = 'service_role' then false
   end
 from (values ('public.empresas'), ('public.perfiles'), ('public.productos'),
              ('public.camiones'), ('public.clientes')) t(tabla),
      (values ('anon'), ('authenticated'), ('service_role')) r(rol),
      (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
-             ('REFERENCES'), ('TRIGGER')) p(privilegio);
+             ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(privilegio);
 
 -- ---------------------------------------------------------------------------
 -- Tablas existentes: matriz por rol
@@ -50,7 +49,7 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'authenticated' and esperado is not null
        and has_table_privilege('authenticated', tabla, privilegio) <> esperado$$,
-  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) en las cinco tablas');
+  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN) en las cinco tablas');
 
 select is_empty(
   $$select tabla, privilegio from matriz
@@ -66,7 +65,7 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'service_role' and tabla <> 'public.productos' and esperado is not null
        and has_table_privilege('service_role', tabla, privilegio) <> esperado$$,
-  'O-2: service_role no tiene TRUNCATE/REFERENCES/TRIGGER sobre empresas, perfiles, camiones ni clientes');
+  'P11: service_role no tiene ningún privilegio (ni SELECT ni MAINTAIN) sobre empresas, perfiles, camiones ni clientes');
 
 -- Privilegios por columna (un GRANT por columna no aparece en la ACL de tabla).
 select ok(

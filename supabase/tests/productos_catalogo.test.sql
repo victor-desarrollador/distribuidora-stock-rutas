@@ -312,23 +312,44 @@ select is(
 -- ---------------------------------------------------------------------------
 -- privado.usuario_actual() coincide con auth.uid()
 -- ---------------------------------------------------------------------------
+-- usuario_actual() sólo lo ejecuta su owner, propietario_rpc (postgres ya no
+-- hereda ese EXECUTE: O-3), y propietario_rpc no tiene USAGE sobre `auth`.
+-- auth.uid() se evalúa como postgres y se compara como propietario_rpc.
+create temp table uid_esperado (caso text, uid uuid);
+grant select on uid_esperado to public;
+grant usage on schema extensions to propietario_rpc;
+
 select set_config('request.jwt.claims',
   '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}', true);
-select is(privado.usuario_actual(), auth.uid(),
+insert into uid_esperado select 'claims', auth.uid();
+set local role propietario_rpc;
+select is(privado.usuario_actual(), (select uid from uid_esperado where caso = 'claims'),
   'usuario_actual = auth.uid() con claims completos');
+reset role;
 
 select set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-4000-8000-000000000001', true);
-select is(privado.usuario_actual(), auth.uid(),
+insert into uid_esperado select 'sub', auth.uid();
+set local role propietario_rpc;
+select is(privado.usuario_actual(), (select uid from uid_esperado where caso = 'sub'),
   'usuario_actual = auth.uid() con el claim sub heredado');
+reset role;
 select set_config('request.jwt.claim.sub', '', true);
 
 select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
-select ok(privado.usuario_actual() is null and auth.uid() is null,
+insert into uid_esperado select 'sin_sub', auth.uid();
+set local role propietario_rpc;
+select ok(privado.usuario_actual() is null
+          and (select uid from uid_esperado where caso = 'sin_sub') is null,
   'usuario_actual y auth.uid() son nulos sin sub');
+reset role;
 
 select set_config('request.jwt.claims', '', true);
-select ok(privado.usuario_actual() is null and auth.uid() is null,
+insert into uid_esperado select 'sin_claims', auth.uid();
+set local role propietario_rpc;
+select ok(privado.usuario_actual() is null
+          and (select uid from uid_esperado where caso = 'sin_claims') is null,
   'usuario_actual y auth.uid() son nulos sin claims');
+reset role;
 
 -- ---------------------------------------------------------------------------
 -- Bypass directo: authenticated no escribe la tabla
