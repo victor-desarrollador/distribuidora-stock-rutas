@@ -1,8 +1,8 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 24/10/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 25/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026)
 
 > **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; el 23/10/2026, P2, P3 y P4 (§18); y el 24/10/2026, P11 global y las observaciones O-3 y O-4, para validación controlada (§18.2). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P10 y P12–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P10 ni P12–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
@@ -25,6 +25,7 @@
 | v1.5 + anexo (complemento P11-productos) | Claude Code | Amplía P11-productos en §18.1: `service_role` tampoco escribe directamente `public.productos` (hallazgo H-01 de The Architect). Acotado al slice productos; P11 global sigue pendiente. El estado de la ADR no cambia y no autoriza producción. |
 | v1.5 (corrección terminológica) | Claude Code | Corrección terminológica: el producto es de empresa única; `empresa_id` es una frontera técnica de aislamiento y no una capacidad multiempresa. Renombra el encabezado de §8 a «Invariante de aislamiento por `empresa_id`» y alinea las referencias normativas de membresía (§3.1, §3.2, §8, §9, T2, T3 y la nota sobre inicio de sesión anónimo) al modelo aprobado de perfil 1:1, una empresa y un rol; sin cambio de comportamiento. Las garantías, T4/T5/T15 y el estado de la ADR (**APROBADA PARA VALIDACIÓN CONTROLADA**) no cambian. |
 | v1.5 + anexo §18.2 | Claude Code | Registra las decisiones humanas del 24/10/2026, para validación controlada: **P11 global** (`service_role` denegado por defecto en objetos de negocio; única excepción vigente, SELECT sobre `public.productos`), **O-3** (`postgres` → `propietario_rpc` con SET true e INHERIT false) y **O-4** (`public.rls_auto_enable()` y `ensure_rls` se conservan, sin EXECUTE para PUBLIC/`anon`/`authenticated`/`service_role`), con la evidencia read-only de staging que fundamentó O-4. El estado de la ADR no cambia; P8–P10 y P12–P17 siguen pendientes y P18 separada; no autoriza producción. |
+| v1.5 + anexo §18.3 | Claude Code | Registra las decisiones humanas del 25/10/2026 **acotadas al dominio Stock** (slice `stock-ingreso`): P10, P12, P13, P14, P15, P16 y P17 para Stock, más la huella de idempotencia v1. No resuelve esos puntos para jornadas, ventas ni dinero, no cambia el estado de la ADR ni autoriza producción. |
 
 ---
 
@@ -441,7 +442,7 @@ Aserciones de catálogo que se repiten siempre:
 | P17 | Mecanismo de auditoría de operaciones exitosas | 14 |
 | P18 | Registro de intentos rechazados (**decisión futura separada**) | 14 |
 
-**P8–P10 y P12–P17 continúan pendientes. P18 continúa como decisión futura separada y no es requisito previo.** P11 global quedó resuelta el 24/10/2026 para validación controlada (§18.2). Para el slice productos rigen además las decisiones acotadas de §18.1, que no cambian este estado global.
+**P8–P10 y P12–P17 continúan pendientes como decisiones globales** (para el dominio Stock rigen las decisiones acotadas de §18.3). **P18 continúa como decisión futura separada y no es requisito previo.** P11 global quedó resuelta el 24/10/2026 para validación controlada (§18.2). Para el slice productos rigen además las decisiones acotadas de §18.1, que no cambian este estado global.
 
 | # | Decisión resuelta | Resultado | Sección |
 |---|---|---|---|
@@ -513,6 +514,22 @@ Implementación y evidencia: `supabase/migrations/20261023140000_catalogo_produc
 - Causa de los lints 0028/0029: función `SECURITY DEFINER` en `public` (esquema expuesto, con USAGE para `anon` y `authenticated`) y EXECUTE explícito para esos roles.
 
 Implementación y evidencia local: `supabase/migrations/20261024232059_hardening_adr001_p11_o3_o4.sql`, `supabase/tests/hardening_adr001.test.sql`, `supabase/tests/grants_default_privileges.test.sql` y la entrada «Hardening transversal ADR-001: P11 global, O-3 y O-4» de `docs/progress-log.md`. La aplicación de la migración en staging y su validación posterior quedan pendientes de autorización humana.
+
+### 18.3 Decisiones acotadas al dominio Stock (25/10/2026)
+
+> **Alcance estricto.** Decisiones humanas **aprobadas para validación controlada** que aplican **únicamente al dominio Stock** (`public.operaciones`, `public.movimientos_stock`, `public.stock_actual` y sus RPC; primer slice `stock-ingreso`). **No resuelven P10–P17 globalmente**: jornadas, ventas, dinero, retiros, conteos, rendiciones y cierres siguen pendientes. **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, y **no autorizan producción**.
+
+| # | Decisión acotada a Stock | Estado global |
+|---|---|---|
+| P10-stock | Catálogo del slice 1: sólo `registrar_ingreso` (exterior → depósito), permitido a `dueno` y `encargado`; el vendedor/piloto no. `mover_a_cuarentena` y `registrar_merma` requieren una decisión previa (roles y motivo); `cuarentena_apta`, regularizaciones y `ajuste` quedan **BLOCKED** (criterios de aptitud pendientes, dependencia de conteos y permiso de administrador no definido). Lectura de `operaciones`, `movimientos_stock` y `stock_actual`: sólo `dueno` y `encargado` de la misma empresa con perfil activo. | P10 global pendiente |
+| P12-stock | Idempotencia en `operaciones`: `UNIQUE (empresa_id, actor_id, idempotency_key)` con `idempotency_key uuid`; el tipo no integra la unicidad y va dentro de la huella; retención indefinida en Fase 1; sin columna de resultado: el resultado estable del replay es `operaciones.id`. Misma clave + misma huella → mismo id sin efectos; misma clave + otra huella u otro tipo → `PT409 stock_conflicto_idempotencia`; un rechazo de negocio no deja reserva. **Huella v1:** SHA-256 hex en minúsculas de `v1\|ingreso\|<producto uuid>\|<cantidad>\|<motivo>`, con `<motivo>` = `-` si es NULL y `+` + motivo normalizado si no; un cambio de semántica crea `v2` y nunca se reinterpretan operaciones existentes. | P12 global pendiente |
+| P13-stock | `READ COMMITTED` + `pg_advisory_xact_lock` por empresa + ubicación + producto, tomados en orden global, **sólo en las RPC que debitan stock**; el saldo se calcula después del lock. `registrar_ingreso` sólo acredita y no toma locks. Depósito y cuarentena nunca negativos; el negativo transitorio en camión sigue **PROPUESTA NO APROBADA**. Reintento del cliente: máximo 3, misma clave y mismo payload, ante `40001`, `40P01`, conexión perdida o timeout con resultado desconocido; `55P03` sólo si proviene de la política explícita de locks; `57014` sólo si es un timeout o cancelación recuperable; `PTxxx` nunca. | P13 global pendiente |
+| P14-stock | Sin sobrecargas de las RPC de Stock, ni en `public` ni en `privado`. | P14 global pendiente |
+| P15-stock | `idempotency_key` vive sólo en `operaciones`; no se duplica en `movimientos_stock` (§7.9.1). | P15 global pendiente |
+| P16-stock | Errores `stock_*` con SQLSTATE `PTxyz`: `PT401 stock_no_autenticado`, `PT403 stock_no_autorizado`, `PT400 stock_clave_invalida`, `PT400 stock_cantidad_invalida`, `PT404 stock_producto_no_encontrado` (otra empresa e inexistente, indistinguibles), `PT409 stock_producto_inactivo`, `PT409 stock_conflicto_idempotencia`, `PT500 stock_ubicacion_no_configurada`, `PT500 stock_error_interno`. Sin nombres de restricción ni datos de otra empresa; `40001` nunca para errores de negocio. | P16 global pendiente |
+| P17-stock | La auditoría de operaciones exitosas de Stock es `operaciones` (actor, empresa, tipo, clave, huella, `creado_en`) + `movimientos_stock` (operación, actor, motivo, producto, cantidad, origen, destino, `creado_en`); sin tabla genérica `auditoria` (Blueprint §10). `jornada_id` se agrega en la Etapa 3 con FK real. Append-only por grants y RLS, sin trigger. | P17 global pendiente |
+
+Implementación y evidencia: `supabase/migrations/20261025021032_stock_operaciones_ingreso.sql`, `supabase/tests/stock_ingreso.test.sql` y la entrada «Etapa 2 — Stock, slice 1: stock-ingreso» de `docs/progress-log.md`.
 
 ---
 

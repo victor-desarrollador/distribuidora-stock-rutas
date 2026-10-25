@@ -16,7 +16,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(50);
+select plan(51);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -48,7 +48,8 @@ grant execute on function pg_temp.como_usuario(uuid) to public;
 create temp table tablas_negocio (tabla regclass);
 insert into tablas_negocio values
   ('public.empresas'), ('public.perfiles'), ('public.productos'),
-  ('public.camiones'), ('public.clientes'), ('public.ubicaciones');
+  ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
+  ('public.operaciones'), ('public.movimientos_stock');
 grant select on tablas_negocio to public;
 
 -- Las 20 firmas de negocio (fachadas + implementaciones).
@@ -113,7 +114,7 @@ select ok(
     select 1 from tablas_negocio t, pg_class c, aclexplode(c.relacl) a
      where c.oid = t.tabla and t.tabla <> 'public.productos'::regclass
        and a.grantee = 'service_role'::regrole),
-  'P11: service_role no figura en la ACL de empresas, perfiles, camiones, clientes ni ubicaciones');
+  'P11: service_role no figura en la ACL de las tablas de negocio salvo productos');
 
 select is(
   (select count(*)::int from rpc_negocio r
@@ -148,6 +149,8 @@ select throws_ok('select count(*) from public.clientes', '42501', null,
   'P11: service_role no puede leer clientes');
 select throws_ok('select count(*) from public.ubicaciones', '42501', null,
   'P11: service_role no puede leer ubicaciones');
+select throws_ok('select count(*) from public.movimientos_stock', '42501', null,
+  'P11: service_role no puede leer movimientos_stock');
 select lives_ok('select count(*) from public.productos',
   'P11: service_role lee productos (excepción nominada)');
 select throws_ok(
