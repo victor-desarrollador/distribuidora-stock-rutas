@@ -1,4 +1,59 @@
 ---
+## 25/10/2026 — Slice Etapa 1: ubicaciones (local; sin commit)
+
+**Rama:** `feat/ubicaciones-etapa-1` desde `main` = `282c85c5df1e15147148e2538cc69b806bac4e92` · **Autorización humana explícita:** implementar el slice `ubicaciones` (cambio de esquema y seguridad) exclusivamente en local, con las decisiones D1–D6. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. El preámbulo de `AGENTS.md` §1.3 se presentó antes del primer cambio.
+
+### Objetivo
+Último componente de la Etapa 1 (Blueprint §14): las ubicaciones internas de stock de Fase 1 — `deposito`, `cuarentena` y `camion` — con aislamiento por `empresa_id` (Blueprint §7.2, §7.3, §8) y preparadas para que `movimientos_stock` (Etapa 2) las referencie por `(empresa_id, id)`. Merma y cliente **no** son ubicaciones.
+
+**Fuera de alcance (no implementado):** `movimientos_stock`, operaciones, saldos, ingresos, carga, jornadas, ventas, conteos, rendiciones, devoluciones, mermas, retiros, gastos, vencimientos y frontend.
+
+### Decisiones humanas aprobadas (D1–D6)
+- **D1:** depósito y cuarentena (uno de cada uno por empresa) por backfill + seed/bootstrap explícito; **sin trigger**.
+- **D2:** `privado.crear_camion(text,text)` crea la ubicación del camión en la **misma transacción**; backfill para camiones existentes.
+- **D3:** `creado_en`, **sin `creado_por`**.
+- **D4:** dueño, encargado y vendedor/piloto con perfil activo leen todas las ubicaciones de su empresa (sin filtro por rol ni por jornada).
+- **D5:** inmutables: sin `activo`, sin UPDATE ni DELETE.
+- **D6:** `tipo text` con CHECK, no enum.
+
+### Migración `20261025010315_catalogo_ubicaciones.sql`
+- `public.ubicaciones (id, empresa_id, tipo, camion_id, creado_en)`; FK a `empresas` y FK compuesta `(empresa_id, camion_id) → camiones (empresa_id, id)`, ambas `ON DELETE RESTRICT`; `UNIQUE (empresa_id, id)` y `UNIQUE (empresa_id, camion_id)`; CHECK de tipo y de coherencia `(tipo = 'camion') = (camion_id IS NOT NULL)`; índice único parcial `(empresa_id, tipo) WHERE camion_id IS NULL`. Sin `nombre`, `activo`, `saldo_actual` ni `creado_por`.
+- **Seguridad:** RLS habilitada sin FORCE; owner `postgres`. `revoke all` a PUBLIC, `anon`, `authenticated` y `service_role`; `authenticated` sólo SELECT; `propietario_rpc` SELECT + INSERT de `(empresa_id, tipo, camion_id)`; nadie tiene UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ni MAINTAIN. `service_role` sin privilegios (P11, sin excepción nueva). Policies: `ubicaciones_select_empresa` (authenticated, perfil activo de la misma empresa), `ubicaciones_select_propietario_rpc` y `ubicaciones_insert_propietario_rpc` (sólo `tipo = 'camion'` con camión de la misma empresa y actor dueño activo: depósito y cuarentena nunca se crean por RPC).
+- **Backfill** idempotente (`ON CONFLICT … DO NOTHING` dirigido al índice parcial y a `(empresa_id, camion_id)`).
+- **`crear_camion`:** redefinida con el patrón O-3 (CREATE temporal sobre `privado`, `SET ROLE propietario_rpc`, `CREATE OR REPLACE`, `RESET ROLE`, revoke inmediato). Misma firma, contrato, errores, validaciones, owner, SECURITY DEFINER, `search_path=''` y ACL; después del alta del camión inserta su ubicación dentro del mismo bloque (una violación de restricción de ubicaciones se informa como `camion_error_interno`). La fachada no cambia.
+- **Verificación fail-closed** al final: exactamente un depósito y una cuarentena por empresa, exactamente una ubicación por camión, sin cruces de empresa, sin tipos ni combinaciones inválidas, owner/RLS/grants y atributos/ACL de `crear_camion`.
+- **Seed:** depósito y cuarentena de las dos empresas locales, idempotente (`ON CONFLICT` dirigido); repetir el bloque no agrega filas.
+
+### Tests
+- **Nuevo** `supabase/tests/ubicaciones.test.sql` (82): backfill (conteos y repetición sin duplicar; toda empresa con un depósito y una cuarentena); catálogo exacto (columnas, ausencia de `nombre`/`activo`/`saldo_actual`/`creado_por`, constraints con su definición, índice parcial, sin otras unicidades, owner, RLS sin FORCE, policies, grants por rol y por columna, PUBLIC); constraints negativos (camion sin `camion_id`, depósito/cuarentena con `camion_id`, `merma`, `cliente`, depósito y cuarentena duplicados, segunda ubicación del mismo camión, A → camión de B); lectura de dueño, encargado, vendedor con metadata falsa, dueño de B, perfil inactivo, sin perfil y anon; escritura directa de dueño, encargado, vendedor, anon y `service_role` sin efectos; `propietario_rpc` (no depósito, no cuarentena, no vendedor, no otra empresa, no UPDATE/DELETE; control positivo); `crear_camion` (una ubicación de la misma empresa, comportamiento vigente, PT409/PT400/PT403 sin efectos, atomicidad si falla la ubicación, cambios de estado sin borrar ni duplicar, otra empresa, atributos y ACL de la función y de la fachada).
+- **Actualizados (sin debilitar):** `grants_default_privileges` (la matriz y los chequeos de columnas/PUBLIC incluyen `ubicaciones`), `hardening_adr001` (P11 sobre `ubicaciones`; +1 aserción de comportamiento), `camiones_catalogo` (+1: el alta crea su ubicación).
+
+### Verificación (local)
+| Verificación | Resultado |
+|---|---|
+| `git diff --check` | exit 0 |
+| `npx supabase db reset` | OK, 8 migraciones + seed |
+| `npx supabase test db` | **PASS, 640/640** en 7 archivos (ubicaciones 82, clientes 183, productos 125, camiones 113, auth 55, hardening 50 con 8 SKIP, grants 32) |
+| `npx supabase db lint` | «No schema errors found» |
+| `npx supabase db advisors --local` | «No issues found» |
+| `npm run typecheck` / `npm run lint` | exit 0 / exit 0 |
+| `npm test` | 25 archivos / 805 tests |
+| `npx playwright test` | 76/76 |
+| `npm run build` | exit 0 |
+
+**Mutaciones** (arnés ad hoc no versionado, en transacción revertida, sobre `ubicaciones` + `camiones_catalogo` + `grants_default_privileges` + `hardening_adr001`). Control: 277 `ok`, 0 `not ok`. **7/7 detectadas:** FK simple en lugar de compuesta → 5; sin índice parcial → la suite aborta con error (el `ON CONFLICT` del backfill requiere el índice) antes de las aserciones de duplicados; INSERT directo a `authenticated` → 4; policy INSERT que permite depósito → 3; SELECT a `service_role` → 7; SELECT sin aislamiento por empresa → 5; `crear_camion` sin la ubicación → 6. Después, `supabase test db` 640/640.
+
+### Riesgos y pendientes
+- **Bootstrap de empresas:** una empresa creada después de esta migración necesita su depósito y su cuarentena por el bootstrap administrativo (D1); el modelo no lo fuerza. Las RPC de la Etapa 2 deberán fallar cerrado si faltan.
+- **Acoplamiento de reglas:** la policy de INSERT exige dueño, igual que `exigir_dueno_camiones`; si cambia el permiso de alta de camiones, hay que cambiar ambas. Un rechazo por RLS dentro de `crear_camion` no se traduciría a un código estable (hoy no puede ocurrir).
+- **Runner de staging de camiones:** borra camiones antes que sus ubicaciones; con la FK `restrict` hay que ajustarlo antes de la validación en staging.
+- El backfill está replicado en `ubicaciones.test.sql`; si cambia en la migración, hay que actualizar el test.
+- «No cargar desde cuarentena» queda para las RPC de la Etapa 2.
+- Superficie sensible (esquema, RLS, grants, `propietario_rpc`, SECURITY DEFINER): **corresponde security review** y auditoría independiente del hash que se commitee.
+
+**STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · REMOTE ACTIONS: NONE · SECRETS EXPOSED: NO.**
+
+---
 ## 24/10/2026 — Cierre de staging: hardening ADR-001 P11/O-3/O-4 (validación controlada) — PASS
 
 **Entorno:** staging, project ref `rtsncntppghdynzhezzg` · **Código:** `main` = `90bdaef1c8622c141add495a08b26cd42e067ff9` (merge del PR #17) · **Commit funcional auditado:** `f5d1f30c887a63602590f694a446cda318145a79` · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y ejecutar esta validación con fixtures controlados, transacciones revertidas y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, migraciones nuevas, cambios de código, commit, push, PR, merge ni deploy en la validación. Esta entrada complementa la del hardening («Hardening transversal ADR-001: P11 global, O-3 y O-4»), cuyas líneas «migración de hardening en staging: NO REALIZADA» y «validación post-migración: PENDIENTE» reflejan el momento de aquella entrada y quedan superadas por ésta **sólo en cuanto al estado de staging**.

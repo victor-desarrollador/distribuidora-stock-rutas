@@ -27,6 +27,18 @@ values ('00000000-0000-4000-8000-0000000000e1', 'Distribuidora (local)'),
        -- Fixture adversarial de aislamiento (ver cabecera).
        ('00000000-0000-4000-8000-0000000000e2', 'Otra empresa (local, aislamiento)');
 
+-- Bootstrap de ubicaciones fijas (decisión D1 del slice ubicaciones): un
+-- depósito y una cuarentena por empresa. Idempotente: no depende de que la
+-- migración haya corrido antes. La seed no crea camiones; la ubicación de cada
+-- camión la crea privado.crear_camion.
+insert into public.ubicaciones (empresa_id, tipo)
+select e.id, t.tipo
+  from public.empresas e
+ cross join (values ('deposito'), ('cuarentena')) as t (tipo)
+ where e.id in ('00000000-0000-4000-8000-0000000000e1',
+                '00000000-0000-4000-8000-0000000000e2')
+on conflict (empresa_id, tipo) where camion_id is null do nothing;
+
 with cuentas (id, usuario) as (
   values
     ('00000000-0000-4000-8000-000000000001'::uuid, 'dueno.prueba'),
