@@ -177,7 +177,9 @@ select is(
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
+        'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
   'ninguna función de public es SECURITY DEFINER; sólo las implementaciones privadas (productos, camiones, clientes y stock) lo son');
 

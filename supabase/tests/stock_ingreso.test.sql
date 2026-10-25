@@ -118,7 +118,7 @@ select is(
         'tipo_movimiento:text:true:-', 'producto_id:uuid:true:-', 'cantidad:integer:true:-',
         'ubicacion_origen_id:uuid:false:-', 'ubicacion_destino_id:uuid:false:-',
         'actor_id:uuid:true:-', 'motivo:text:false:-',
-        'creado_en:timestamp with time zone:true:now()'],
+        'creado_en:timestamp with time zone:true:now()', 'motivo_codigo:text:false:-'],
   'movimientos_stock: columnas, tipos, NOT NULL y defaults aprobados');
 
 select is(
@@ -146,7 +146,7 @@ select is(
         'operaciones_huella_sha256:CHECK ((huella ~ ''^[0-9a-f]{64}$''::text))',
         'operaciones_idempotencia_unica:UNIQUE (empresa_id, actor_id, idempotency_key)',
         'operaciones_pkey:PRIMARY KEY (id)',
-        'operaciones_tipo_valido:CHECK ((tipo = ''ingreso''::text))'],
+        'operaciones_tipo_valido:CHECK ((tipo = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text])))'],
   'operaciones: constraints exactas (FK compuesta al actor, UNIQUE de idempotencia sin tipo, CHECK de tipo y huella)');
 
 select is(
@@ -159,13 +159,15 @@ select is(
         'movimientos_stock_empresa_id_unico:UNIQUE (empresa_id, id)',
         'movimientos_stock_extremo_requerido:CHECK (((ubicacion_origen_id IS NOT NULL) OR (ubicacion_destino_id IS NOT NULL)))',
         'movimientos_stock_extremos_distintos:CHECK ((ubicacion_origen_id IS DISTINCT FROM ubicacion_destino_id))',
-        'movimientos_stock_forma_por_tipo:CHECK (((tipo_movimiento <> ''ingreso''::text) OR ((ubicacion_origen_id IS NULL) AND (ubicacion_destino_id IS NOT NULL))))',
+        'movimientos_stock_forma_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (ubicacion_origen_id IS NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NULL))))',
+        'movimientos_stock_motivo_codigo_valido:CHECK (((motivo_codigo IS NULL) OR (motivo_codigo = ANY (ARRAY[''vencido''::text, ''roto_danado''::text, ''mal_estado''::text, ''error_pedido''::text, ''cambio''::text, ''otro''::text]))))',
         'movimientos_stock_motivo_normalizado:CHECK (((motivo IS NULL) OR ((motivo = btrim(motivo)) AND (length(motivo) > 0))))',
+        'movimientos_stock_motivo_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (motivo_codigo IS NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (motivo_codigo IS NULL) AND (motivo IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (motivo_codigo IS NOT NULL) AND ((motivo_codigo <> ''otro''::text) OR (motivo IS NOT NULL)))))',
         'movimientos_stock_operacion_fk:FOREIGN KEY (empresa_id, operacion_id) REFERENCES operaciones(empresa_id, id) ON DELETE RESTRICT',
         'movimientos_stock_origen_fk:FOREIGN KEY (empresa_id, ubicacion_origen_id) REFERENCES ubicaciones(empresa_id, id) ON DELETE RESTRICT',
         'movimientos_stock_pkey:PRIMARY KEY (id)',
         'movimientos_stock_producto_fk:FOREIGN KEY (empresa_id, producto_id) REFERENCES productos(empresa_id, id) ON DELETE RESTRICT',
-        'movimientos_stock_tipo_valido:CHECK ((tipo_movimiento = ''ingreso''::text))'],
+        'movimientos_stock_tipo_valido:CHECK ((tipo_movimiento = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text])))'],
   'movimientos_stock: constraints exactas (FK compuestas a operación, producto, ubicaciones y actor; CHECK de cantidad, extremos, tipo, forma y motivo)');
 
 select is(
@@ -239,7 +241,7 @@ select is(
          where a.attrelid = 'public.movimientos_stock'::regclass and a.attnum > 0 and not a.attisdropped
            and has_column_privilege('propietario_rpc', 'public.movimientos_stock', a.attname, 'INSERT')
          order by 1),
-  array['actor_id', 'cantidad', 'empresa_id', 'motivo', 'operacion_id', 'producto_id',
+  array['actor_id', 'cantidad', 'empresa_id', 'motivo', 'motivo_codigo', 'operacion_id', 'producto_id',
         'tipo_movimiento', 'ubicacion_destino_id', 'ubicacion_origen_id'],
   'propietario_rpc inserta en movimientos_stock sólo las columnas del alta');
 
@@ -542,6 +544,15 @@ select isnt((select id from ops where clave = 'otra_persona'), (select id from o
 -- ---------------------------------------------------------------------------
 -- Ledger append-only y escritura directa
 -- ---------------------------------------------------------------------------
+-- Una operación de A sin movimiento (como owner), para probar la FK compuesta
+-- de producto sin que intervenga el índice único de operaciones unitarias.
+with o as (
+  insert into public.operaciones (empresa_id, actor_id, tipo, idempotency_key, huella)
+  values ('aaaaaaaa-0000-4000-8000-000000000000', 'aaaaaaaa-0000-4000-8000-000000000001', 'ingreso',
+          '55555555-0000-4000-8000-000000000001', repeat('c', 64))
+  returning id)
+insert into ops select 'sin_mov', id from o;
+
 create temp table huella_ledger as
   select (select md5(string_agg(o::text, '|' order by o.id)) from public.operaciones o) as ops,
          (select md5(string_agg(m::text, '|' order by m.id)) from public.movimientos_stock m) as movs;
@@ -609,7 +620,7 @@ select throws_ok(
 select throws_ok(
   $$insert into public.movimientos_stock (empresa_id, operacion_id, tipo_movimiento, producto_id, cantidad,
                                          ubicacion_destino_id, actor_id)
-    values ('aaaaaaaa-0000-4000-8000-000000000000', (select id from ops where clave = 'dueno'), 'ingreso',
+    values ('aaaaaaaa-0000-4000-8000-000000000000', (select id from ops where clave = 'sin_mov'), 'ingreso',
             'bbbbbbbb-0000-4000-8000-0000000000f1', 1, 'aaaaaaaa-0000-4000-8000-0000000000d1',
             'aaaaaaaa-0000-4000-8000-000000000001')$$,
   '23503', null, 'movimiento de A con un producto de B: rechazado por la FK compuesta');
@@ -619,7 +630,7 @@ select throws_ok(
     values ('aaaaaaaa-0000-4000-8000-000000000000', (select id from ops where clave = 'dueno'), 'ingreso',
             'aaaaaaaa-0000-4000-8000-0000000000f1', 1, 'bbbbbbbb-0000-4000-8000-0000000000d1',
             'aaaaaaaa-0000-4000-8000-000000000001')$$,
-  '23503', null, 'movimiento de A hacia una ubicación de B: rechazado por la FK compuesta');
+  '42501', null, 'movimiento de A hacia una ubicación de B: rechazado por RLS (el ingreso exige un depósito propio, D8)');
 select throws_ok(
   $$insert into public.movimientos_stock (empresa_id, operacion_id, tipo_movimiento, producto_id, cantidad,
                                          ubicacion_destino_id, actor_id)
@@ -677,7 +688,7 @@ select throws_ok(
     values ('aaaaaaaa-0000-4000-8000-000000000000', (select id from ops where clave = 'dueno'), 'merma',
             'aaaaaaaa-0000-4000-8000-0000000000f1', 1, 'aaaaaaaa-0000-4000-8000-0000000000d1',
             'aaaaaaaa-0000-4000-8000-000000000001')$$,
-  '23514', null, 'tipos no aprobados en este slice se rechazan (merma)');
+  '23514', null, 'una merma con destino se rechaza (forma por tipo)');
 select throws_ok(
   $$insert into public.movimientos_stock (empresa_id, operacion_id, tipo_movimiento, producto_id, cantidad,
                                          ubicacion_destino_id, actor_id, motivo)

@@ -2,7 +2,7 @@
 
 **Fecha:** 12/10/2026 · **Última revisión documental:** 25/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`)
 
 > **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; el 23/10/2026, P2, P3 y P4 (§18); y el 24/10/2026, P11 global y las observaciones O-3 y O-4, para validación controlada (§18.2). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P10 y P12–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P10 ni P12–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
@@ -26,6 +26,7 @@
 | v1.5 (corrección terminológica) | Claude Code | Corrección terminológica: el producto es de empresa única; `empresa_id` es una frontera técnica de aislamiento y no una capacidad multiempresa. Renombra el encabezado de §8 a «Invariante de aislamiento por `empresa_id`» y alinea las referencias normativas de membresía (§3.1, §3.2, §8, §9, T2, T3 y la nota sobre inicio de sesión anónimo) al modelo aprobado de perfil 1:1, una empresa y un rol; sin cambio de comportamiento. Las garantías, T4/T5/T15 y el estado de la ADR (**APROBADA PARA VALIDACIÓN CONTROLADA**) no cambian. |
 | v1.5 + anexo §18.2 | Claude Code | Registra las decisiones humanas del 24/10/2026, para validación controlada: **P11 global** (`service_role` denegado por defecto en objetos de negocio; única excepción vigente, SELECT sobre `public.productos`), **O-3** (`postgres` → `propietario_rpc` con SET true e INHERIT false) y **O-4** (`public.rls_auto_enable()` y `ensure_rls` se conservan, sin EXECUTE para PUBLIC/`anon`/`authenticated`/`service_role`), con la evidencia read-only de staging que fundamentó O-4. El estado de la ADR no cambia; P8–P10 y P12–P17 siguen pendientes y P18 separada; no autoriza producción. |
 | v1.5 + anexo §18.3 | Claude Code | Registra las decisiones humanas del 25/10/2026 **acotadas al dominio Stock** (slice `stock-ingreso`): P10, P12, P13, P14, P15, P16 y P17 para Stock, más la huella de idempotencia v1. No resuelve esos puntos para jornadas, ventas ni dinero, no cambia el estado de la ADR ni autoriza producción. |
+| v1.5 + anexo §18.3 (slice 2) | Claude Code | Amplía §18.3 con las decisiones humanas del 25/10/2026 del slice `stock-cuarentena-merma` (D1–D9, huellas v1 de cuarentena y merma, lock concreto de débito y errores nuevos), **acotadas al dominio Stock**. No resuelve P10–P17 globalmente, no habilita la Etapa 3, `cuarentena_apta` ni el negativo transitorio, no cambia el estado de la ADR ni autoriza producción. |
 
 ---
 
@@ -517,7 +518,7 @@ Implementación y evidencia local: `supabase/migrations/20261024232059_hardening
 
 ### 18.3 Decisiones acotadas al dominio Stock (25/10/2026)
 
-> **Alcance estricto.** Decisiones humanas **aprobadas para validación controlada** que aplican **únicamente al dominio Stock** (`public.operaciones`, `public.movimientos_stock`, `public.stock_actual` y sus RPC; primer slice `stock-ingreso`). **No resuelven P10–P17 globalmente**: jornadas, ventas, dinero, retiros, conteos, rendiciones y cierres siguen pendientes. **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, y **no autorizan producción**.
+> **Alcance estricto.** Decisiones humanas **aprobadas para validación controlada** que aplican **únicamente al dominio Stock** (`public.operaciones`, `public.movimientos_stock`, `public.stock_actual` y sus RPC; slices `stock-ingreso` y `stock-cuarentena-merma`). **No resuelven P10–P17 globalmente**: jornadas, ventas, dinero, retiros, conteos, rendiciones y cierres siguen pendientes. **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, y **no autorizan producción**.
 
 | # | Decisión acotada a Stock | Estado global |
 |---|---|---|
@@ -530,6 +531,27 @@ Implementación y evidencia local: `supabase/migrations/20261024232059_hardening
 | P17-stock | La auditoría de operaciones exitosas de Stock es `operaciones` (actor, empresa, tipo, clave, huella, `creado_en`) + `movimientos_stock` (operación, actor, motivo, producto, cantidad, origen, destino, `creado_en`); sin tabla genérica `auditoria` (Blueprint §10). `jornada_id` se agrega en la Etapa 3 con FK real. Append-only por grants y RLS, sin trigger. | P17 global pendiente |
 
 Implementación y evidencia: `supabase/migrations/20261025021032_stock_operaciones_ingreso.sql`, `supabase/tests/stock_ingreso.test.sql` y la entrada «Etapa 2 — Stock, slice 1: stock-ingreso» de `docs/progress-log.md`.
+
+#### Slice 2 `stock-cuarentena-merma` (25/10/2026)
+
+Mismo alcance estricto: **sólo dominio Stock**. Estas decisiones **no resuelven P10–P17 globalmente**, **no habilitan la Etapa 3** (carga, jornadas, camión como origen), **ni `cuarentena_apta`**, **ni el negativo transitorio en camión** (sigue **PROPUESTA NO APROBADA**), no cambian el estado de la ADR (**APROBADA PARA VALIDACIÓN CONTROLADA**) y **no autorizan producción**.
+
+| # | Decisión acotada a Stock | Estado global |
+|---|---|---|
+| D1 (P10-stock) | `mover_a_cuarentena` y `registrar_merma`: `dueno` y `encargado`, sin diferencias entre ellos; el vendedor/piloto recibe `PT403`. | P10 global pendiente |
+| D2 | Motivo de cuarentena: texto obligatorio, `btrim`, vacío → NULL → `PT400 stock_motivo_invalido`. Sin catálogo. | — |
+| D3 | Origen sólo depósito; cuarentena o camión → `PT400 stock_origen_invalido`. Sin error `stock_camion_inactivo`. | — |
+| D4 | Sin merma desde cuarentena (queda para la revisión de cuarentena). | — |
+| D5 | `motivo_codigo` de merma: catálogo literal de Blueprint §7.7 (`vencido`, `roto_danado`, `mal_estado`, `error_pedido`, `cambio`, `otro`), comparación exacta después de `btrim` (sin pasar a minúsculas). | — |
+| D6 | Columna `movimientos_stock.motivo_codigo text`: obligatoria y del catálogo para merma; `otro` exige `motivo`; NULL para ingreso y `a_cuarentena`. | — |
+| D7 | Índice único parcial `movimientos_stock_operacion_unitaria_unica (empresa_id, operacion_id) WHERE tipo_movimiento IN ('ingreso','a_cuarentena','merma')`: una operación unitaria, un movimiento. | — |
+| D8 | La policy de INSERT del ledger exige que el ingreso vaya a una ubicación propia de tipo depósito; `a_cuarentena` depósito propio → cuarentena propia; merma depósito propio → NULL; el tipo del movimiento debe coincidir con el de la operación. | — |
+| D9 | Un solo slice y una sola migración para ambas RPC. La cantidad de archivos de tests no está restringida: pueden separarse cuando sea técnicamente necesario (p. ej., un archivo por nivel de aislamiento, REPEATABLE READ y SERIALIZABLE). | — |
+| P12-stock (huellas v1) | `v1\|a_cuarentena\|<producto>\|<origen>\|<cantidad>\|<m>` y `v1\|merma\|<producto>\|<origen>\|<cantidad>\|<motivo_codigo>\|<m>`, con `<m>` = `-` si el motivo es NULL y `+` + motivo normalizado si no; el destino de la cuarentena se resuelve en el servidor y no integra la huella. Replay: se verifica la autorización vigente antes; con la misma huella devuelve el id original sin revalidar estado mutable. | P12 global pendiente |
+| P13-stock (lock concreto) | Un único `pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('stock:' \|\| empresa \|\| ':' \|\| origen \|\| ':' \|\| producto, 0))` por RPC, tomado después de la idempotencia y de validar producto y origen, y antes de leer el saldo; sin lock del destino. El saldo (bigint) se lee después del lock; si no alcanza → `PT409 stock_insuficiente`, sin revelar saldo. El modelo aprobado es `READ COMMITTED`: estas dos RPC de débito lo verifican explícitamente como primera comprobación y, con otro aislamiento, fallan cerradas con `PT500 stock_error_interno`, sin cambiar el aislamiento del caller (con una instantánea fija, el saldo leído después del lock sería el previo). Sus pruebas viven en archivos propios por nivel de aislamiento. | P13 global pendiente |
+| P16-stock (errores nuevos) | `PT400 stock_motivo_invalido`, `PT400 stock_origen_invalido`, `PT404 stock_ubicacion_no_encontrada` (otra empresa e inexistente, indistinguibles), `PT409 stock_insuficiente`; `PT500 stock_ubicacion_no_configurada` también si no hay exactamente una cuarentena. | P16 global pendiente |
+
+Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarentena_merma.sql`, `supabase/tests/stock_cuarentena_merma.test.sql` y la entrada «Etapa 2 — Stock, slice 2: stock-cuarentena-merma» de `docs/progress-log.md`.
 
 ---
 
