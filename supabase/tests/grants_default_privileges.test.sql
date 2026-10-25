@@ -31,7 +31,8 @@ select t.tabla, r.rol, p.privilegio,
     when r.rol = 'service_role' then false
   end
 from (values ('public.empresas'), ('public.perfiles'), ('public.productos'),
-             ('public.camiones'), ('public.clientes'), ('public.ubicaciones')) t(tabla),
+             ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
+             ('public.operaciones'), ('public.movimientos_stock')) t(tabla),
      (values ('anon'), ('authenticated'), ('service_role')) r(rol),
      (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
              ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(privilegio);
@@ -49,7 +50,7 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'authenticated' and esperado is not null
        and has_table_privilege('authenticated', tabla, privilegio) <> esperado$$,
-  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN) en las seis tablas');
+  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN) en las tablas de negocio');
 
 select is_empty(
   $$select tabla, privilegio from matriz
@@ -65,7 +66,7 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'service_role' and tabla <> 'public.productos' and esperado is not null
        and has_table_privilege('service_role', tabla, privilegio) <> esperado$$,
-  'P11: service_role no tiene ningún privilegio (ni SELECT ni MAINTAIN) sobre empresas, perfiles, camiones, clientes ni ubicaciones');
+  'P11: service_role no tiene ningún privilegio (ni SELECT ni MAINTAIN) sobre empresas, perfiles, camiones, clientes, ubicaciones, operaciones ni movimientos_stock');
 
 -- Privilegios por columna (un GRANT por columna no aparece en la ACL de tabla).
 select ok(
@@ -93,9 +94,11 @@ select ok(
     select 1 from pg_class c, aclexplode(c.relacl) a
      where c.oid in ('public.empresas'::regclass, 'public.perfiles'::regclass,
                      'public.productos'::regclass, 'public.camiones'::regclass,
-                     'public.clientes'::regclass, 'public.ubicaciones'::regclass)
+                     'public.clientes'::regclass, 'public.ubicaciones'::regclass,
+                     'public.operaciones'::regclass, 'public.movimientos_stock'::regclass,
+                     'public.stock_actual'::regclass)
        and a.grantee = 0),
-  'PUBLIC no tiene privilegios sobre las seis tablas');
+  'PUBLIC no tiene privilegios sobre las tablas de negocio ni sobre stock_actual');
 
 -- ---------------------------------------------------------------------------
 -- Catálogo genérico: cualquier tabla futura de public que se salga del modelo
@@ -182,9 +185,11 @@ select is(
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.validar_cliente(uuid)',
+        'registrar_ingreso(uuid,uuid,integer,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las veinte firmas aprobadas: productos, camiones y clientes (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las veintidós firmas aprobadas: productos, camiones, clientes y stock (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)

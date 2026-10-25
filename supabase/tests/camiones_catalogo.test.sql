@@ -177,8 +177,9 @@ select is(
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.validar_cliente(uuid)'],
-  'ninguna función de public es SECURITY DEFINER; sólo las implementaciones privadas (productos, camiones y clientes) lo son');
+  'ninguna función de public es SECURITY DEFINER; sólo las implementaciones privadas (productos, camiones, clientes y stock) lo son');
 
 select is(
   (select count(*)::int from firmas f

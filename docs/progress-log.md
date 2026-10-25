@@ -1,4 +1,58 @@
 ---
+## 25/10/2026 — Etapa 2 — Stock, slice 1: stock-ingreso (local; sin commit)
+
+**Rama:** `feat/stock-ingreso-etapa-2` desde `main` = `30451f4d090a8d824df23d939b087b4b313e91ec` (merge del PR #19, ubicaciones) · **Autorización humana explícita:** implementar el slice 1 de la Etapa 2 en local con las decisiones E1–E18 y la huella v1. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. El preámbulo de `AGENTS.md` §1.3 se presentó antes del primer cambio.
+
+### Objetivo
+Primer slice de la Etapa 2 (Blueprint §14): el ledger `movimientos_stock` como única fuente de verdad del stock (§7.4), `operaciones` como ejecución lógica idempotente (§7.9.1), el saldo derivado `stock_actual` (§8, `saldos_stock` [DERIVADA]) y la primera operación real, `registrar_ingreso` (exterior → depósito).
+
+**Fuera de alcance (no implementado):** carga, jornadas, ventas, retornos, conteos, rendiciones, devoluciones, `cuarentena_apta`, `mover_a_cuarentena`, merma, regularizaciones, `ajuste`, retiros, gastos, vencimientos, negativo transitorio, frontend y Fase 2.
+
+### Decisiones humanas aprobadas (dominio Stock; registradas en ADR-001 §18.3)
+- **E1/P10:** sólo `registrar_ingreso`. **E2:** dueño y encargado; el vendedor no. **E3:** motivo opcional, `btrim`, vacío → NULL. **E4:** leen `operaciones`, `movimientos_stock` y `stock_actual` sólo dueño y encargado de la empresa con perfil activo.
+- **P12 (E5–E8):** `UNIQUE (empresa_id, actor_id, idempotency_key)`, clave `uuid`, el tipo fuera del UNIQUE y dentro de la huella, retención indefinida, sin columna de resultado (el resultado del replay es `operaciones.id`).
+- **Huella v1:** SHA-256 hex en minúsculas de `v1|ingreso|<producto uuid>|<cantidad>|<motivo>` con `<motivo>` = `-` si es NULL y `+` + motivo normalizado si no; un cambio de semántica crea `v2`.
+- **P13 (E9, E10):** `READ COMMITTED` + advisory locks por empresa + ubicación + producto sólo para RPC que debitan; `registrar_ingreso` acredita y no toma locks. Contrato de reintento del cliente registrado (no implementado en este slice).
+- **P16 (E11):** errores `stock_*`. **P17 (E12):** `operaciones` + `movimientos_stock` son la auditoría exitosa; sin tabla `auditoria`. **E13:** sin `jornada_id` (Etapa 3). **E14:** append-only por grants y RLS, sin trigger. **P14 (E15):** sin sobrecargas. **P15 (E16):** `idempotency_key` sólo en `operaciones`. **E18:** decisiones acotadas al dominio Stock.
+
+### Migración `20261025021032_stock_operaciones_ingreso.sql`
+- **`public.operaciones`** (`id`, `empresa_id`, `actor_id`, `tipo`, `idempotency_key`, `huella`, `creado_en`): FK a `empresas`, `UNIQUE (empresa_id, id)`, FK compuesta `(empresa_id, actor_id) → perfiles`, `UNIQUE (empresa_id, actor_id, idempotency_key)`, CHECK `tipo in ('ingreso')` y huella `^[0-9a-f]{64}$`.
+- **`public.movimientos_stock`** (`id`, `empresa_id`, `operacion_id`, `tipo_movimiento`, `producto_id`, `cantidad`, `ubicacion_origen_id`, `ubicacion_destino_id`, `actor_id`, `motivo`, `creado_en`): FK compuestas a operación, producto, ubicaciones de origen y destino y actor, todas de la misma `empresa_id`; CHECK de cantidad positiva, al menos un extremo, extremos distintos, tipo `ingreso`, forma del ingreso (origen NULL, destino no NULL) y motivo normalizado; índices por `(empresa_id, destino, producto)` y `(empresa_id, origen, producto)`. Sin `saldo_actual` ni `jornada_id`.
+- **`public.stock_actual`:** vista `security_invoker = true`, entradas − salidas por empresa, ubicación y producto, `cantidad bigint`. Respeta la RLS del ledger.
+- **`registrar_ingreso`:** fachada `public` SECURITY INVOKER (EXECUTE sólo `authenticated`) → implementación `privado` SECURITY DEFINER de `propietario_rpc`, `search_path=''`. Orden: identidad/perfil/rol → estructura (clave, cantidad, producto no NULL) → motivo normalizado → huella v1 → reserva `ON CONFLICT DO NOTHING` / replay → producto de la empresa y activo → depósito único resuelto en el servidor (fail-closed) → un movimiento → `operaciones.id`. Las violaciones de restricción y de privilegio en los inserts se traducen a `PT500 stock_error_interno`.
+- **Seguridad:** RLS sin FORCE; owner `postgres`. `authenticated` sólo SELECT (y la RLS sólo le da filas a dueño/encargado); `propietario_rpc` SELECT + INSERT por columna; nadie UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ni MAINTAIN; `anon`, `service_role` y PUBLIC sin privilegios (P11, sin excepción nueva). Policies de INSERT de `propietario_rpc`: actor = usuario actual con rol dueño/encargado activo; el movimiento cuelga de una operación de la misma empresa, del mismo actor y de tipo compatible. Grants de la implementación fijados antes del `ALTER … OWNER` (O-3); CREATE temporal sobre `privado` revocado.
+- **Verificación fail-closed** al final: owner, RLS, grants de tablas y vista, `security_invoker`, atributos y ACL de fachada e implementación, sin sobrecargas y sin CREATE residual.
+
+### Tests
+- **Nuevo** `supabase/tests/stock_ingreso.test.sql` (119): catálogo exacto (columnas, tipos, defaults, constraints con su definición, índices, owner, RLS sin FORCE, policies, grants por rol y por columna, PUBLIC, vista `security_invoker`, fachada INVOKER e implementación DEFINER con owner, `search_path` y ACL, sin sobrecargas, sin parámetros de empresa/ubicación/actor/tipo/huella); ingreso de dueño y encargado (1 operación + 1 movimiento, actor, empresa y depósito del servidor, origen NULL, motivo con trim o NULL); huella v1 contra el literal canónico, NULL vs `-`, cambio por cantidad/producto/motivo; saldo 10 + 5 = 15 igual a la suma del ledger; lectura (vendedor con metadata falsa, dueño de B, perfil inactivo y sin perfil en 0; anon 42501); rechazos sin efectos (vendedor, privado llamado por SQL, inactivo, sin perfil, sin `sub`, anon, producto de otra empresa / inexistente / NULL, inactivo, cantidad 0 / negativa / NULL, clave NULL, empresa sin depósito); el rechazo no deja reserva; idempotencia (mismo id, normalización previa, conflicto por cantidad/producto/motivo/NULL, replay válido con el producto desactivado, otro actor con la misma UUID); append-only y escritura directa para dueño, encargado, anon, `service_role` y `propietario_rpc`; cruces de empresa (operación A→B, producto B, ubicación B, operación de otro actor, operación de B, vendedor) rechazados por RLS o FK compuesta; restricciones del ledger; atomicidad (si falla el movimiento no queda la operación ni cambia el saldo); otra empresa en su propio depósito.
+- **Listas cerradas actualizadas (sin debilitar):** `productos_catalogo` y `camiones_catalogo` (funciones DEFINER: +`privado.registrar_ingreso`; auxiliares), `grants_default_privileges` (firmas ejecutables por `authenticated`: 20 → 22; matriz con `operaciones` y `movimientos_stock`; PUBLIC también sobre `stock_actual`), `hardening_adr001` (P11 sobre las tablas nuevas; +1 aserción de comportamiento).
+- **Concurrencia (arnés ad hoc, dos sesiones reales):** misma clave y mismo payload → la segunda espera ~2 s en el `ON CONFLICT` y devuelve el mismo `operaciones.id` (1 operación, 1 movimiento); misma clave con otra cantidad en paralelo → `stock_conflicto_idempotencia`.
+
+### Verificación (local)
+| Verificación | Resultado |
+|---|---|
+| `git diff --check` | exit 0 |
+| `npx supabase db reset` | OK, 9 migraciones + seed |
+| `npx supabase test db` | **PASS, 760/760** en 8 archivos (stock 119, ubicaciones 82, clientes 183, productos 125, camiones 113, auth 55, hardening 51 con 8 SKIP, grants 32) |
+| `npx supabase db lint` | «No schema errors found» |
+| `npx supabase db advisors --local` | «No issues found» |
+| typecheck / lint / build | exit 0 / exit 0 / exit 0 |
+| Vitest | 25 archivos / 805 tests |
+| Playwright | 76/76 |
+
+**Mutaciones** (arnés ad hoc no versionado, en transacción revertida, sobre `stock_ingreso` + `grants_default_privileges` + `hardening_adr001`). Control: 202 `ok`, 0 `not ok`. **7/7 detectadas:** FK compuesta de producto → simple: 3; sin `UNIQUE` de idempotencia: 15 (más errores SQL: el `ON CONFLICT` de la RPC deja de tener destino); INSERT a `authenticated`: 3; policy de SELECT sin rol: 2; vista no `security_invoker`: 5; sin chequeo de producto activo: 6; huella sin cantidad: 4. Después, `supabase test db` 760/760.
+
+### Riesgos y pendientes
+- El destino «depósito» del ingreso lo garantiza la RPC y la policy, no un constraint (forzarlo exigiría una FK que incluya `tipo`).
+- Un replay exige el rol vigente: si el actor deja de ser dueño/encargado o se desactiva, su replay recibe `PT403` (prioriza autorización sobre devolver el resultado).
+- La suma sobre el ledger crece con el tiempo; los índices compuestos alcanzan para la escala de Fase 1; materialización = optimización futura (§8).
+- Las RPC que debiten (slice 2) deben tomar el advisory lock; requieren su propio test de concurrencia.
+- Bootstrap de empresas: sin depósito, el ingreso falla cerrado (`PT500 stock_ubicacion_no_configurada`).
+- Superficie sensible (ledger de stock, RLS, grants, SECURITY DEFINER, idempotencia, concurrencia): **corresponde security review** y auditoría independiente del hash que se commitee.
+
+**STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · REMOTE ACTIONS: NONE · SECRETS EXPOSED: NO.**
+
+---
 ## 25/10/2026 — Slice Etapa 1: ubicaciones (local; sin commit)
 
 **Rama:** `feat/ubicaciones-etapa-1` desde `main` = `282c85c5df1e15147148e2538cc69b806bac4e92` · **Autorización humana explícita:** implementar el slice `ubicaciones` (cambio de esquema y seguridad) exclusivamente en local, con las decisiones D1–D6. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. El preámbulo de `AGENTS.md` §1.3 se presentó antes del primer cambio.
