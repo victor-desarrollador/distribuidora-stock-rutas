@@ -1,4 +1,59 @@
 ---
+## 24/10/2026 — Cierre de staging: hardening ADR-001 P11/O-3/O-4 (validación controlada) — PASS
+
+**Entorno:** staging, project ref `rtsncntppghdynzhezzg` · **Código:** `main` = `90bdaef1c8622c141add495a08b26cd42e067ff9` (merge del PR #17) · **Commit funcional auditado:** `f5d1f30c887a63602590f694a446cda318145a79` · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y ejecutar esta validación con fixtures controlados, transacciones revertidas y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, migraciones nuevas, cambios de código, commit, push, PR, merge ni deploy en la validación. Esta entrada complementa la del hardening («Hardening transversal ADR-001: P11 global, O-3 y O-4»), cuyas líneas «migración de hardening en staging: NO REALIZADA» y «validación post-migración: PENDIENTE» reflejan el momento de aquella entrada y quedan superadas por ésta **sólo en cuanto al estado de staging**.
+
+**HARDENING ADR-001 VALIDADO EN STAGING.**
+
+### Preflight y aplicación
+- Verificado por el humano: el dry-run previo (`supabase db push --linked --dry-run`) mostró únicamente `20261024232059_hardening_adr001_p11_o3_o4.sql`, y `supabase db push --linked` la aplicó correctamente.
+- `supabase migration list --linked`: **7/7 migraciones alineadas** local/remoto después de aplicar.
+- `supabase db lint --linked`: «No schema errors found».
+- `supabase db advisors --linked`: «No issues found». Los WARN **0028/0029** sobre `public.rls_auto_enable()` (O-4) **ya no aparecen**.
+
+### Método
+- Estado inicial de staging: **0** en productos, camiones, clientes, perfiles, empresas, usuarios Auth, identities, sessions, refresh tokens y `auth.audit_log_entries`. Fixtures temporales de dos empresas (B sólo como fixture adversarial) y usuarios controlados por runner (dueño, encargado, vendedor/piloto con `user_metadata` engañosa, perfil inactivo, sin perfil, dueño de B); ids y contraseñas aleatorios por corrida, no impresos.
+- Permisos probados con la publishable key + JWT reales contra la Data API; la secret key sólo para probar que `service_role` no tiene acceso (salvo la excepción aprobada). SQL administrativo para catálogo, huellas y cleanup; la prueba funcional de O-4 en una transacción terminada en `ROLLBACK`.
+- Runners temporales fuera del repo: uno nuevo para el hardening (incluye la regresión de productos) y los de camiones y clientes ya usados en sus cierres de staging (con la única modificación de higiene descrita abajo).
+
+### Resultado final (segunda corrida completa): 403/403 PASS
+| Runner | Resultado |
+|---|---|
+| Hardening (incluye productos) | **100/100 PASS** |
+| Camiones | **94/94 PASS** |
+| Clientes | **209/209 PASS** |
+
+**Hardening, por gate:** PRECHECK 2/2 · P11 13/13 · O-3 16/16 · O-4 11/11 · O4_RUNTIME 2/2 · PRODUCTOS 48/48 · P11_HTTP 6/6 · CLEANUP 2/2.
+
+### Hechos comprobados
+- **P11:** `service_role` sólo conserva **SELECT sobre `public.productos`** (ACL exactamente `SELECT`, permitido también por HTTP). Sin SELECT sobre `empresas`, `perfiles`, `camiones` ni `clientes` (también rechazado por HTTP); sin INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ni MAINTAIN en las cinco tablas; sin grants por columna; sin EXECUTE sobre las 10 fachadas, las 10 implementaciones ni ningún auxiliar de `privado` (también rechazado por HTTP). Sin vías indirectas: no es miembro de ningún rol, no es owner de objetos de `public`/`privado`, sin USAGE sobre `privado` y PUBLIC sin privilegios sobre tablas ni funciones de negocio.
+- **O-3:** membresía `postgres` → `propietario_rpc` con grantor `postgres`: **SET true, INHERIT false**, sin ADMIN (la fila ADMIN de `supabase_admin` sin SET ni INHERIT); ninguna fila con INHERIT; `pg_has_role(…, SET) = true` y `(…, USAGE) = false`. `anon`, `authenticated`, `authenticator` y `service_role` no pueden SET ni heredar `propietario_rpc`. `propietario_rpc` sigue NOLOGIN/NOSUPERUSER/NOBYPASSRLS/NOCREATEDB/NOCREATEROLE/NOREPLICATION, sin CREATE en `public`/`privado` y sin tablas propias. Toda función de `privado` es de `propietario_rpc` con `search_path=""`; las 10 implementaciones son SECURITY DEFINER y las 10 fachadas SECURITY INVOKER; las 5 tablas siguen siendo de `postgres`.
+- **O-4:** `public.rls_auto_enable()` existe, owner `postgres`, SECURITY DEFINER, retorno `event_trigger`, `search_path=pg_catalog`; ACL `{postgres=X/postgres}`: **sin EXECUTE para PUBLIC, `anon`, `authenticated` ni `service_role`**, y la llamada explícita como `anon`/`authenticated` falla con «permission denied». `ensure_rls`: owner `postgres`, habilitado, `ddl_command_end`, tags exactos `CREATE TABLE` / `CREATE TABLE AS` / `SELECT INTO`, apunta a `rls_auto_enable()` y es su único event trigger. Ninguna función SECURITY DEFINER de `public` es ejecutable por PUBLIC ni por roles de la Data API.
+- **O-4 en runtime real:** dentro de una transacción revertida, `CREATE TABLE`, `CREATE TABLE AS` y `SELECT INTO` en `public` quedaron con **RLS habilitada automáticamente**; revocar EXECUTE no afectó el event trigger. Tras el `ROLLBACK`, ninguna tabla de prueba persistió.
+- **Regresiones:** productos (48/48), camiones (94/94) y clientes (209/209) mantienen el comportamiento validado antes del hardening: aislamiento cross-company (PT404 indistinguible de inexistente), perfil inactivo y usuario sin perfil sin acceso, `anon` sin acceso, `user_metadata` y headers manipulados sin efecto, escrituras directas rechazadas para todos los actores, `service_role` sin acceso (salvo SELECT de productos), `privado` no expuesto (`PGRST106`), atomicidad (huellas idénticas) y validaciones de negocio (`PT400`/`PT401`/`PT403`/`PT404`/`PT409`). `pg_graphql` sigue deshabilitado.
+
+### Cleanup
+- Conteos finales **iguales a los iniciales** (todos en 0) en los tres runners.
+- Sin fixtures residuales (clientes, productos, camiones, perfiles, empresas, `auth.users`, `auth.identities`, `auth.sessions`, `auth.refresh_tokens`, `auth.audit_log_entries`); sin tablas `zz_hard_o4_*`; los runners no crean roles; sin datos persistidos por los runners.
+
+### Incidente del runner (no es un fallo del producto)
+- Primera corrida del hardening: **99/100**. El único FAIL fue un **falso negativo** de la aserción O4_RUNTIME: el producto ya había devuelto `relrowsecurity=true` para las tres tablas.
+- Causa: el parser tomaba la última línea de la salida de psql (`ROLLBACK`) en lugar de la fila de resultado. Se corrigió el runner temporal fuera del repo; el resultado real de la primera corrida, reprocesado, da PASS.
+- Segunda corrida completa: **100/100** (camiones y clientes, 94/94 y 209/209 en ambas corridas).
+
+### Higiene de credenciales
+- Durante el diagnóstico operativo se detectó que los runners temporales pasaban `TEST_DATABASE_URL` como argumento del proceso `psql`, visible en la lista de procesos.
+- Los runners temporales se corrigieron para usar variables `PG*` del proceso hijo (la segunda corrida ya las usó). La salida de ambas corridas no contiene credenciales.
+- **Acción operativa separada:** rotar la credencial de la base de staging.
+
+### Estado y pendientes
+- **HARDENING ADR-001 VALIDADO EN STAGING.** ADR-001 sigue **APROBADA PARA VALIDACIÓN CONTROLADA**; P8–P10 y P12–P17 siguen pendientes y P18 separada.
+- **Producción NO validada y NO autorizada.** No hubo deploy productivo.
+- Pendientes que se mantienen: rotación de la credencial de staging; M-1 (atomicidad de la migración bajo el CLI, no verificada empíricamente; la aplicación en staging fue exitosa); L-1 (las aserciones pgTAP de O-4 sólo corren contra el objeto real si existe: repetir advisors y catálogo de `rls_auto_enable` tras cambios de configuración del proyecto).
+
+**PRODUCTION: NOT TOUCHED · VERCEL: NOT TOUCHED · CODE CHANGES: NONE · SECRETS EXPOSED IN RUNNER OUTPUT: NO.**
+
+---
 ## 24/10/2026 — Hardening transversal ADR-001: P11 global, O-3 y O-4 (local; sin commit)
 
 **Rama:** `chore/hardening-adr-001` desde `main` = `f01bad12dc253de94b4be305075a85f1b3d38cd2` · **Autorización humana explícita:** implementar sólo el hardening aprobado, con una migración local, pgTAP, mutation tests y verificaciones locales; por separado, una lectura read-only de catálogo en staging para O-4. **No autorizado y no realizado:** escrituras en staging (la migración no se aplicó allí), producción, push, PR, merge, deploy ni commit.
