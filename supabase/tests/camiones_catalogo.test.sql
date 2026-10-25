@@ -10,7 +10,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(112);
+select plan(113);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -554,6 +554,15 @@ select lives_ok(
   $$insert into creados
     select 'dueno', public.crear_camion('  CD123EF  ', '  Camión Norte  ')$$,
   'el dueño crea un camión');
+
+-- Slice ubicaciones (D2): el alta crea en la misma transacción su ubicación.
+reset role;
+select results_eq(
+  $$select u.empresa_id, u.tipo, count(*) over ()::int
+      from public.ubicaciones u join creados x on x.id = u.camion_id where x.clave = 'dueno'$$,
+  $$values ('aaaaaaaa-0000-4000-8000-000000000000'::uuid, 'camion', 1)$$,
+  'el alta del camión crea exactamente una ubicación camion de su empresa');
+select pg_temp.como_usuario('aaaaaaaa-0000-4000-8000-000000000001');
 
 select lives_ok(
   $$select public.actualizar_camion('aaaaaaaa-0000-4000-8000-00000000c002',

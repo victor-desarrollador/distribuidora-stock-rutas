@@ -31,7 +31,7 @@ select t.tabla, r.rol, p.privilegio,
     when r.rol = 'service_role' then false
   end
 from (values ('public.empresas'), ('public.perfiles'), ('public.productos'),
-             ('public.camiones'), ('public.clientes')) t(tabla),
+             ('public.camiones'), ('public.clientes'), ('public.ubicaciones')) t(tabla),
      (values ('anon'), ('authenticated'), ('service_role')) r(rol),
      (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
              ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(privilegio);
@@ -49,7 +49,7 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'authenticated' and esperado is not null
        and has_table_privilege('authenticated', tabla, privilegio) <> esperado$$,
-  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN) en las cinco tablas');
+  'authenticated tiene sólo SELECT (sin INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN) en las seis tablas');
 
 select is_empty(
   $$select tabla, privilegio from matriz
@@ -65,22 +65,24 @@ select is_empty(
   $$select tabla, privilegio from matriz
      where rol = 'service_role' and tabla <> 'public.productos' and esperado is not null
        and has_table_privilege('service_role', tabla, privilegio) <> esperado$$,
-  'P11: service_role no tiene ningún privilegio (ni SELECT ni MAINTAIN) sobre empresas, perfiles, camiones ni clientes');
+  'P11: service_role no tiene ningún privilegio (ni SELECT ni MAINTAIN) sobre empresas, perfiles, camiones, clientes ni ubicaciones');
 
 -- Privilegios por columna (un GRANT por columna no aparece en la ACL de tabla).
 select ok(
   not has_any_column_privilege('anon', 'public.empresas', 'select, insert, update, references')
   and not has_any_column_privilege('anon', 'public.perfiles', 'select, insert, update, references')
   and not has_any_column_privilege('anon', 'public.productos', 'select, insert, update, references')
-  and not has_any_column_privilege('anon', 'public.camiones', 'select, insert, update, references'),
-  'anon no tiene privilegios por columna en las cinco tablas');
+  and not has_any_column_privilege('anon', 'public.camiones', 'select, insert, update, references')
+  and not has_any_column_privilege('anon', 'public.ubicaciones', 'select, insert, update, references'),
+  'anon no tiene privilegios por columna en las tablas de negocio');
 
 select ok(
   not has_any_column_privilege('authenticated', 'public.empresas', 'insert, update, references')
   and not has_any_column_privilege('authenticated', 'public.perfiles', 'insert, update, references')
   and not has_any_column_privilege('authenticated', 'public.productos', 'insert, update, references')
-  and not has_any_column_privilege('authenticated', 'public.camiones', 'insert, update, references'),
-  'authenticated no tiene INSERT/UPDATE/REFERENCES por columna en las cinco tablas');
+  and not has_any_column_privilege('authenticated', 'public.camiones', 'insert, update, references')
+  and not has_any_column_privilege('authenticated', 'public.ubicaciones', 'insert, update, references'),
+  'authenticated no tiene INSERT/UPDATE/REFERENCES por columna en las tablas de negocio');
 
 select ok(
   not has_any_column_privilege('service_role', 'public.productos', 'insert, update, references'),
@@ -91,9 +93,9 @@ select ok(
     select 1 from pg_class c, aclexplode(c.relacl) a
      where c.oid in ('public.empresas'::regclass, 'public.perfiles'::regclass,
                      'public.productos'::regclass, 'public.camiones'::regclass,
-                     'public.clientes'::regclass)
+                     'public.clientes'::regclass, 'public.ubicaciones'::regclass)
        and a.grantee = 0),
-  'PUBLIC no tiene privilegios sobre las cinco tablas');
+  'PUBLIC no tiene privilegios sobre las seis tablas');
 
 -- ---------------------------------------------------------------------------
 -- Catálogo genérico: cualquier tabla futura de public que se salga del modelo
