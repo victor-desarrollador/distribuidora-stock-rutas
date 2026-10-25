@@ -176,6 +176,7 @@ select is(
         'crear_camion(text,text)',
         'crear_cliente(text,text,text,text)',
         'crear_producto(text,text,text,text,numeric,integer)',
+        'mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.actualizar_camion(uuid,text,text)',
         'privado.actualizar_cliente(uuid,text,text,text,text)',
         'privado.actualizar_producto(uuid,text,text,numeric,integer)',
@@ -185,11 +186,14 @@ select is(
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
+        'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)',
         'registrar_ingreso(uuid,uuid,integer,text)',
+        'registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las veintidós firmas aprobadas: productos, camiones, clientes y stock (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las veintiséis firmas aprobadas: productos, camiones, clientes y stock (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)

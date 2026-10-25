@@ -1,4 +1,92 @@
 ---
+## 25/10/2026 — Etapa 2 — Stock, slice 2: stock-cuarentena-merma (local; sin commit)
+
+**Rama:** `feat/stock-cuarentena-merma-etapa-2` desde `main` = `d1ce951cf82984a403606e452ce0064de3773ef2` (merge del PR #20, stock-ingreso) · **Autorización humana explícita:** implementar el slice 2 de la Etapa 2 en local con las decisiones D1–D9. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. El preámbulo de `AGENTS.md` §1.3 se presentó antes del primer cambio.
+
+### Objetivo
+Dos operaciones que debitan el depósito sobre el ledger del slice 1 (Blueprint §7.4, §7.7, §7.9.1): `mover_a_cuarentena` (depósito → cuarentena) y `registrar_merma` (depósito → exterior), con idempotencia, saldo nunca negativo y serialización por advisory lock.
+
+**Fuera de alcance (no implementado):** `cuarentena_apta`, merma desde cuarentena, camión como origen, carga, jornadas, ventas, devoluciones, conteos, regularizaciones, `ajuste`, negativo transitorio, frontend y Fase 2.
+
+### Decisiones humanas aprobadas (dominio Stock; registradas en ADR-001 §18.3, slice 2)
+- **D1:** ambas RPC para dueño y encargado, sin diferencias; vendedor → `PT403`. **D2:** motivo de cuarentena obligatorio (`btrim`; vacío → `PT400 stock_motivo_invalido`). **D3:** origen sólo depósito (cuarentena/camión → `PT400 stock_origen_invalido`). **D4:** sin merma desde cuarentena. **D5/D6:** `motivo_codigo` con el catálogo literal de Blueprint §7.7; `otro` exige texto; NULL para ingreso y cuarentena. **D7:** índice único parcial de operaciones unitarias. **D8:** la policy exige destino depósito para el ingreso. **D9:** una migración y un archivo de tests (precisión humana posterior: D9 no limita los archivos de prueba; los de aislamiento van aparte, ver más abajo).
+- **Huellas v1:** `v1|a_cuarentena|<producto>|<origen>|<cantidad>|<m>` y `v1|merma|<producto>|<origen>|<cantidad>|<codigo>|<m>`.
+- **Lock:** `pg_advisory_xact_lock(hashtextextended('stock:'||empresa||':'||origen||':'||producto, 0))`, uno por RPC, después de idempotencia + producto + origen y antes de leer el saldo.
+- **Aislamiento (corrección pre-commit autorizada):** las dos RPC exigen `READ COMMITTED` (P13-stock) y, con cualquier otro nivel, fallan cerradas con `PT500 stock_error_interno` como primera comprobación, sin cambiar el aislamiento del caller.
+
+### Migración `20261025033454_stock_cuarentena_merma.sql`
+- Guardia `current_user = postgres` y verificación previa de que los datos existentes (sólo ingresos, un movimiento por operación) cumplen el modelo nuevo.
+- `operaciones_tipo_valido` y `movimientos_stock_tipo_valido`: `ingreso`, `a_cuarentena`, `merma`. `movimientos_stock_forma_por_tipo` con la forma de cada tipo. Columna `motivo_codigo text` + `movimientos_stock_motivo_codigo_valido` (catálogo) + `movimientos_stock_motivo_por_tipo`. Índice `movimientos_stock_operacion_unitaria_unica`.
+- `propietario_rpc`: `INSERT (motivo_codigo)` agregado; sin UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN. Sin excepción nueva para `service_role` (P11).
+- Policies de INSERT de `propietario_rpc` endurecidas: operaciones con los 3 tipos; ledger con tipo igual al de la operación (misma empresa y actor) y forma por tipo contra `public.ubicaciones` de la empresa (ingreso → depósito; `a_cuarentena` depósito → cuarentena; merma depósito → NULL).
+- `privado.mover_a_cuarentena` / `privado.registrar_merma` (SECURITY DEFINER de `propietario_rpc`, `search_path=''`) y fachadas `public` SECURITY INVOKER de `postgres` (EXECUTE sólo `authenticated`, sin sobrecargas). Orden: `transaction_isolation = 'read committed'` (si no, `PT500 stock_error_interno`; `privado.usuario_actual()` se evalúa después, no en el `DECLARE`) → identidad/perfil/rol → clave, cantidad, motivo/código, producto y origen no NULL → huella → reserva `ON CONFLICT DO NOTHING` / replay → producto de la empresa y activo → origen de la empresa y de tipo depósito → (cuarentena) destino único resuelto en el servidor → lock → saldo bigint → `stock_insuficiente` → un movimiento → `operaciones.id`. Sin `WHEN OTHERS`, sin COMMIT, sin dblink; sólo violaciones de restricción/privilegio en los inserts → `PT500 stock_error_interno`.
+- ACL fijada antes del `ALTER … OWNER` (O-3), CREATE temporal sobre `privado` revocado y bloque final fail-closed (seguridad, owner, `search_path`, ACL exacta, sobrecargas, grants de tablas, CREATE residual).
+
+### Tests
+- **Nuevo** `supabase/tests/stock_cuarentena_merma.test.sql` (150): catálogo (columna, constraints con su definición exacta, índice parcial, policies, fachadas e implementaciones, sin sobrecargas, sin parámetros de empresa/actor/tipo/destino/huella, grants de `propietario_rpc`, anon/`service_role` sin EXECUTE); cuarentena de dueño y encargado (1 operación + 1 movimiento, destino del servidor, motivo con trim, huella contra el literal canónico, `stock_actual` 15/5, stock exacto a 0, insuficiente sin efectos y sin reserva); orígenes cuarentena/camión/otra empresa/inexistente/NULL, producto de otra empresa/inactivo, motivo NULL/espacios, cantidades, clave NULL, empresa sin cuarentena; idempotencia (replay con stock ya insuficiente, conflicto por cantidad/origen/producto/motivo/tipo); merma con los seis códigos, texto opcional, `otro` con texto, código con `btrim`, huellas con y sin texto, código fuera del catálogo / mayúsculas / NULL / `otro` sin texto, desde cuarentena/camión/otra empresa, insuficiente, replay y conflictos; aislamiento B; autorización de ambas RPC (vendedor con metadata de dueño, privado por SQL, inactivo, sin perfil, sin `sub`, anon, `service_role`) sin efectos; replay con estado mutable (producto inactivo → mismo id; actor inactivo o degradado a vendedor → `PT403`, también en `registrar_ingreso`: cierra L-2 del slice 1); DML directo de dueño/encargado/vendedor/anon/`service_role` sobre ambas tablas sin cambios; `propietario_rpc` sin UPDATE/DELETE y policies endurecidas (D8 ingreso a cuarentena o camión, cuarentena hacia camión, desde camión, merma desde cuarentena, tipo distinto al de la operación, control positivo, D7 segundo movimiento); restricciones del ledger; atomicidad con reutilización de la clave; ningún saldo negativo.
+- **Nuevos** `supabase/tests/stock_aislamiento_repeatable_read.test.sql` y `stock_aislamiento_serializable.test.sql` (16 cada uno): cada archivo abre su transacción con `begin isolation level …` antes de cualquier consulta (el nivel se fija al abrirla; por eso no comparten archivo) y verifica el nivel efectivo. Ambas RPC, por fachada y por la implementación privada, devuelven `PT500 stock_error_interno` con un pedido válido de dueño y también con entradas que sin el guard darían otro resultado: clave NULL (PT400), replay legítimo (devolvería el id), vendedor (PT403), sin `sub` (PT401). Sin efectos: operaciones y ledger idénticos (md5), ninguna clave rechazada reservada y `stock_actual` sin cambios. La reutilización de la misma clave en `READ COMMITTED` después del rechazo no cabe en un solo archivo pgTAP (`plan()`/`finish()` viven en la transacción del archivo); se verificó con el arnés de concurrencia.
+- **Actualizados sin debilitar:** `stock_ingreso` (columnas con `motivo_codigo`, constraints exactas, columnas INSERT de `propietario_rpc`; la FK compuesta de producto se prueba con una operación sin movimiento para que no intervenga D7; el movimiento hacia una ubicación de B ahora lo rechaza la RLS de D8; la merma con destino se rechaza por forma), `productos_catalogo` y `camiones_catalogo` (DEFINER 11 → 13; auxiliares), `grants_default_privileges` (firmas de `authenticated` 22 → 26). `hardening_adr001` sin cambios (no hay tablas nuevas).
+
+### Hallazgo de la autorrevisión: aislamiento transaccional (corregido antes del commit)
+- Bajo `READ COMMITTED` el advisory lock serializa el débito correctamente: cada sentencia toma una instantánea nueva y el saldo se lee después de obtener el lock.
+- Bajo `REPEATABLE READ` o `SERIALIZABLE` la instantánea queda fija desde la primera consulta de la transacción: S2 esperaba el lock (~1,5 s) y después leía el saldo previo al commit de S1. Con 10 unidades, 7 ‖ 7 confirmaban ambas y el saldo quedaba en **−4** (en `SERIALIZABLE` no hubo `40001`: hay un único conflicto lectura-escritura). No es un defecto de esos niveles de PostgreSQL, sino la combinación de una instantánea fija con un algoritmo diseñado para `READ COMMITTED`. Por la API no era alcanzable (PostgREST usa `read committed` y el cliente no puede cambiarlo), pero el código no lo exigía.
+- Corrección: guard al comienzo de `privado.mover_a_cuarentena` y `privado.registrar_merma` (`pg_catalog.current_setting('transaction_isolation') <> 'read committed'` → `PT500 stock_error_interno`, sin `DETAIL`/`HINT`), antes de `privado.usuario_actual()`, perfiles, idempotencia, producto, ubicación, lock y saldo. Error público reutilizado (no amplía P16-stock). No cambia el aislamiento del caller. El `DECLARE` sólo conserva `btrim` de los parámetros.
+- Manejo de errores sin cambios: el guard no está dentro de ningún bloque `EXCEPTION`; los únicos handlers siguen envolviendo los dos `INSERT` (4 clases de restricción/privilegio). Sin `WHEN OTHERS`; `40001`, `40P01`, `55P03` y `57014` se propagan.
+
+### Concurrencia (arnés ad hoc no versionado, dos conexiones reales, base local)
+No hay directorio `scripts/` y `supabase/tests/` sólo contiene `*.test.sql`; el arnés quedó fuera del repositorio. S1 retiene el lock 2 s; S2 arranca 0,5 s después. Resultados con el guard:
+| Caso | Resultado |
+|---|---|
+| C1a cuarentena 7 ‖ merma 7 sobre 10 (`READ COMMITTED`) | una OK, la otra `stock_insuficiente` tras esperar ~1,52 s; saldo 3 |
+| C1b merma 7 ‖ cuarentena 7 sobre 10 (`READ COMMITTED`) | ídem; saldo 3 |
+| C2 cuarentena 4 ‖ merma 5 sobre 10 | ambas OK (la segunda espera ~1,53 s); saldo 1 |
+| C1a/C1b con S2 en `REPEATABLE READ` | S2 `PT500 stock_error_interno` sin esperar el lock (0,00 s); saldo 3 |
+| C1a/C1b con S2 en `SERIALIZABLE` | ídem; saldo 3 |
+| Misma clave: rechazo en `REPEATABLE READ`/`SERIALIZABLE` y reintento en `READ COMMITTED` (ambas RPC) | 1º `PT500`, clave no reservada; 2º OK con la misma clave, 1 movimiento |
+| C3 otro producto (clave de lock independiente) | sin esperar el lock ajeno: ~0,01 s (tolerancia < 1,0 s con S1 reteniendo 2 s); PASS |
+| C4 misma clave y mismo payload | S2 espera ~1,53 s y devuelve el mismo `operaciones.id`; exactamente 1 movimiento; saldo final 7; PASS |
+
+### Mutaciones (arnés ad hoc no versionado)
+pgTAP sobre `stock_cuarentena_merma`, `stock_ingreso`, `ubicaciones` y los dos archivos de aislamiento, en transacción revertida; control 383 `ok` (150 + 119 + 82 + 16 + 16), 0 `not ok`, 0 errores SQL. Las de lock (1, 2 y 10) se aplicaron de forma persistente y se corrió el arnés de concurrencia en `READ COMMITTED`; se restauró y la base se reinició con `db reset`. Ninguna detección proviene de SQL roto ni de errores de setup; las fallas en cascada se indican.
+| # | Mutación | Resultado |
+|---|---|---|
+| 1 | sin lock (cuarentena) | **detectada:** C1a, C1b y cuarentena ‖ cuarentena sin espera (0,01 s), ambas OK, saldo −4 |
+| 2 | saldo leído antes del lock (cuarentena) | **detectada:** C1b y cuarentena ‖ cuarentena: S2 espera ~1,53 s y aun así confirma, saldo −4 (lectura vieja, no falta de lock). C1a no la detecta por el orden |
+| 3 | sin chequeo de suficiencia (ambas) | **detectada:** 5 aserciones (`stock_insuficiente`, sin efectos, saldo nunca negativo) |
+| 4 | cuarentena permitida como origen | **detectada:** «origen cuarentena: PT400» |
+| 5 | vendedor permitido (ambas) | **detectada:** 4 aserciones de PT403 del vendedor |
+| 6 | sólo se quita el filtro de empresa del origen en la RPC (ambas) | **equivalente funcional bajo la RLS actual:** 0 fallas y 0 diferencias en 14 casos (7 × 2 RPC: mismo SQLSTATE y mensaje, sin efectos). La policy SELECT de `propietario_rpc` sobre `ubicaciones` (sin BYPASSRLS; perfil 1:1 cuya empresa queda fijada por el `KEY SHARE` de `operaciones_actor_fk` desde la reserva) ya oculta las filas de otra empresa. Canal temporal residual medido en local: ~48 µs más para un UUID existente en otra empresa que para uno inexistente (6 rondas × 5000 llamadas; en el control la diferencia es ruido). El filtro se conserva como defensa en profundidad y para homogeneizar el comportamiento; no se agregó un test de tiempo |
+| 6p | sólo se abre la policy SELECT de `propietario_rpc` sobre `ubicaciones` (filtro de la RPC intacto) | **equivalente funcional bajo el filtro de la RPC:** 0 fallas |
+| 6b | filtro de la RPC quitado + policy abierta | **detectada** por el aislamiento entre empresas: «origen de otra empresa: PT404» y «merma desde un depósito de otra empresa» |
+| 7 | huella sin origen (cuarentena) | **detectada:** «conflicto por origen» y literal canónico |
+| 8 | merma con destino (CHECK) | **detectada:** «una merma con destino se rechaza (forma)» y constraints exactas en ambos archivos; en cascada, 145 (23505 por D7) y 146/147/149 (PT409: la merma del 139 consumió 1 unidad) |
+| 9 | policy `a_cuarentena` sin exigir destino cuarentena | **detectada:** «a_cuarentena de depósito hacia un camión: rechazado por RLS»; en cascada, el control positivo (D7) |
+| 10 | clave de lock distinta en cuarentena | **detectada:** C1a y C1b sin espera, saldo −4; cuarentena ‖ cuarentena sigue serializada (es la clave distinta, no la falta de lock) |
+| 11 | sin guard de `transaction_isolation` (ambas) | **detectada:** 15/16 aserciones en cada archivo de aislamiento (todas menos la del nivel efectivo) |
+
+**Resumen:** 10/10 mutaciones no equivalentes detectadas (1–5 y 7–11); 6 y 6p son funcionalmente equivalentes entre sí (cada capa cubre a la otra) y quedan fuera del denominador; 6b, defensa en profundidad, detectada. Las mutaciones 1, 2 y 10 no las detecta pgTAP: sólo el arnés de concurrencia.
+
+### Verificación (local)
+| Verificación | Resultado |
+|---|---|
+| `git diff --check` | exit 0 |
+| `npx supabase db reset` | OK, 10 migraciones + seed |
+| `npx supabase test db` | **PASS, 942/942** en 11 archivos (+150 de `stock_cuarentena_merma`, +16 + 16 de aislamiento) |
+| `npx supabase db lint` | «No schema errors found» |
+| `npx supabase db advisors --local` | «No issues found» |
+| typecheck / lint / build | exit 0 / exit 0 / exit 0 (gate previo a la corrección de aislamiento; la corrección no toca frontend) |
+| Vitest | 25 archivos / 805 tests (ídem) |
+| Playwright | 76/76 (ídem) |
+
+### Riesgos y pendientes
+- El filtro de empresa del origen en la RPC y la RLS de `ubicaciones` se cubren mutuamente; quitar sólo uno de los dos no cambia el resultado funcional (mutaciones 6 y 6p). Quitar el filtro de la RPC agregaría el canal temporal de ~48 µs.
+- Las fixtures de cuarentena dependen de la cuarentena única por empresa (`ubicaciones_fija_unica`); sin cuarentena la RPC falla cerrado (`PT500`).
+- **MEDIUM conocido:** las mutaciones 1, 2 y 10 sólo las detecta el arnés de concurrencia, que no está versionado. Además el CI no ejecuta Supabase (ni pgTAP ni el arnés). La tolerancia de C3 depende del tiempo.
+- Superficie sensible (ledger, RLS, grants, SECURITY DEFINER, idempotencia, concurrencia): **corresponde security review** y auditoría independiente del hash que se commitee. Staging de ubicaciones + stock-ingreso sigue pendiente de autorización.
+
+**STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · REMOTE ACTIONS: NONE · SECRETS EXPOSED: NO.**
+
+---
 ## 25/10/2026 — Etapa 2 — Stock, slice 1: stock-ingreso (local; sin commit)
 
 **Rama:** `feat/stock-ingreso-etapa-2` desde `main` = `30451f4d090a8d824df23d939b087b4b313e91ec` (merge del PR #19, ubicaciones) · **Autorización humana explícita:** implementar el slice 1 de la Etapa 2 en local con las decisiones E1–E18 y la huella v1. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. El preámbulo de `AGENTS.md` §1.3 se presentó antes del primer cambio.

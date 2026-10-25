@@ -209,9 +209,11 @@ select is(
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
+        'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
-  'sólo las once implementaciones privadas (productos, camiones, clientes y stock) son SECURITY DEFINER');
+  'sólo las trece implementaciones privadas (productos, camiones, clientes y stock) son SECURITY DEFINER');
 
 select is(
   (select count(*)::int from pg_proc p
@@ -302,7 +304,8 @@ select is(
       and p.proname not in ('crear_camion', 'actualizar_camion',
                             'cambiar_estado_camion', 'crear_cliente',
                             'actualizar_cliente', 'validar_cliente',
-                            'cambiar_estado_cliente', 'registrar_ingreso')
+                            'cambiar_estado_cliente', 'registrar_ingreso',
+                            'mover_a_cuarentena', 'registrar_merma')
       and (has_function_privilege('authenticated', p.oid, 'execute')
            or has_function_privilege('anon', p.oid, 'execute')
            or p.proacl is null
