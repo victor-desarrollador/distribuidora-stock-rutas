@@ -1,4 +1,113 @@
 ---
+## 25/10/2026 — Documental (cierre): ADR-005 §2.3.1 limitada al desbordamiento (M-3 / L-1)
+
+**Rama:** `docs/fiambres-peso-presupuestos` (base `b60a6d1`). **Sólo documental**, autorizada por decisión humana tras la segunda revisión documental completa.
+
+- **ADR-005 §2.3.1:** la regla de error queda limitada a **desbordamiento o valor fuera del rango representable** (falla con error; nunca devuelve un valor aproximado). Un resultado monetario exacto con más de 2 decimales **no** es un error automático: su conversión al importe final se rige por **D-R1**, que sigue **completamente pendiente**.
+- **ADR-005 §4:** la regla de desbordamiento se atribuye sólo a ADR-005 §2.3.1 (no a `BLUEPRINT.md` §7.1). El Blueprint no cambió en esta corrección.
+
+**CODE/SQL/MIGRATIONS/TESTS: NOT MODIFIED · STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED.**
+
+---
+## 25/10/2026 — Documental (tercera pasada): bloqueos M-1/M-2 y observaciones L-1–L-3 de la revisión completa (sin commit)
+
+**Rama:** `docs/fiambres-peso-presupuestos` (base `b60a6d1`). **Sólo documental**, con decisiones humanas explícitas del 25/10/2026 sobre los hallazgos de la revisión documental completa. Esta entrada deja superado lo que las dos entradas anteriores de este día dicen sobre ADR-003 «reemplazada parcialmente» y sobre la presentación «hasta 3 decimales».
+
+### Decisiones humanas aplicadas
+- **M-1:** ADR-003 pasa a **REEMPLAZADA por ADR-005**, en su totalidad y sin autoridad normativa. Los principios generales que siguen vigentes (2 decimales en precios, `>= 0`, aritmética exacta sin `float`, snapshot) rigen por `BLUEPRINT.md` §7.1 y ADR-005 §2. Se actualizaron el encabezado y la nota de ADR-003, la nota de ADR-002, el índice `docs/decisions/README.md`, ADR-005 (encabezado y §4) y las menciones en Blueprint y PRD. El principio de «fallar cerrado» que antes sólo estaba en ADR-003 §2.3 quedó explícito en ADR-005 §2.3.1.
+- **M-2:** **D-R1 queda completamente pendiente** (destino, regla de empate, momento y escala intermedia). Se quitaron «redondeo a centavos», «una sola vez por línea» y «único redondeo final por línea» de ADR-005, Blueprint y PRD. Siguen vigentes: nunca `float`, aritmética exacta y la fórmula conceptual `gramos × precio_por_kg / 1000`.
+- **L-1:** se separa la **entrada** en kg (hasta 3 decimales; más de 3 se rechaza sin redondear) de la **presentación** (3 decimales fijos). Los gramos enteros siguen siendo el canónico.
+- **L-2:** el **origen del precio** de cada línea del presupuesto queda pendiente (automático desde el catálogo, editable o no, quién lo modifica). Se quitó «se toma el precio vigente del catálogo».
+- **L-3:** «presupuesto emitido» pasa a «presupuesto guardado». No se introduce ningún ciclo de vida ni estado.
+
+### Cómo se verificó
+`git diff --check`, `git status --short`, `git diff --stat` y búsquedas `rg` de las frases eliminadas, de ADR-003/media pieza y de D-R1/redondeo, con las apariciones residuales clasificadas.
+
+**CODE/SQL/MIGRATIONS/TESTS: NOT MODIFIED · STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · COMMIT: NOT CREATED.**
+
+---
+## 25/10/2026 — Documental (segunda pasada): AGENTS y análisis de base de datos alineados con ADR-005 (sin commit)
+
+**Rama:** `docs/fiambres-peso-presupuestos` (misma tarea que la entrada siguiente; base `b60a6d1`). **Sólo documental**, autorizada por el humano en dos correcciones puntuales.
+
+### Qué se hizo
+- `AGENTS.md` §10: la regla «Los fiambres se venden por pieza y media pieza» se reemplazó por una regla breve alineada con ADR-005 (`unidad` en cantidad entera; `peso` en kg con hasta 3 decimales y gramos enteros como canónico; nunca `float` para cantidades ni dinero) con enlace a ADR-005. En §7 se aclaró que `piezas_a_medias`/`medias_a_piezas` son identificadores existentes del prototipo cuya semántica revisa la tarea de migración.
+- `docs/architecture/analisis-base-datos.md` v0.2 → **v0.3**: bloque en §0 que separa el **modelo histórico** pieza/media pieza, el **modelo objetivo** de ADR-005 («implementación pendiente») y el **SQL/prototipo actual** pendiente de migración; filas de `productos`, `movimientos_stock.cantidad` y `venta_items` alineadas sin fijar columnas ni tipos SQL definitivos.
+
+### Cómo se verificó
+`git diff --check` (exit 0), `git status --short`, `git diff --stat` y `rg` global de `fiambres.*pieza|pieza.*fiambre|media pieza|medias piezas|precio_media|precio_pieza|no existe.*kg` sobre `AGENTS.md`, `BLUEPRINT.md` y `docs/`. **Sin contradicciones reales restantes:** las apariciones son históricas (ADR-002/003, historial de versiones, requisito de migración, bitácora), estado actual pendiente de migración (SQL local, prototipo, D-R4) o referencias explícitas a la regla reemplazada.
+
+**CODE/SQL/MIGRATIONS/TESTS: NOT MODIFIED · STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · COMMIT: NOT CREATED.**
+
+---
+## 25/10/2026 — Documental: fiambres por peso (ADR-005) y módulo Presupuestos (sin implementación; sin commit)
+
+**Rama:** `docs/fiambres-peso-presupuestos` desde `main` = `b60a6d1ef23189649dc67bee22059eea2859e5e4` (merge del PR #21, stock-cuarentena-merma). **Tarea sólo documental:** sin código, SQL, migraciones, pruebas, Supabase, frontend, Vercel, staging ni producción. Sin commit hasta la revisión humana.
+
+### Origen
+Reunión con el cliente, registrada el 25/10/2026. Decisiones confirmadas:
+- **Fiambres por peso:** ya no se venden por pieza ni media pieza; se venden por peso, expresado en kg con cantidades fraccionarias (por ejemplo, `28,680 kg`, `47,300 kg`; son evidencia de precisión, no fixtures) y con precio por kg.
+- **Presupuestos:** nuevo requisito. Encabezado con `PRESUPUESTO`, número, fecha, hora, nombre del cliente, cuenta (si tiene) y DNI. Tabla con Cantidad (kg), Código, Descripción, Precio, % IVA e Importe. **Sin descuentos.** **IVA 21% sólo visual** (no se calcula, suma, resta ni desglosa). Importe = cantidad × precio y total = suma de importes. No es factura y no integra ARCA.
+
+Decisiones humanas tomadas en esta tarea (AskUserQuestion, 25/10/2026):
+- **ADR-005 APROBADA**, incluida la representación canónica en gramos enteros. No autoriza migraciones ni implementación.
+- **Presupuestos en Fase 1**, con entrega (1A/1B) pendiente.
+- Generan presupuestos **dueño y encargado**; el **vendedor/piloto queda pendiente**.
+- Un presupuesto admite productos **`peso` y `unidad`**.
+
+### Qué se hizo
+- **Nueva** `docs/decisions/005-fiambres-por-peso-gramos.md`:
+  - forma de venta `unidad`/`peso`, kg con hasta 3 decimales en pantalla, gramos enteros como canónico, más de 3 decimales rechazado y conversión sin punto flotante;
+  - dinero en `numeric(14,2)` e importe conceptual `gramos × precio_por_kg / 1000`;
+  - ADR-003 reemplazada parcialmente; consecuencias sobre productos, ledger, carga, ventas, retornos, rendición, precios, pruebas y prototipo/`localStorage`;
+  - pendientes D-R1–D-R4 y fuentes oficiales.
+- `BLUEPRINT.md` v2.0 → **v2.1**:
+  - §2 (unidades y presupuestos), §4 (productos y fila Presupuestos), §5 (presupuesto ≠ factura);
+  - §7.1 reescrita, §7.4 (gramos), §7.5 (ítems de venta), **§7.10 Presupuestos (nueva)**;
+  - §8 (`productos`, `clientes`, `venta_items`, `presupuestos`, `presupuesto_items` y restricciones), §9 (roles), §11 (kg en reportes), §12 (pruebas de peso y de presupuestos; se quitan las de media pieza);
+  - §14 (Presupuestos y cambio de modelo a peso), §15 (pendientes nuevos), §16 (glosario), §17;
+  - desambiguación «presupuesto» (módulo) ↔ «cotización comercial del proyecto».
+- `docs/PRD.md` 0.10 → **0.11**: §0, RF-01, **RF-12 y §7.1 Presupuestos**, roles, §9, §13, §17, §21 (pendientes 15–19), §22.
+- `docs/decisions/README.md`: índice con ADR-005 y estado de ADR-003.
+- Notas de supersesión **sin cambiar el contenido histórico**: `003-precio-derivado-media-pieza.md`, `002-precios-independientes-pieza-media.md` y `docs/requirements/migracion-unidades-prototipo.md`.
+
+### Skills usadas
+- **source-driven-development:** se verificaron en la documentación oficial de PostgreSQL:
+  - `numeric` es exacto y es el recomendado para importes;
+  - `real`/`double precision` son inexactos;
+  - rangos de `integer`/`bigint`;
+  - redondeo implícito al guardar con más escala que la declarada;
+  - `round(numeric)` rompe los empates alejándose de cero.
+
+  Además, en MDN, `Number.MAX_SAFE_INTEGER`. Se comprobó en Node que `1.005 * 1000` da `1004.9999999999999`. No se encontró razón para preferir otra representación exacta: kg en `numeric(…,3)` también es exacto, pero rompe la invariante entera del ledger ya implementado (ADR-005 §3).
+- **api-and-interface-design:** modelo conceptual de presupuesto separado de venta (sin operación de stock, pagos ni jornada); snapshot de cliente y producto frente a referencias mutables; IVA como dato informativo nombrado sin ambigüedad; sin campos de descuento «por si acaso»; número, hora y snapshot asignados por el servidor (consideración técnica marcada PROPUESTA TÉCNICA NO APROBADA). Sin API ni SQL definitivos.
+- **grilling:** una ronda de cuatro preguntas (estado de la ADR, fase, roles y tipos de producto). El resto de las ramas abiertas se registró como pendiente, sin asumir respuestas.
+
+### Pendientes registrados (no resueltos)
+- D-R1, redondeo monetario por peso.
+- D-R2, pesaje en la operación.
+- D-R3, tolerancia de diferencias de pesaje.
+- D-R4, datos locales/staging en medias piezas.
+- Presupuestos: numeración (secuencia, formato, reinicio, unicidad, anulación), ciclo de vida, vigencia, conversión a venta, vendedor/piloto, cliente no registrado, edición manual del precio y entrega.
+- Clientes: DNI y cuenta (hoy no existen en `public.clientes`) y significado de «cuenta».
+
+### Contradicciones detectadas fuera del alcance editado (no modificadas)
+- `AGENTS.md` §10: «Los fiambres se venden por pieza y media pieza.» Contradice ADR-005; el Blueprint prevalece (`AGENTS.md` §1.1). Su corrección requiere autorización.
+- `docs/architecture/analisis-base-datos.md` (v0.2, líneas 43 y 141): `forma_venta (unidad/pieza)` y «medias piezas». Es un análisis derivado y queda desactualizado.
+- `INVENTARIO_ETAPA_0.md`: referencias a `kg` y a la media pieza como evidencia del estado del 16/10/2026. Histórico, no se toca.
+- Código y SQL locales (`productos`, `cantidades.ts`, `precios.ts` y sus pruebas): siguen con pieza/media pieza. Esperado: lo cambia la tarea de implementación de ADR-005.
+
+### Cómo se verificó
+`git diff --check`, `git status --short`, `git diff --stat`, y una búsqueda global con `rg` de pieza/media/kg/presupuesto/descuento/IVA/factura clasificada por vigencia. No se corrió la suite técnica: la tarea es docs-only y no toca código.
+
+### Riesgos
+- Hasta implementar ADR-005, el SQL local y el prototipo contradicen el Blueprint.
+- Las Etapas 3–4 (carga, ventas, conteos) no deben diseñarse sobre medias piezas.
+- La implementación toca `movimientos_stock`, productos y precios, así que **corresponde security review**.
+
+**STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · CODE/SQL/TESTS: NOT MODIFIED · COMMIT: NOT CREATED.**
+
+---
 ## 25/10/2026 — Etapa 2 — Stock, slice 2: stock-cuarentena-merma (local; sin commit)
 
 **Rama:** `feat/stock-cuarentena-merma-etapa-2` desde `main` = `d1ce951cf82984a403606e452ce0064de3773ef2` (merge del PR #20, stock-ingreso) · **Autorización humana explícita:** implementar el slice 2 de la Etapa 2 en local con las decisiones D1–D9. **No autorizado y no realizado:** staging, producción, push, PR, merge, deploy ni commit. El preámbulo de `AGENTS.md` §1.3 se presentó antes del primer cambio.

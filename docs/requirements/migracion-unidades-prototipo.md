@@ -5,6 +5,8 @@
 **Estado:** **requisito documental**. Define qué hay que migrar y cómo se aceptará. **No autoriza** todavía la modificación de código: la implementación queda **pendiente de autorización humana**. La estrategia de versionado de `localStorage` (`v1 → v2`, §7-bis) es una **decisión humana aprobada** (18/10/2026).
 **Fuente de verdad:** `BLUEPRINT.md` v1.6 §2 y §7.1 (decisión humana de unidades), §7.4, §12; `AGENTS.md` §3 y §5; `docs/PRD.md` (RF-01, §9). Si algo de este documento contradice el Blueprint, manda el Blueprint.
 
+> **Nota posterior (25/10/2026). Histórico en lo referido a pieza/media pieza y `kg`.** [ADR-005](../decisions/005-fiambres-por-peso-gramos.md) reemplaza la regla de unidades de este requisito: los fiambres se venden por peso (entrada en kg con hasta 3 decimales; visualización en kg con 3 decimales fijos; gramos enteros como representación canónica objetivo) y `kg` vuelve a ser una unidad comercial válida para fiambres. Los objetivos «sin `kg`» y «fiambres en medias piezas» de este documento **ya no son requisitos**. Sigue vigente, como principio, que un cambio de semántica de cantidades del prototipo no reinterpreta datos persistidos: versión nueva de las claves, inicialización limpia y ninguna migración automática (§7 y §7-bis). El nuevo requisito de migración del prototipo se define en la tarea que implemente ADR-005. El contenido de abajo se conserva sin cambios.
+
 > **Aviso de alcance.** Este documento **no implementa** nada ni amplía otras decisiones. ADR-001 está **APROBADA PARA VALIDACIÓN CONTROLADA**, pero este requisito de unidades no habilita Supabase, SQL, migraciones, RLS, RPC ni cambios de seguridad (§10).
 
 ---

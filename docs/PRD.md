@@ -1,19 +1,19 @@
 # PRD — Sistema de Control de Stock y Rendición
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 23/10/2026
-**Versión:** 0.10
-**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v2.0; **no lo reemplaza**.
+**Fecha:** 25/10/2026
+**Versión:** 0.11
+**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v2.1; **no lo reemplaza**.
 **Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
 
 ---
 
 ## 0. Cómo leer este documento
 
-- **Fuente de verdad:** `BLUEPRINT.md` v2.0, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR vigentes y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
+- **Fuente de verdad:** `BLUEPRINT.md` v2.1, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR vigentes y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
 - **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
 - **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
-- **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.5, **APROBADA PARA VALIDACIÓN CONTROLADA**), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (estado `aprobada`). ADR-001 resolvió P1/P19/P20, P2–P4, P5–P7 y, para validación controlada, P11 (§18.2); P8–P10 y P12–P17 siguen pendientes y P18 es una decisión futura separada. Su estado permite validación sólo local/staging y no autoriza producción. ADR-002 es histórica y superada; ADR-003 establece que el precio de media pieza se deriva del de pieza completa (mitad, redondeada al peso entero, `.50` sube) y no es configurable.
+- **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.5, **APROBADA PARA VALIDACIÓN CONTROLADA**), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (`reemplazada` por ADR-005; histórica, sin autoridad normativa), **ADR-005 — Fiambres por peso y unidad mínima en gramos** (estado `aprobada`; no autoriza migraciones ni implementación). ADR-001 resolvió P1/P19/P20, P2–P4, P5–P7 y, para validación controlada, P11 (§18.2); P8–P10 y P12–P17 siguen pendientes y P18 es una decisión futura separada. Su estado permite validación sólo local/staging y no autoriza producción. ADR-002 es histórica y superada. ADR-003 regía el precio derivado de media pieza; desde el 25/10/2026 ADR-005 la reemplaza en su totalidad: los fiambres se venden por peso, en kg en pantalla, con gramos enteros como canónico y precio por kg.
 - **Fase 2:** lo listado en Blueprint §5 permanece fuera de Fase 1.
 - Este documento **no inventa** decisiones ausentes: donde falta definición, remite a «Decisiones pendientes» (§21), a «Dependencias de ADR» (§22) y al Blueprint §15.
 
@@ -72,8 +72,8 @@ Tres roles, con las capacidades confirmadas en Blueprint §9. No se crean roles 
 
 | Rol | Puede | No puede |
 |---|---|---|
-| **Dueño** | Visión general; administrar usuarios, clientes, productos, stock, jornadas y rendiciones; autorizar gastos y retiros; confirmar recepción de retiros. | Borrar movimientos confirmados sin reversión auditada. |
-| **Encargado** | Operación general; editar y validar clientes; administrar cargas, conteos, cierre con diferencias, gastos y retiros de efectivo. | Administrar roles globales ni borrar historial sin compensación. |
+| **Dueño** | Visión general; administrar usuarios, clientes, productos, stock, jornadas y rendiciones; autorizar gastos y retiros; confirmar recepción de retiros; generar y consultar presupuestos. | Borrar movimientos confirmados sin reversión auditada. |
+| **Encargado** | Operación general; editar y validar clientes; administrar cargas, conteos, cierre con diferencias, gastos y retiros de efectivo; generar y consultar presupuestos. | Administrar roles globales ni borrar historial sin compensación. |
 | **Vendedor / Piloto** | Ver su jornada y clientes necesarios; **crear cliente nuevo**; registrar ventas y pagos mixtos; transcribir papel; finalizar ventas (`ventas_finalizadas`); confirmar entrega de retiro de dinero. | Editar ficha de cliente existente, cambiar precios maestros, aprobar su propio conteo/rendición, registrar retiros como receptor autorizado. |
 
 Reglas transversales de rol (Blueprint §3.2, §7.5, §9):
@@ -81,6 +81,7 @@ Reglas transversales de rol (Blueprint §3.2, §7.5, §9):
 - **Quien cuenta el regreso no es el vendedor** de esa jornada; si no hay otra persona disponible, el conteo queda pendiente, sin auto-bypass.
 - La separación vendedor/conteo se valida **por participación real** en la jornada, incluso si una persona acumula permisos.
 - El vendedor **puede crear** clientes nuevos pero **nunca editar** fichas existentes (Blueprint §2, §7.5).
+- Si el vendedor/piloto puede generar o consultar presupuestos está **pendiente** (Blueprint §9, §15).
 
 ---
 
@@ -110,7 +111,7 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 
 | ID | Requisito | Entrega | Fuente |
 |---|---|---|---|
-| RF-01 | **Productos:** alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad`/`pieza`), precio, stock mínimo. **Lácteos por unidad entera; fiambres por pieza/media pieza; sin `kg` en Fase 1.** **Fiambres: solo se configura el precio de pieza completa; el de media pieza se deriva (mitad, redondeada al peso entero, `.50` sube) y no es configurable (ADR-003 — Precio derivado de media pieza).** | 1A | Blueprint §4, §7.1 |
+| RF-01 | **Productos:** alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad`/`peso`), precio, stock mínimo. **Lácteos por unidad entera; fiambres por peso** (ADR-005): cantidades en **kg**, ingresadas con **hasta 3 decimales** y mostradas con **3 decimales fijos**, guardadas como **gramos enteros**, y **precio por kg**. Sin pieza ni media pieza; nunca `float`. | 1A | Blueprint §4, §7.1 |
 | RF-02 | **Clientes:** consultar y buscar; **alta por vendedor** desde celular; dueño/encargado editan y validan. Historial básico. | 1A; altas móviles 1B | Blueprint §4, §7.5 |
 | RF-03 | **Depósito y camiones:** stock por ubicación, carga por jornada, movimientos auditados, cuarentena y retornos. | 1A | Blueprint §4, §7.2 |
 | RF-04 | **Jornadas:** una por camión y fecha, asignación de vendedor, preparación, salida, carga final de ventas, conteo por tercero, rendición y cierre. | 1A | Blueprint §4, §7.5 |
@@ -120,7 +121,8 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 | RF-08 | **Gastos en ruta:** registrados únicamente con autorización de dueño/encargado; afectan la conciliación como categoría separada de los retiros. | 1A registración autorizada / 1B móvil | Blueprint §4, §7.6 |
 | RF-09 | **Devoluciones y mermas:** motivos, clasificación por aptitud, segregación de cuarentena y trazabilidad. La aptitud se evalúa por producto; no hay autorización genérica para todo retorno. | 1A | Blueprint §4, §7.7 |
 | RF-10 | **Rendición:** mercadería esperada vs contada por estado; efectivo/transferencias/a cuenta/retiros separados; diferencias solo con aprobación y motivo. | 1A | Blueprint §4, §7.8 |
-| RF-11 | **Reportes y usuarios:** los 9 reportes de Blueprint §11, exportación CSV, 3 roles, RLS y auditoría. | 1A; ampliaciones 1B | Blueprint §4, §11 |
+| RF-11 | **Reportes y usuarios:** los 9 reportes de Blueprint §11, exportación CSV, 3 roles, RLS y auditoría. Cantidades por peso en kg con 3 decimales fijos. | 1A; ampliaciones 1B | Blueprint §4, §11 |
+| RF-12 | **Presupuestos:** generar, guardar y consultar presupuestos internos para clientes (ver §7.1 de este documento). Sin efecto sobre stock ni dinero; IVA 21% sólo informativo; sin descuentos. | Fase 1; entrega pendiente | Blueprint §4, §7.10 |
 
 **Sub-requisitos de integridad funcional** (reglas que atraviesan varios módulos):
 
@@ -136,6 +138,47 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 - **PROPUESTA NO APROBADA — Prohibición de descuentos** al vendedor y esquema de precio de lista vs aplicado (Blueprint §7.5, §15).
 - **PROPUESTA NO APROBADA — Retiro que supera el saldo registrado sin bloqueo** (Blueprint §7.6, §15).
 - **PROPUESTA TÉCNICA NO APROBADA — Vencimientos por partida de ingreso** (`partidas_ingreso`), sin saldo por partida ni FEFO (Blueprint §2, §4, §8, §15).
+
+### 7.1 Presupuestos (RF-12)
+
+Requisito confirmado por el cliente el 25/10/2026 (Blueprint §7.10). Fase 1; la entrega (1A/1B) está pendiente.
+
+**Historia.** Como **dueño o encargado**, quiero generar un presupuesto para un cliente con los productos, las cantidades, los precios y el total, para entregárselo como referencia, sin que eso registre una venta, mueva mercadería ni genere deuda.
+
+**Actores.** Dueño y encargado. **Vendedor/piloto: PENDIENTE** (no se asume que pueda generarlos ni consultarlos).
+
+**Flujo mínimo.**
+1. Iniciar un presupuesto.
+2. Seleccionar o identificar al cliente (nombre, cuenta si tiene, DNI). Si se admite un cliente no registrado está pendiente.
+3. Cargar productos, tanto `peso` (fiambres) como `unidad` (lácteos).
+4. Indicar la cantidad: en **kg, con hasta 3 decimales**, para productos `peso`; en unidades enteras para productos `unidad`.
+5. Registrar el precio aplicado a cada línea (por kg o unitario). El origen de ese precio (por ejemplo, automático desde el catálogo), si es editable y quién puede modificarlo están pendientes; sin descuentos en ningún caso.
+6. Mostrar `21%` en la columna `% IVA` de cada línea, **sólo como etiqueta**.
+7. Calcular el importe de cada línea: `cantidad × precio`. El redondeo por peso está pendiente (ADR-005 D-R1).
+8. Mostrar el total, que es la suma de los importes.
+9. Guardar el presupuesto con número, fecha y hora del servidor y snapshot de los datos del cliente y de los productos, y poder consultarlo después.
+
+**Contenido.**
+- Encabezado: `PRESUPUESTO`, número, fecha, hora, cliente, cuenta (si tiene) y DNI.
+- Tabla: Cantidad | Código | Descripción | Precio | % IVA | Importe.
+- Pie: `TOTAL PRESUPUESTO: $ …`.
+- En PC se muestra como tabla; en Android puede mostrarse como filas o tarjetas. Una impresión/PDF futura no está comprometida.
+
+**El presupuesto NO:**
+- descuenta stock, crea `movimientos_stock` ni reserva o compromete mercadería;
+- abre ni modifica jornadas;
+- registra pagos ni cobros, crea deuda ni saldo a cuenta, ni afecta la cuenta corriente;
+- afecta la rendición;
+- es una venta ni se convierte en venta (la conversión futura está pendiente);
+- es factura ni integra ARCA;
+- calcula, suma, resta ni desglosa IVA (no hay subtotal fiscal);
+- tiene descuentos de ningún tipo.
+
+**Snapshot.** Un presupuesto guardado conserva el código, la descripción, el precio aplicado, la cantidad y el importe de cada línea, y el nombre, la cuenta y el DNI del cliente. Cambios posteriores en el producto o en el cliente no lo alteran.
+
+**Dependencias.**
+- Hoy la ficha de cliente **no tiene DNI ni cuenta** (Blueprint §7.10.8); agregarlos es una decisión pendiente.
+- La numeración, el ciclo de vida, la vigencia y la conversión a venta están pendientes (§21).
 
 ---
 
@@ -164,7 +207,13 @@ Derivados de la tabla de alcance (Blueprint §4) y de las reglas de negocio (Blu
 - **El stock nunca se edita a mano.** Todo cambio es un movimiento registrado: quién, cuándo, por qué, cuánto, desde dónde y hacia dónde (Blueprint §3.1, §7.4).
 - **El stock de cada ubicación es la suma de sus movimientos.** Puede existir una tabla/vista de saldos mantenida por la misma transacción, pero el libro de movimientos es la verdad (Blueprint §7.4).
 - **Ubicaciones** (Blueprint §7.2): `deposito`, `cuarentena` (no vendible, no se puede cargar a un camión), `camion:<id>` (jornada abierta). **`merma` no es ubicación interna**; es una salida terminal (`tipo_movimiento = merma`). El cliente tampoco es ubicación interna; es contraparte comercial.
-- **Cantidades enteras en la unidad mínima.** **Lácteos** por **unidad entera**; **fiambres** por **pieza/media**, con representación canónica en **medias piezas** (entero); nunca decimales y **sin `kg` en Fase 1** (Blueprint §7.1). Ejemplo de consistencia categoría/unidad *(no es una regla de nombres)*: `Queso cremoso en bote` → Lácteos/`unidad`; `Queso cremoso en pieza` → Fiambres/`pieza`. Precio por pieza; el de media se deriva (mitad, redondeada al peso entero, `.50` sube) y no es configurable (ADR-003).
+- **Cantidades enteras en la unidad mínima** (Blueprint §7.1, ADR-005).
+  - **Lácteos:** `unidad`, en **unidades enteras**.
+  - **Fiambres:** `peso`, ingresados en kg con **hasta 3 decimales** (`1`, `1,2`, `1,25`, `1,250`), mostrados **con 3 decimales fijos** (`1,000 kg`, `28,680 kg`) y guardados como **gramos enteros** (`28680`). Más de 3 decimales de kg se rechaza, sin redondear.
+  - Nunca `float` ni conversiones en punto flotante.
+  - **Precio:** unitario para `unidad` y **por kg** para `peso`; no existen la pieza ni la media pieza.
+  - Ejemplo de consistencia categoría/unidad *(no es una regla de nombres)*: `Queso cremoso en bote` → Lácteos/`unidad`; un fiambre fraccionado → Fiambres/`peso`.
+  - **Pendientes:** redondeo monetario del importe por peso (D-R1), pesaje en la operación (D-R2), tolerancia de diferencias de pesaje (D-R3; hasta entonces, toda diferencia cuenta) y tratamiento de los datos locales/staging en medias piezas (D-R4).
 - **Tipos de movimiento** (Blueprint §7.4): `ingreso`, `carga_camion`, `venta`, `retorno_camion`, `devolucion_cliente`, `a_cuarentena`, `cuarentena_apta`, `merma`, `faltante_rendicion`, `sobrante_rendicion`, `ajuste`.
 - **No se permiten saldos negativos silenciosos.** Si una venta en papel aún no registrada hace que una venta posterior exceda el saldo informático, se registra una **incidencia de conciliación** y se exige regularización trazable por dueño/encargado; la venta física nunca se borra ni se inventa stock (Blueprint §7.4).
 - **Ajustes** con motivo obligatorio y permiso de administrador (Blueprint §7.4).
@@ -227,7 +276,7 @@ Reglas:
 - **Móvil (Android, vendedor/piloto en ruta):** registrar la jornada, crear clientes nuevos, registrar ventas y pagos mixtos, transcribir papel y finalizar ventas (`ventas_finalizadas`); en 1B, retiros en vivo y gastos (Blueprint §4, §7.5).
 - **Escritorio (depósito/administración):** productos, clientes, camiones, cargas, conteos, rendición, cierre, reportes y administración de usuarios (Blueprint §4, §11).
 - **Online-first:** la operación digital asume conexión; el talonario numerado de papel es la contingencia. No hay modo offline automático ni sincronización (Blueprint §2, §5).
-- **Reutilización del prototipo:** el prototipo actual (`apps/web/`) es **referencia de UX**, no de reglas. Sus pantallas y layouts pueden servir como referencia visual, pero la lógica debe reimplementarse conforme al Blueprint (`INVENTARIO_ETAPA_0.md`, §16–§17). No hay decisión registrada sobre el destino del prototipo (Blueprint §15; `INVENTARIO_ETAPA_0.md`, §18.20). El prototipo usa además `kg` y piezas enteras, lo que **no cumple** la regla de unidades vigente (Blueprint §7.1) y **requiere migración** (`docs/requirements/migracion-unidades-prototipo.md`). El versionado de las claves demo de `localStorage` (**v1 → v2**, con inicialización limpia y **sin migración automática** de cantidades) es una **decisión humana aprobada**; su ejecución queda pendiente de autorización.
+- **Reutilización del prototipo:** el prototipo actual (`apps/web/`) es **referencia de UX**, no de reglas. Sus pantallas y layouts pueden servir como referencia visual, pero la lógica debe reimplementarse conforme al Blueprint (`INVENTARIO_ETAPA_0.md`, §16–§17). No hay decisión registrada sobre el destino del prototipo (Blueprint §15; `INVENTARIO_ETAPA_0.md`, §18.20). El prototipo implementa hoy pieza/media pieza con precio derivado (ADR-003, claves `_demo_v4`), lo que **no cumple** la regla de unidades vigente (Blueprint §7.1, ADR-005). Requiere un cambio posterior autorizado con una versión nueva de las claves operativas, inicialización limpia y **sin reinterpretar** datos anteriores. `docs/requirements/migracion-unidades-prototipo.md` queda histórico en lo referido a pieza/media pieza.
 
 ---
 
@@ -277,7 +326,8 @@ Recuperación general: las correcciones sobre registros confirmados se hacen con
 
 Un módulo se considera terminado cuando cumple las **pruebas obligatorias** de Blueprint §12 y «nada se da por terminado sin prueba» (Blueprint §3.5). Criterios por área (no exhaustivos; el detalle está en Blueprint §12):
 
-- **Stock:** cargar descuenta depósito y suma camión por el mismo importe; no se carga más que lo disponible; no se carga cuarentena; media pieza guarda y vende en medias y se cobra con su precio derivado (ADR-003: con pieza = 21, `c=1 → 11`, `c=2 → 21`, `c=3 → 32`); la venta histórica conserva la media aplicada; el saldo de cada ubicación coincide con la suma de movimientos.
+- **Stock:** cargar descuenta depósito y suma camión por la misma cantidad; no se carga más que lo disponible; no se carga cuarentena; un fiambre `peso` guarda gramos enteros (`1,250 kg` → `1250`) y conserva el peso exacto al cargar, vender y retornar; más de 3 decimales de kg se rechaza; ningún cálculo usa `float`; el documento histórico conserva el precio aplicado y el importe; el saldo de cada ubicación coincide con la suma de movimientos.
+- **Presupuestos:** no crean movimientos de stock, pagos ni deuda; importe = cantidad × precio y total = suma de importes; IVA 21% sólo visual; sin descuentos; el snapshot no cambia si cambian el producto o el cliente; sólo dueño/encargado de la misma empresa (vendedor según decisión pendiente).
 - **Jornada:** no hay dos jornadas por camión y fecha (aunque una esté cerrada); el vendedor no registra el conteo de regreso; las notas de papel pendientes bloquean el conteo formal; no se cierra sin conteo; una jornada cerrada rechaza toda modificación.
 - **Rendición:** pago mixto suma el total; `a_cuenta` no suma al efectivo esperado; retiro confirmado por ambos descuenta caja exactamente una vez; dos solicitudes del mismo retiro producen una sola operación; gastos no autorizados no reducen la caja; devoluciones no se duplican; al cerrar, el stock del camión queda en 0.
 - **Ventas en papel:** número duplicado en cualquier jornada de la misma empresa/serie se rechaza; un salto de numeración genera aviso.
@@ -356,8 +406,13 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 10. **Gastos de ruta** — tipos, quién solicita/autoriza, comprobante, momento y efecto en la rendición.
 11. **Devoluciones por producto** — criterios documentables de aptitud apto/no apto.
 12. **Vencimientos** — fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. *(PROPUESTA NO APROBADA.)*
-13. ~~**Precio media pieza**~~ — **resuelto por ADR-003 (21/10/2026)**, que supera a ADR-002 (dos precios independientes, hoy histórica): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube).
-14. **Fechas** — día operativo, zona horaria del negocio y corte de jornada.
+13. ~~**Precio media pieza**~~ — resuelto por ADR-003 (21/10/2026) y **superado** por ADR-005 (25/10/2026): ya no existe la media pieza; los fiambres se venden por peso.
+14. **Fechas** — día operativo, zona horaria del negocio y corte de jornada (también afecta la fecha y la hora del presupuesto).
+15. **Redondeo monetario por peso (ADR-005 D-R1)** — cómo se convierte el valor exacto de `gramos × precio_por_kg / 1000` al importe final: destino, regla de empate, momento en que se aplica y escala intermedia. Nada de esto está decidido.
+16. **Pesaje en la operación (D-R2)** y **diferencias de pesaje (D-R3)**.
+17. **Datos locales/staging en medias piezas (D-R4)** — reinicio limpio o migración explícita.
+18. **Presupuestos** — numeración (secuencia, formato, reinicio, unicidad, anulación), ciclo de vida/estados, vigencia, conversión a venta, permiso del vendedor/piloto, cliente no registrado, origen del precio de cada línea, si es editable y quién puede modificarlo, y entrega (1A/1B).
+19. **Clientes — DNI y cuenta** — agregarlos a la ficha (hoy no existen), obligatoriedad, formato, unicidad y significado de «cuenta».
 
 **Prioridad media — antes de entrega:** verificación de transferencias en Fase 1; manejo de cobros de deudas anteriores (cuenta corriente integral es Fase 2); valuación de faltantes y responsabilidades; cantidad exacta de camiones/usuarios/catálogo y conectividad.
 
@@ -368,6 +423,7 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 ## 22. Dependencias de ADR
 
 - **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (`docs/decisions/001-rpc-privilegiadas.md`): **versión 1.5**, estado **APROBADA PARA VALIDACIÓN CONTROLADA** (`docs/decisions/README.md`). P1 seleccionó Topología D; P19/P20 fijaron dos etapas y migraciones sólo local/staging; P5–P7 (22/10/2026), P2–P4 (23/10/2026) y P11 (24/10/2026, para validación controlada) quedaron resueltas por decisión humana. P8–P10 y P12–P17 siguen pendientes, P18 es futura/separada y producción continúa bloqueada.
+- **ADR-005 — Fiambres por peso y unidad mínima en gramos** (`docs/decisions/005-fiambres-por-peso-gramos.md`): **APROBADA** (25/10/2026). Reemplaza a ADR-003 en su totalidad (ADR-003 queda histórica, sin autoridad normativa). **No autoriza** migraciones ni implementación: el cambio de modelo (productos, stock, prototipo, pruebas) requiere una tarea posterior específica, con security review. D-R1–D-R4 siguen pendientes.
 - **Otras reglas con estado de propuesta** (no son ADR, pero bloquean implementación): stock negativo transitorio, anulación de ventas, prohibición de descuentos, retiro que excede el saldo y vencimientos por partida (Blueprint §7.4–§7.6, §15).
 - **Regla de estado:** una ADR `aprobada para validación controlada` sólo se implementa en local/staging y dentro de sus decisiones resueltas; producción requiere estado `aprobada` tras aceptación humana final. Un agente no puede aprobar una ADR (`docs/decisions/README.md`; AGENTS.md §3).
 
@@ -387,3 +443,4 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 | 0.8 | 21/10/2026 | **Acompaña a `BLUEPRINT.md` v1.9**: refleja ADR-003 — Precio derivado de media pieza (aprobada; supera a ADR-002 solo en la política de precio de media): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube), cantidad canónica en medias sin cambios, snapshot histórico con la media aplicada. RF-01, criterios de Stock y pregunta 13. Sin cambios en ADR-001 ni SQL aprobado. |
 | 0.9 | 22/10/2026 | Acompaña a `BLUEPRINT.md` v2.0 y ADR-001 v1.3: Topología D y gobernanza P19/P20 aprobadas para validación controlada local/staging. P2–P17 pendientes, P18 separada y producción bloqueada. Sin backend, SQL ni migraciones. |
 | 0.10 | 23/10/2026 | Alinea las referencias a ADR-001 v1.5: P5–P7 (22/10/2026) y P2–P4 (23/10/2026) resueltas por decisión humana; P8–P17 pendientes, P18 separada y producción bloqueada. Sin cambios de requisitos de producto. |
+| 0.11 | 25/10/2026 | Acompaña a `BLUEPRINT.md` v2.1 tras la reunión con el cliente: **ADR-005** (fiambres por peso; kg ingresado con hasta 3 decimales y mostrado con 3 fijos, gramos enteros, precio por kg, sin `float`; D-R1 completamente pendiente; ADR-003 reemplazada) en §0, RF-01, §9, §13, §17 y §21–§22. **Nuevo RF-12 / §7.1 Presupuestos**: dueño/encargado (vendedor pendiente), productos `unidad` y `peso`, IVA 21% sólo visual, sin descuentos, total = suma de importes, snapshot, sin efecto de stock ni dinero. Pendientes nuevos 15–19. Sin código, SQL ni migraciones. |

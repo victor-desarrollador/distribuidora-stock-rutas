@@ -1,8 +1,8 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 2.0 (documento de trabajo controlado; propuestas no aprobadas identificadas)
-**Fecha:** 22/10/2026 (hora local Argentina)
+**Versión:** 2.1 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Fecha:** 25/10/2026 (hora local Argentina)
 **Estado:** Apto para inventario técnico, planificación y validación controlada de ADR-001 exclusivamente en local/staging. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
 > Este documento es la fuente de referencia del proyecto. Todo agente (Claude Code, OpenCode, Codex) y toda persona que trabaje en el repositorio debe leerlo antes de escribir código. Si algo del código contradice este documento, el documento manda hasta que se registre una decisión que lo cambie (ver sección 13: ADR).
@@ -31,11 +31,12 @@ Todo lo que no sirva a ese objetivo queda fuera de la Fase 1.
 - El dueño o encargado puede **retirar efectivo en cualquier momento del recorrido**: queda fecha/hora de registro del servidor, hora declarada del hecho si difiere, quién entrega, quién recibe, importe, camión, jornada y confirmación de **ambas personas**.
 - Gastos del recorrido con dinero recaudado: **solo con autorización** del dueño/encargado y comprobante/motivo registrados (detalle pendiente).
 - El cierre con diferencias lo aprueba **dueño o encargado**, sin eliminar la diferencia registrada.
-- **Unidades (decisión humana confirmada):** los **lácteos** se venden y controlan por **cantidad/unidad entera**; los **fiambres**, **únicamente por pieza o media pieza** (1 pieza = 2 medias piezas; 1/2 pieza = 1 media pieza; la representación canónica es siempre un entero en medias piezas). **No existe `kg` en Fase 1.** El prototipo legacy todavía usa `kg` y expresa las piezas como piezas enteras, y requiere migración (ver §7.1 y `docs/requirements/migracion-unidades-prototipo.md`).
+- **Unidades (decisión del cliente del 25/10/2026; ADR-005, aprobada):** los **lácteos** y productos por unidad se venden y controlan por **cantidad/unidad entera**. Los **fiambres** se venden y controlan **por peso**: comercialmente se expresan **en kg**, se ingresan con **hasta 3 decimales** y se muestran con **3 decimales fijos** (`28,680 kg`), el precio es **por kg** y la representación canónica es un **entero en gramos**. La pieza y la media pieza **dejaron de existir** como unidad de venta, stock o precio (reemplaza la regla vigente del 13/10 al 25/10/2026; histórico en ADR-002/ADR-003). Nunca se usa `float`. El prototipo demo todavía implementa pieza/media pieza y requiere un cambio posterior autorizado (ver §7.1).
+- **Presupuestos (decisión del cliente del 25/10/2026):** el sistema debe generar **presupuestos** internos para clientes, con IVA 21% **sólo como etiqueta informativa** y **sin descuentos**. Un presupuesto **no** es venta ni factura, **no** mueve stock ni dinero y **no** integra ARCA (ver §7.10).
 - Vencimientos: el cliente pidió **control de vencimientos asociado a productos, sin trazabilidad por lote**. **PROPUESTA TÉCNICA NO APROBADA:** anotar fecha de vencimiento en cada ingreso de mercadería, sin asignar ventas a ingresos ni prometer saldos disponibles por partida. Ver secciones 4, 5 y 8.
 - Devoluciones: **tratamiento según producto**. No exigen aprobación humana general para retornar al stock vendible, pero **nunca** se reingresará automáticamente mercadería no apta: debe cumplir reglas verificables de aptitud, origen y conservación; criterios pendientes.
 - **Fase 2:** preventa, pedidos programados, proveedores, compras, comprobantes de compra, pagos combinados a proveedores, cuotas y cuentas corrientes de proveedores. En Fase 2 se contemplará recepción distinta de la fecha de compra y almacenamiento privado de foto/PDF de comprobantes.
-- No incluye emisión fiscal por ARCA. Los comprobantes de Fase 1 son internos.
+- No incluye emisión fiscal por ARCA. Los comprobantes de Fase 1, incluidos los presupuestos, son internos.
 
 ---
 
@@ -49,11 +50,11 @@ Todo lo que no sirva a ese objetivo queda fuera de la Fase 1.
 
 ---
 
-## 4. Alcance — Fase 1 (funcionalmente acordado; confirmar con presupuesto)
+## 4. Alcance — Fase 1 (funcionalmente acordado; confirmar con la cotización comercial del proyecto)
 
 | Módulo | Entrega propuesta | Incluye |
 |---|---|---|
-| Productos | 1A | Alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta, precio de venta (en fiambres: precio de pieza; el de media pieza se deriva y no se configura; ADR-003) y stock mínimo. Fiambre por pieza/media pieza. Alertas orientativas de vencimiento por fecha de cada ingreso (**propuesta pendiente de aprobación**, sin FEFO). |
+| Productos | 1A | Alta, edición y baja lógica por dueño/encargado. Categoría, forma de venta (`unidad` / `peso`), precio de venta (unitario en `unidad`; **por kg** en fiambres `peso`; ADR-005) y stock mínimo. Fiambres por peso (kg en pantalla, gramos enteros como canónico). Alertas orientativas de vencimiento por fecha de cada ingreso (**propuesta pendiente de aprobación**, sin FEFO). |
 | Clientes | 1A; altas desde celular en 1B | Consultar y buscar; alta inicial por vendedor; dueño/encargado editan y validan. Historial básico. |
 | Depósito y camiones | 1A | Stock por ubicación, carga por jornada, movimientos auditados, cuarentena y retornos. |
 | Jornadas | 1A | Una jornada por camión y fecha, asignación de vendedor, preparación, salida, carga final de ventas, conteo por tercero, rendición, cierre. |
@@ -64,6 +65,7 @@ Todo lo que no sirva a ese objetivo queda fuera de la Fase 1.
 | Devoluciones/mermas | 1A | Motivos, clasificación por aptitud, segregación de cuarentena y trazabilidad; aptitud según producto sin autorización genérica para todos los retornos. |
 | Rendición | 1A | Mercadería esperada vs contada por estado, y efectivo/transferencias/a cuenta/retiros separados; diferencias aceptables solo con aprobación y motivo. |
 | Reportes y usuarios | 1A; ampliaciones en 1B | Rendiciones, diferencias, stock, ventas, retiros de efectivo, exportación CSV, 3 roles (dueño, encargado, vendedor/piloto), RLS y auditoría. |
+| Presupuestos | Fase 1; entrega (1A/1B) pendiente de acuerdo comercial | Generación y consulta de presupuestos internos por dueño/encargado (vendedor/piloto: pendiente), con número, fecha, hora, datos del cliente y detalle de productos `unidad` y `peso`; IVA 21% sólo informativo; sin descuentos. **No** mueve stock, **no** mueve dinero y **no** es factura ni comprobante fiscal (§7.10). |
 
 **Extras no comprometidos** (sujetos a tiempo y aprobación): impresión de carga, comprobante interno, alertas básicas y búsquedas avanzadas. No confundir con el alcance de Fase 2.
 
@@ -80,7 +82,7 @@ Todo lo que no sirva a ese objetivo queda fuera de la Fase 1.
 - Listas de precios por cliente, exportaciones ampliadas y reportes avanzados.
 
 ### Fuera del alcance actual, sin fecha comprometida
-- Facturación electrónica ARCA; comprobantes internos no son facturas fiscales.
+- Facturación electrónica ARCA; los comprobantes internos, incluidos los presupuestos de §7.10, no son facturas fiscales. El presupuesto no calcula, discrimina ni liquida IVA.
 - Aplicación Android nativa; modo offline automático/sincronización.
 - GPS/seguimiento en vivo, optimización de rutas, integraciones bancarias.
 - Funciones de IA en el producto, n8n, módulo sanitario regulatorio o plataforma SaaS completa.
@@ -102,23 +104,35 @@ Backend:   Supabase — Auth · PostgreSQL · RLS · RPC (funciones SQL) · Stor
 
 ## 7. Reglas de negocio
 
-### 7.1 Unidades: unidad entera, pieza y media pieza
+### 7.1 Unidades: unidad entera y peso
 
-- Cada producto tiene una **forma de venta**:
-  - `unidad` — **lácteos**: se venden y controlan por **cantidad/unidad entera** (ej. yogur, sachet de leche, queso, caja). Nunca fracciones.
-  - `pieza` — **fiambres**: se venden y controlan **únicamente por pieza o media pieza**.
-- **No existe `kg` en Fase 1.** Ningún producto se vende, carga, cuenta ni rinde por kilogramo.
-- Para productos `pieza` (fiambres), **el stock se guarda en medias piezas** (número entero), que es la **representación canónica**.
-  - 1 pieza = 2 medias piezas. 1/2 pieza = 1 media pieza.
-  - En pantalla se muestra como "4 piezas + 1 media" (= 9 en la base).
-- **Nunca se usan decimales para cantidades.** Todas las cantidades en la base son enteros en la unidad mínima: **unidad entera** para `unidad`, **medias piezas** para `pieza`.
-- **Ejemplo de consistencia categoría/unidad** *(es solo un ejemplo de coherencia categoría↔unidad; **no** es una regla sobre nombres de producto)*: `Queso cremoso en bote` (untable) → `Lácteos` / `unidad` (cantidad canónica **entera**); `Queso cremoso en pieza` → `Fiambres` / `pieza` (cantidad canónica **entera en medias piezas**). **No** se admite la combinación `Lácteos` + `pieza` ni `Fiambres` + `unidad`.
-- Precio (**ADR-003 — Precio derivado de media pieza, aprobada 21/10/2026**; supera a ADR-002 solo en la política de precio de media pieza): un producto `unidad` tiene un único precio unitario. Un producto `pieza` tiene un único precio configurable, el de **pieza completa**. El **precio de media pieza no es configurable**: es la mitad del precio de pieza, **redondeada al peso entero** (fracción `>= .50` sube; `< .50` baja). Se calcula sobre centavos enteros: `floor((centavos_pieza + 100) / 200)`. Ejemplos: 20,98 → 10; 20,99 → 10; 21,00 → 11; 21,01 → 11; 21,02 → 11; 25 → 13.
-  - **Cantidad canónica y presentación comercial:** el stock y la persistencia usan el entero `c` en medias piezas; comercialmente `c` se descompone siempre en `floor(c / 2)` piezas completas más como máximo una media (`c mod 2 = 1`). `c = 2` vale **una pieza**, nunca dos medias.
-  - **Subtotal:** `pieza` = `floor(c / 2) * precio_pieza + (c mod 2 = 1 ? precio_media_pieza : 0)`; `unidad` = `cantidad * precio_unitario`. Ejemplo con pieza = 21 (media 11): `c=1 → 11`, `c=2 → 21` (no 22), `c=3 → 32`. Con pieza = 10.000 (media 5.000): `c=1 → 5.000`, `c=2 → 10.000`, `c=3 → 15.000`, `c=5 → 25.000`.
-  - **Historial de venta:** cada ítem `pieza` conserva el precio de media pieza **aplicado** al vender; una venta histórica se reconstruye con ese valor guardado, **sin volver a derivarlo**. Ítem `pieza` sin ese valor, o ítem `unidad` con él, es inválido.
-  - **Decimales:** los precios admiten como máximo 2 decimales; más de 2 se rechaza (sin redondear ni truncar). El prototipo calcula en centavos enteros; la base futura usará `numeric(14,2)`, nunca `float`. Precio 0: se mantiene la validación mínima vigente (`>= 0`); exigir `> 0` sería otra decisión.
-- **Prototipo legacy (pendiente de migración).** El prototipo de demostración actual (`apps/web/src/`) **todavía contiene `kg`** y **expresa las piezas como piezas enteras** (no en medias piezas). Esa representación **no cumple esta regla** y **requiere migración** antes de reutilizar sus datos o su lógica. El requisito de migración está en `docs/requirements/migracion-unidades-prototipo.md`. El versionado de las claves demo de `localStorage` (v1 → v2, con **inicialización limpia** y **sin migración automática** de cantidades) es una **decisión humana aprobada** (18/10/2026); su **ejecución** queda pendiente de autorización. El modelo de precios independientes (ADR-002, hoy superada) llevó las claves operativas del prototipo de `v2` a `v3`. El precio derivado de media pieza (ADR-003) las lleva de `v3` a **`v4`** (`distribuidora_productos_demo_v4`, `distribuidora_jornadas_demo_v4`, `distribuidora_ventas_demo_v4`, `distribuidora_cobros_demo_v4`, `distribuidora_movimientos_demo_v4`, `distribuidora_retornos_demo_v4`, `distribuidora_camiones_demo_v4`), por inicialización limpia y sin leer, copiar, reinterpretar ni borrar `v3` ni `v2`; `clientes` queda en `distribuidora_clientes_demo_v2` y la sesión en `distribuidora_sesion_demo_v1`.
+> **Vigente desde el 25/10/2026 — [ADR-005](docs/decisions/005-fiambres-por-peso-gramos.md), aprobada.** Reemplaza la regla anterior de pieza/media pieza (13/10–25/10/2026), que se conserva sólo como historial en ADR-002, ADR-003 y en `docs/requirements/migracion-unidades-prototipo.md`. ADR-005 **no autoriza** migraciones ni implementación: el cambio de modelo requiere una tarea posterior específica.
+
+- Cada producto tiene una **forma de venta** (valores conceptuales; el nombre y el tipo SQL definitivos se fijan en la tarea de migración):
+  - `unidad` — **lácteos** y productos por unidad: se venden y controlan por **cantidad/unidad entera** (ej. yogur, sachet de leche, caja). Nunca fracciones.
+  - `peso` — **fiambres**: se venden, cargan, cuentan, retornan y rinden **por peso**.
+- **No existen la pieza ni la media pieza** como unidad de venta, de stock ni de precio.
+- **Productos `peso`:**
+  - **Entrada:** kilogramos con **hasta 3 decimales** (son válidas, por ejemplo, `1`, `1,2`, `1,25` y `1,250`). Una cantidad con **más de 3 decimales de kg se rechaza**: no se redondea, no se trunca ni se normaliza.
+  - **Presentación comercial:** kilogramos con **3 decimales fijos** (`1,000 kg`, `1,200 kg`, `1,250 kg`, `28,680 kg`).
+  - **Representación canónica:** **entero en gramos** (`28,680 kg` → `28680`; `1,250 kg` → `1250`).
+  - La conversión kg ↔ gramos se hace sobre la representación decimal exacta, **nunca con punto flotante** (en JavaScript, `1.005 * 1000` da `1004.9999999999999`).
+- **Unidad mínima:** **unidad entera** para `unidad`; **gramo** para `peso`. **Todas las cantidades en la base son enteros en la unidad mínima**; nunca `float`, `double precision` ni `real`.
+- **Consistencia categoría/forma de venta:** `Lácteos` ↔ `unidad`; `Fiambres` ↔ `peso`. **No** se admiten `Lácteos` + `peso` ni `Fiambres` + `unidad`. *(Ejemplo de coherencia, no una regla sobre nombres de producto: `Queso cremoso en bote` (untable) → `Lácteos` / `unidad`.)*
+- **Precio:**
+  - un producto `unidad` tiene un único **precio unitario**; un producto `peso` tiene un único **precio por kg**;
+  - los precios admiten como máximo 2 decimales (más de 2 se rechaza, sin redondear ni truncar). Precio 0: se mantiene la validación mínima vigente (`>= 0`); exigir `> 0` sería otra decisión;
+  - el dinero se guarda en `numeric(14,2)`, nunca `float`.
+- **Importe de una línea (conceptual):**
+  - `unidad`: `cantidad × precio_unitario`;
+  - `peso`: `cantidad_kg × precio_por_kg` = `gramos × precio_por_kg / 1000`.
+
+  Con gramos enteros y precios con 2 decimales, el valor exacto puede tener hasta 5 decimales. Cómo se convierte ese valor exacto al importe monetario final es la **política de redondeo monetario pendiente** (ADR-005 D-R1, §15): destino, regla de empate, momento en que se aplica y escala intermedia **no están decididos**. Hasta que se decida no se fija fórmula SQL ni de dominio. La implementación deberá definir explícitamente el momento y la regla de redondeo según la política que se apruebe, sin punto flotante, y no debe depender del redondeo implícito de `numeric(14,2)`.
+- **Historial:** cada ítem de venta o de presupuesto conserva la cantidad canónica, el precio aplicado (unitario o por kg) y el importe. Un documento histórico se reconstruye con esos valores, **sin volver a calcularlos** (ADR-005 §2.3).
+- **Estado actual del código (no cumple esta regla; requiere una tarea autorizada):**
+  - **SQL local/staging:** `productos` admite `forma_venta in ('unidad','pieza')`, el precio de pieza completa y `stock_minimo` en medias piezas (`20261023140000_catalogo_productos.sql`). El ledger `movimientos_stock.cantidad integer` ya es compatible con gramos (ADR-005 §6).
+  - **Prototipo demo (`apps/web/src/`):** implementa pieza/media pieza con precio derivado (ADR-003) sobre las claves `_demo_v4` (`distribuidora_productos_demo_v4`, `distribuidora_jornadas_demo_v4`, `distribuidora_ventas_demo_v4`, `distribuidora_cobros_demo_v4`, `distribuidora_movimientos_demo_v4`, `distribuidora_retornos_demo_v4`, `distribuidora_camiones_demo_v4`; `clientes` en `distribuidora_clientes_demo_v2` y la sesión en `distribuidora_sesion_demo_v1`).
+  - Al cambiarlo se aplica el criterio ya aprobado para cambios de semántica: **versión nueva de las claves operativas, inicialización limpia y sin leer, copiar, reinterpretar ni borrar las anteriores**. Una media pieza guardada nunca se reinterpreta como gramo. La versión exacta se fija en esa tarea.
 
 ### 7.2 Ubicaciones de stock
 
@@ -155,7 +169,7 @@ Cada usuario pertenece a una única empresa: un perfil 1:1 con `auth.users`, con
 - `operacion` — ejecución lógica que originó el movimiento (ver §7.9);
 - `jornada` cuando aplique (opcional según tipo);
 - `producto`;
-- `cantidad` — entero positivo en unidad mínima (unidad entera o medias piezas, §7.1);
+- `cantidad` — entero positivo en unidad mínima: unidad entera para productos `unidad`, **gramos** para productos `peso` (§7.1, ADR-005);
 - `ubicacion_origen` (nullable) y `ubicacion_destino` (nullable) — al menos uno no nulo;
 - `tipo_movimiento`;
 - `actor` (usuario);
@@ -190,7 +204,7 @@ Flujo lógico: `abierta → cargada → en_reparto → ventas_finalizadas → re
 
 - **Una sola jornada por (`empresa_id`, `camion_id`, `fecha`)**, aunque otra del mismo día esté cerrada; no habrá segunda salida por camión ese día.
 - El vendedor registra ventas digitales con conexión. Sin conexión usa talonario numerado; **debe transcribir, guardar en servidor y declarar completas** las ventas en papel antes de que el encargado inicie el **conteo formal**. El camión puede ingresar físicamente al predio; el sistema solo bloquea el proceso administrativo.
-- Identificar origen de venta (`digital`/`papel`), serie y número de nota (cuando aplique), usuario, instante de registro del servidor, jornada, cliente, ítems, precios históricos y pagos.
+- Identificar origen de venta (`digital`/`papel`), serie y número de nota (cuando aplique), usuario, instante de registro del servidor, jornada, cliente, ítems, precios históricos y pagos. Cada ítem guarda la cantidad en unidad mínima (unidades o gramos), el precio aplicado (unitario o por kg) y el importe (§7.1). **La venta por peso no se diseña hasta resolver el redondeo monetario (ADR-005 D-R1) y el pesaje en ruta (ADR-005 D-R2)**.
 - La validación de duplicados se realiza por empresa, serie y número **en todo el histórico**, no solamente dentro de una jornada; también idempotencia por solicitud. Notas anuladas se preservan con motivo y sin efecto de stock/dinero. Registrar saltos de numeración y resolución.
 - **Anulación — PROPUESTA NO APROBADA:** vendedor anula solo sus propias ventas antes de finalizar ventas (`ventas_finalizadas`) y con motivo obligatorio; luego solo dueño/encargado con operación compensatoria. Toda anulación aparece en rendición y auditoría. No implementar sin aprobación.
 - **Precios/descuentos — PROPUESTA NO APROBADA:** el vendedor no puede modificar precios ni otorgar descuentos en Fase 1; utiliza el precio configurado. Registrar precio de lista y precio aplicado históricos; excepciones futuras requieren nueva decisión.
@@ -321,6 +335,97 @@ La estrategia concreta de bloqueo, isolation level o advisory locks se decide en
 
 ---
 
+### 7.10 Presupuestos
+
+Requisito confirmado por el cliente el 25/10/2026. Pertenece a **Fase 1**; la entrega (1A/1B) y la etapa del plan quedan pendientes (§14, §15). Esta sección fija **reglas funcionales y un modelo conceptual**. **No** aprueba tablas, columnas, tipos, RPC ni migraciones.
+
+#### 7.10.1 Qué es y qué no es
+
+Un **presupuesto** es un **documento interno e informativo** que detalla productos, cantidades, precios e importes para un cliente.
+
+- **No es una venta:** no se convierte automáticamente en venta y no la reemplaza. Si podrá convertirse más adelante está **pendiente**.
+- **No es factura** ni comprobante fiscal, y **no integra ARCA** (§5).
+- **No afecta stock:** no crea `movimientos_stock`, no descuenta, no reserva ni compromete mercadería y no cambia `stock_actual`.
+- **No afecta dinero:** no registra pagos ni cobros, no crea deuda ni saldo a cuenta, no afecta cuentas corrientes y no interviene en la rendición.
+- **No se asocia a jornadas:** no abre ni modifica jornadas, cargas ni camiones.
+
+#### 7.10.2 Actores
+
+- **Dueño y encargado** pueden generar y consultar presupuestos.
+- **Vendedor/piloto: PENDIENTE.** No se asume que pueda generarlos ni consultarlos.
+
+#### 7.10.3 Contenido (confirmado)
+
+**Encabezado:** la palabra `PRESUPUESTO`, el **número de presupuesto**, la **fecha** y la **hora** (instante del servidor; la presentación en zona horaria operativa depende del pendiente «Fechas» de §15), el **nombre del cliente**, la **cuenta del cliente** si tiene y el **DNI del cliente**.
+
+**Detalle (tabla):**
+
+| Columna | Contenido |
+|---|---|
+| Cantidad | productos `peso`: kg con 3 decimales fijos (`28,680 kg`; se ingresa con hasta 3 decimales, §7.1); productos `unidad`: unidades enteras. Un presupuesto admite **ambas formas de venta** (decisión humana del 25/10/2026). |
+| Código | código del producto |
+| Descripción | descripción del producto |
+| Precio | precio por kg (`peso`) o unitario (`unidad`) |
+| % IVA | siempre `21%` (**etiqueta informativa**, ver §7.10.4) |
+| Importe | `cantidad × precio` (§7.1) |
+
+**Pie:** `TOTAL PRESUPUESTO: $ …` = **suma de los importes** de las líneas.
+
+#### 7.10.4 IVA: sólo informativo
+
+`21%` es **una etiqueta visual fija** en cada línea. **No** se calcula, suma, resta, discrimina ni desglosa IVA. No existen subtotal fiscal, neto gravado, IVA total, `importe × 1,21` ni `importe / 1,21`. Si hace falta persistir el dato, el nombre interno debe dejar claro que es informativo (por ejemplo, `iva_porcentaje_informativo`; nombre no decidido).
+
+#### 7.10.5 Sin descuentos
+
+Los presupuestos **no tienen descuentos**: ni por línea, ni global, ni porcentaje, ni monto. No existe columna de descuento ni mecanismo previsto «por si más adelante». La propuesta no aprobada sobre descuentos en **ventas** (§7.5) es una discusión separada y no cambia.
+
+#### 7.10.6 Importe y total
+
+- Importe de línea `unidad` = `cantidad × precio_unitario`.
+- Importe de línea `peso` = `gramos × precio_por_kg / 1000`, con el **redondeo monetario pendiente** (ADR-005 D-R1).
+- Total = suma de los importes de las líneas (requisito del cliente). Cómo se aplica el redondeo monetario a importes y total lo define D-R1.
+
+Montos en `numeric(14,2)`, nunca `float`.
+
+#### 7.10.7 Snapshot histórico
+
+Un presupuesto guardado **no cambia** si después cambian el nombre, el código, la descripción o el precio del producto, ni los datos visibles del cliente.
+
+- **Cliente:** el presupuesto guarda una **referencia** al cliente registrado (si se puede emitir a un cliente no registrado está **pendiente**) y un **snapshot** del nombre, de la cuenta (si existe) y del DNI tal como se imprimieron.
+- **Producto:** cada línea guarda una **referencia** al producto y un **snapshot** del código, la descripción, la forma de venta, la cantidad canónica, el precio aplicado, el porcentaje de IVA informativo y el importe.
+- **Reconstrucción:** se usan los valores guardados, sin recalcular.
+- **Precio aplicado:** el presupuesto registra el precio aplicado a cada línea. El **origen** de ese precio (por ejemplo, si se toma automáticamente del catálogo), si es **editable** y **quién** puede modificarlo quedan **pendientes de definición** (§15). Sin descuentos en ningún caso.
+
+#### 7.10.8 Datos del cliente: estado actual
+
+`public.clientes` (`20261024180000_catalogo_clientes.sql`) tiene hoy nombre, comercio, dirección y teléfono, pero **no tiene DNI ni cuenta**: ese slice excluyó expresamente CUIT/DNI. Agregar esos campos a la ficha, su obligatoriedad, su formato, su unicidad y el significado exacto de «cuenta» son **decisiones pendientes** (§15). No se inventa ninguna migración. La ficha del cliente (dato maestro mutable) y el snapshot del presupuesto (dato histórico) son cosas distintas.
+
+#### 7.10.9 Formato visual (referencia conceptual, sin UI aprobada)
+
+```text
+PRESUPUESTO
+N.º <número>
+
+Fecha: <dd/mm/aaaa>      Hora: <hh:mm>
+Cliente: <nombre>
+Cuenta: <cuenta, si tiene>
+DNI: <dni>
+
+Cantidad   | Código | Descripción | Precio   | % IVA | Importe
+28,680 kg  | ...    | ...         | $ .../kg | 21%   | $ ...
+3 u        | ...    | ...         | $ ...    | 21%   | $ ...
+
+TOTAL PRESUPUESTO: $ ...
+```
+
+Sin descuento, sin IVA calculado y sin subtotal fiscal. En PC se muestra como tabla. En Android puede adaptarse a filas o tarjetas. Una impresión/PDF futura (no comprometida) mantendría el formato tabular. El número `N.º` es un marcador: su formato no está decidido (§15).
+
+#### 7.10.10 Consideración técnica (PROPUESTA TÉCNICA NO APROBADA)
+
+Como el número, la fecha/hora del servidor y los snapshots los debe fijar el servidor, la generación probablemente requiera una RPC idempotente con `empresa_id` derivado del perfil y RLS por empresa (Topología D). Implica security review. Aunque el presupuesto no mueve stock ni dinero, se diseñará en una tarea posterior.
+
+---
+
 ## 8. Modelo de datos (propuesto)
 
 > Nombres en español, snake_case. Todas las tablas llevan `id`, `empresa_id`, `created_at`, `created_by`. Las filas marcadas **[APROBADA]** son decisión conceptual ya aprobada (§7 y §9); las marcadas **[PROPUESTA]** aún requieren diseño/aprobación; **[F2]** es Fase 2.
@@ -330,9 +435,9 @@ La estrategia concreta de bloqueo, isolation level o advisory locks se decide en
 | `empresas` | [APROBADA CONCEPTUALMENTE] | nombre; entidad dueña; `empresa_id` en todas las tablas de negocio |
 | `perfiles` | [APROBADA CONCEPTUALMENTE] | usuario (auth), nombre, activo; empresa y rol leídos de tablas protegidas |
 | `roles` | [PROPUESTA TÉCNICA] | sin tabla de membresías: un perfil 1:1 con `auth.users`, una empresa y un rol por usuario (decisión humana P5–P7, ADR-001 §18). Roles funcionales (dueño, encargado, vendedor/piloto) **aprobados**; **tabla `roles` NO aprobada** |
-| `productos` | [APROBADA CONCEPTUALMENTE] | codigo, nombre, categoria, forma_venta (`unidad`/`pieza`), precio_pieza_o_unidad (el precio de media pieza **no** se guarda en el producto: se deriva; ADR-003), stock_minimo, activo. *Tipos y restricciones SQL definitivos: pendientes* |
+| `productos` | [APROBADA CONCEPTUALMENTE] | codigo, nombre, categoria, forma_venta (`unidad`/`peso`; ADR-005), precio (unitario en `unidad`, **por kg** en `peso`; `numeric(14,2)`), stock_minimo (entero en unidad mínima: unidades o gramos), activo. Sin precio de media pieza. *Hoy en SQL local: `unidad`/`pieza` y medias piezas; el cambio requiere una migración posterior autorizada. Tipos y restricciones SQL definitivos: pendientes* |
 | `camiones` | [APROBADA CONCEPTUALMENTE] | patente, nombre, activo |
-| `clientes` | [APROBADA CONCEPTUALMENTE] | nombre, comercio, direccion, telefono, activo, creado_por, validado_por, estado_validacion; contraparte comercial, **no** ubicación de stock |
+| `clientes` | [APROBADA CONCEPTUALMENTE] | nombre, comercio, direccion, telefono, activo, creado_por, validado_por, estado_validacion; contraparte comercial, **no** ubicación de stock. **DNI y cuenta:** requeridos para mostrar en presupuestos (§7.10), pero **no existen** en el modelo actual; agregarlos y definir su obligatoriedad, formato y unicidad son **decisiones pendientes** (§15) |
 | `ubicaciones` | [APROBADA CONCEPTUALMENTE] | internas: `deposito`, `cuarentena`, `camion` (camion_id). **`merma` no es ubicación interna** (salida terminal) |
 | `operaciones` | [APROBADA CONCEPTUALMENTE] | empresa_id, tipo, actor, jornada_id (opcional), idempotency_key, creado_en; ejecución lógica idempotente (§7.9) |
 | `movimientos_stock` | [APROBADA CONCEPTUALMENTE] | operacion_id, tipo_movimiento, producto_id, cantidad (entero, unidad mínima), ubicacion_origen_id (nullable), ubicacion_destino_id (nullable), jornada_id, actor, motivo, creado_en. **Sin `saldo_actual`.** Append-only |
@@ -349,7 +454,9 @@ La estrategia concreta de bloqueo, isolation level o advisory locks se decide en
 | `talonarios` | [PROPUESTA TÉCNICA] | serie, numero_desde, numero_hasta, asignado_a, estado, fecha_asignacion |
 | `notas_talonario` | [PROPUESTA TÉCNICA] | talonario_id, numero, jornada_id, estado (`utilizada`/`anulada`/`justificada`), venta_id nullable, motivo, registrado_por |
 | `ventas` | [APROBADA CONCEPTUALMENTE] | operacion_id, jornada_id, cliente_id, origen (digital/papel), serie_talonario, numero_nota, total, estado |
-| `venta_items` | [APROBADA CONCEPTUALMENTE] | venta_id, producto_id, cantidad, precio_unitario, subtotal. **Historial de precios aplicados** (pieza/unidad y, en fiambres, media pieza aplicada) para reconstruir el cobro sin re-derivar la media (ADR-003): **PROPUESTA TÉCNICA pendiente** (forma SQL exacta no aprobada; el prototipo usa la Opción A de ADR-002, vigente por ADR-003) |
+| `venta_items` | [APROBADA CONCEPTUALMENTE] | venta_id, producto_id, cantidad (entero en unidad mínima: unidades o gramos), precio aplicado (unitario o por kg), importe. **Historial de precios aplicados** para reconstruir el cobro sin recalcular (ADR-005 §2.3): **PROPUESTA TÉCNICA pendiente** (forma SQL exacta no aprobada; redondeo del importe por peso pendiente, ADR-005 D-R1). El prototipo todavía usa el snapshot pieza/media de ADR-002/ADR-003 |
+| `presupuestos` | [PROPUESTA TÉCNICA] (requisito confirmado, §7.10) | empresa_id, número (formato y secuencia pendientes), creado_en (servidor), actor, cliente_id (referencia), snapshot de nombre, cuenta y DNI del cliente, total, estado (sólo si se aprueba un ciclo de vida, pendiente). **No** referencia jornada, operación de stock ni pagos |
+| `presupuesto_items` | [PROPUESTA TÉCNICA] (requisito confirmado, §7.10) | presupuesto_id, producto_id (referencia), snapshot de código, descripción y forma de venta, cantidad (entero en unidad mínima), precio aplicado, IVA informativo (21%), importe. **Sin** columnas de descuento ni de IVA calculado |
 | `venta_pagos` | [APROBADA CONCEPTUALMENTE] | operacion_id, venta_id, medio (efectivo/transferencia/a_cuenta; otros pendientes), importe, referencia, estado (`declarada`/`verificada` para transferencias), verificado_por, verificado_at |
 | `partidas_ingreso` | [F2 / PROPUESTA NO APROBADA] | producto_id, fecha_ingreso, fecha_vencimiento (nullable), cantidad_inicial. **No se mantienen saldos por partida ni se atribuye cada venta a un ingreso.** No implementar sin aprobación |
 | `auditoria` | [DERIVADA] | **No hay tabla genérica en Fase 1.** La trazabilidad surge de operaciones, ledgers, documentos, actor, timestamps, motivos, jornada y relaciones |
@@ -362,7 +469,8 @@ Restricciones clave:
 - `venta_pagos`: suma por venta = total confirmado; toda escritura en una transacción; importes `numeric(14,2)`, nunca float.
 - `jornadas`: único (`empresa_id`, `camion_id`, `fecha`), incluso cerrada.
 - `movimientos_stock`: append-only; sin UPDATE/DELETE; enteros positivos con dirección dada por origen/destino; rectificación por movimientos compensatorios.
-- Cantidades registradas en documentos y movimientos: enteros positivos. **Excepción no aprobada:** si se permitiera stock negativo transitorio, sería **solo** para ubicación camión en jornada abierta; depósito y cuarentena no podrán ser negativos. No activar sin decisión aprobada, implementación transaccional y pruebas de concurrencia.
+- `presupuestos`: sin efecto sobre `movimientos_stock`, `stock_actual`, `venta_pagos`, jornadas ni rendiciones. Secuencia, formato, unicidad y reinicio del número: pendientes (§15).
+- Cantidades registradas en documentos y movimientos: enteros positivos en unidad mínima (unidades o gramos). **Excepción no aprobada:** si se permitiera stock negativo transitorio, sería **solo** para ubicación camión en jornada abierta; depósito y cuarentena no podrán ser negativos. No activar sin decisión aprobada, implementación transaccional y pruebas de concurrencia.
 
 ---
 
@@ -372,11 +480,11 @@ Restricciones clave:
 
 | Rol | Puede | No puede |
 |---|---|---|
-| **Dueño** | Visión general; administrar usuarios, clientes, productos, stock, jornadas y rendiciones; autorizar gastos y retiros; confirmar recepción de retiros. | Borrar movimientos confirmados sin reversión auditada. |
-| **Encargado** | Operación general; editar y validar clientes; administrar cargas, conteos, cierre con diferencias, gastos y retiros de efectivo. | Administrar roles globales ni borrar historial sin compensación. |
+| **Dueño** | Visión general; administrar usuarios, clientes, productos, stock, jornadas y rendiciones; autorizar gastos y retiros; confirmar recepción de retiros; generar y consultar presupuestos (§7.10). | Borrar movimientos confirmados sin reversión auditada. |
+| **Encargado** | Operación general; editar y validar clientes; administrar cargas, conteos, cierre con diferencias, gastos y retiros de efectivo; generar y consultar presupuestos (§7.10). | Administrar roles globales ni borrar historial sin compensación. |
 | **Vendedor / Piloto** | Ver su jornada y clientes necesarios; **crear cliente nuevo**; registrar ventas y pagos mixtos; transcribir papel; finalizar ventas (`ventas_finalizadas`); confirmar entrega de retiro de dinero. | Editar ficha de cliente existente, cambiar precios maestros, aprobar su propio conteo/rendición, registrar retiros como receptor autorizado. |
 
-No se crean roles independientes de depósito o administración en Fase 1; esas tareas corresponden al encargado/dueño. La separación vendedor/conteo aplica incluso si una persona posee permisos adicionales: se valida participación real en la jornada.
+Si el vendedor/piloto puede generar o consultar presupuestos está **pendiente** (§15); hasta que se decida, no se le asigna ese permiso. No se crean roles independientes de depósito o administración en Fase 1; esas tareas corresponden al encargado/dueño. La separación vendedor/conteo aplica incluso si una persona posee permisos adicionales: se valida participación real en la jornada.
 
 ---
 
@@ -409,6 +517,8 @@ No se crean roles independientes de depósito o administración en Fase 1; esas 
 
 Exportación CSV y filtros de fecha donde corresponda.
 
+**Cantidades en reportes (ADR-005):** las cantidades de productos `peso` (cargado, vendido, devuelto, esperado, contado, diferencia, stock y mínimo) se calculan en gramos enteros y se muestran **en kg con 3 decimales fijos**. Las de productos `unidad`, en unidades. «Faltantes en unidades» del reporte 2 significa «en la unidad comercial de cada producto» (unidades o kg). La valorización en pesos de las diferencias por peso depende del redondeo pendiente (ADR-005 D-R1). Un listado o una consulta de presupuestos no es uno de estos reportes y no forma parte de la rendición.
+
 ---
 
 ## 12. Pruebas obligatorias
@@ -419,8 +529,14 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] Cargar un camión descuenta del depósito y suma al camión exactamente lo cargado.
 - [ ] No se puede cargar más de lo disponible en depósito.
 - [ ] No se puede cargar mercadería en cuarentena.
-- [ ] Media pieza: cargar "2 piezas + 1 media" guarda 5; vender 1 media deja 4.
-- [ ] Precio de fiambres (ADR-003): con pieza = 21 (media derivada 11), `c=1` cobra 11, `c=2` cobra 21 (no 22) y `c=3` cobra 32; la media derivada de 20,98 / 20,99 / 21,00 / 21,01 / 21,02 es 10 / 10 / 11 / 11 / 11; un precio con más de 2 decimales se rechaza; una venta histórica usa la media guardada, sin re-derivarla.
+- [ ] Peso (ADR-005): `1,250 kg` se guarda como `1250` g; `28,680 kg` como `28680` g.
+- [ ] Peso: cargar, vender y retornar un peso exacto en gramos conserva el valor exacto en cada ubicación; el stock derivado de un producto `peso` es la suma exacta de sus movimientos en gramos.
+- [ ] Peso: una cantidad con más de 3 decimales de kg se rechaza (no se redondea ni se trunca); cantidad 0 o negativa se rechaza.
+- [ ] Peso: la conversión kg → gramos no usa punto flotante (casos de borde como `1,005 kg` → `1005` g).
+- [ ] Ningún cálculo de cantidades ni de dinero usa `float`/`double precision`/`real`.
+- [ ] Un producto `unidad` sigue aceptando sólo enteros; `Lácteos` + `peso` y `Fiambres` + `unidad` se rechazan.
+- [ ] Un precio con más de 2 decimales se rechaza; un documento histórico usa el precio aplicado y el importe guardados, sin recalcularlos.
+- [ ] Importe por peso: casos de redondeo monetario **cuando se apruebe la política** (ADR-005 D-R1); hasta entonces no se escribe una prueba que asuma una regla.
 - [ ] El saldo de cada ubicación coincide con la suma de sus movimientos.
 
 **Jornada**
@@ -450,6 +566,15 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 **Ventas en papel**
 - [ ] Número de nota duplicado en **cualquier jornada de la misma empresa/serie** es rechazado.
 - [ ] Salto en la numeración genera aviso.
+
+**Presupuestos (§7.10)**
+- [ ] Generar un presupuesto no crea `movimientos_stock` ni cambia `stock_actual`.
+- [ ] Generar un presupuesto no crea pagos, deuda ni saldo a cuenta, y no afecta jornadas ni rendiciones.
+- [ ] El importe de cada línea es `cantidad × precio` y el total es la suma de los importes; no se suma, resta ni desglosa IVA.
+- [ ] Cada línea muestra `21%` como IVA informativo; no existe ningún campo ni cálculo de descuento.
+- [ ] Una línea `peso` muestra la cantidad en kg con 3 decimales fijos y una línea `unidad`, en unidades enteras.
+- [ ] Cambiar después el nombre, el código, la descripción o el precio del producto, o los datos del cliente, no altera un presupuesto ya guardado (snapshot).
+- [ ] Dueño y encargado pueden generarlo; usuario de otra `empresa_id`, `anon` y usuario sin perfil activo no pueden generarlo ni verlo. El caso del vendedor/piloto se prueba según la decisión pendiente.
 
 **Seguridad**
 - [ ] La fachada expuesta `SECURITY INVOKER` y la implementación privada `SECURITY DEFINER` rechazan `anon`, usuario sin perfil activo, usuario/perfil con `empresa_id` distinto y vendedor intentando cerrar jornada o realizar retiros.
@@ -540,6 +665,9 @@ Estado: abierto | resuelto (solo con prueba)
 | 5. Operación digital 1B | **Pantalla de autoventa online Android**, creación de clientes desde celular, **registro de retiros en vivo con doble confirmación** e interfaz de gastos (pagos mixtos ya en 1A). | Tests de ventas digitales, retiro e idempotencia |
 | 6. Reportes | Reportes de la sección 11 + CSV. | Revisión con el dueño |
 | 7. Prueba real | Una semana usando el sistema en paralelo con el papel. | Lista de ajustes acordada |
+| Presupuestos | Módulo de §7.10 (Fase 1). **Etapa y entrega pendientes de acuerdo comercial.** Depende de productos con forma de venta `peso` (ADR-005), de los campos DNI/cuenta de clientes (pendientes) y del redondeo D-R1. No depende de jornadas, carga, ventas ni rendición, y no se agrega a ninguna de esas etapas. | Tests de §12 «Presupuestos» en verde |
+
+**Cambio de modelo a peso (ADR-005).** Los slices ya implementados en local de las Etapas 1 y 2 (productos y stock) usan `pieza` y medias piezas. Una **tarea posterior específica y autorizada** (migración nueva, RPC, pruebas pgTAP/Vitest y prototipo) debe adaptarlos a `peso` y gramos. Como carga, ventas, retornos y conteos (Etapas 3–4) dependen de la unidad mínima, conviene ejecutarla antes de diseñarlos; el orden exacto lo autoriza el humano.
 
 ---
 
@@ -560,7 +688,21 @@ Estado: abierto | resuelto (solo con prueba)
 - [ ] **Gastos de ruta:** tipos, quién solicita, quién autoriza, comprobante, momento y cómo afectan rendición.
 - [ ] **Devoluciones por producto:** criterios documentables para clasificación apto/no apto; no asumir que todo retorno está apto por no requerir autorización humana.
 - [ ] **Vencimientos — propuesta:** fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. Requiere aprobación comercial.
-- [x] **Precio media pieza:** resuelto por ADR-003 (21/10/2026), que supera a ADR-002: media no configurable, igual a la mitad del precio de pieza redondeada al peso entero (`.50` sube).
+- [x] ~~**Precio media pieza:** resuelto por ADR-003 (21/10/2026)~~ — **superado** por ADR-005 (25/10/2026): ya no existe la media pieza; los fiambres se venden por peso.
+- [x] **Unidad de los fiambres:** resuelto por ADR-005 (25/10/2026): por peso, kg ingresado con hasta 3 decimales y mostrado con 3 decimales fijos, gramos enteros como canónico y precio por kg.
+- [ ] **Redondeo monetario por peso (ADR-005 D-R1):** cómo se convierte el valor exacto de `gramos × precio_por_kg / 1000` al importe final: destino (por ejemplo, centavos o pesos), regla de empate, momento en que se aplica (por línea, sobre el total u otro) y escala intermedia. Nada de esto está decidido. Bloquea importes de venta y presupuesto y la valorización de diferencias.
+- [ ] **Pesaje en la operación (ADR-005 D-R2):** cómo y dónde se pesa en ingreso, carga, venta en ruta, devolución y conteo de regreso.
+- [ ] **Diferencias de pesaje (ADR-005 D-R3):** tolerancia o no ante diferencias de balanza o pérdida natural de peso. Hasta que se decida, toda diferencia es una diferencia.
+- [ ] **Datos existentes con medias piezas en local/staging (ADR-005 D-R4):** reinicio limpio o migración explícita; nunca una reinterpretación silenciosa.
+- [ ] **Presupuestos — numeración:** secuencia por empresa o no, formato visible, reinicio anual o no, unicidad y qué pasa con el número de un presupuesto anulado.
+- [ ] **Presupuestos — ciclo de vida:** si tiene estados (no hay ningún estado definido; cualquier nombre es una decisión pendiente), si se puede editar o anular después de guardado y quién puede hacerlo.
+- [ ] **Presupuestos — vigencia:** si tiene fecha de vencimiento o plazo de validez y si se muestra.
+- [ ] **Presupuestos — conversión a venta:** si un presupuesto podrá convertirse en venta y con qué efecto. Hasta que se decida, no se convierte.
+- [ ] **Presupuestos — vendedor/piloto:** si puede generarlos o consultarlos.
+- [ ] **Presupuestos — cliente:** si se puede emitir a un cliente no registrado; significado exacto de «cuenta del cliente».
+- [ ] **Presupuestos — precio:** origen del precio de cada línea (por ejemplo, si se toma automáticamente del catálogo), si es editable y quién puede modificarlo (sin descuentos en ningún caso).
+- [ ] **Clientes — DNI y cuenta:** agregarlos a la ficha (hoy no existen), su obligatoriedad, formato, unicidad y quién los carga; impacto sobre el alta por vendedor.
+- [ ] **Presupuestos — entrega:** en qué entrega (1A/1B) y etapa del plan entra el módulo.
 - [ ] **Fechas:** día operativo y zona horaria del negocio (distinción de UTC para auditoría); corte de jornada.
 
 ### Prioridad media — antes de entrega
@@ -568,7 +710,7 @@ Estado: abierto | resuelto (solo con prueba)
 - [ ] ¿Quién maneja eventuales cobros de deudas anteriores y cómo se reflejan? Cuenta corriente integral queda en Fase 2.
 - [ ] Cómo valuar faltantes (precio de venta histórico, costo, otro) y procedimiento para decidir responsabilidades sin descuento automático.
 - [ ] Cantidad exacta de camiones, usuarios, catálogo y capacitación requerida; disponibilidad de conexión en depósito y rutas.
-- [ ] Aclarar y aprobar por escrito la diferencia entre alcance del presupuesto anterior y este Fase 1 revisado.
+- [ ] Aclarar y aprobar por escrito la diferencia entre el alcance de la cotización comercial anterior del proyecto y este Fase 1 revisado (no confundir con el módulo Presupuestos de §7.10).
 
 ### Fase 2 — confirmado como postergado, detalle pendiente
 - [ ] Proveedores/compras: fecha de compra distinta de recepción, documentos PDF/foto y pagos fraccionados en distintas fechas (confirmadas las necesidades, no la implementación Fase 1).
@@ -586,7 +728,10 @@ Estado: abierto | resuelto (solo con prueba)
 - **Faltante:** mercadería o dinero que debería haber vuelto y no volvió.
 - **Cuarentena:** stock separado, no vendible, pendiente de decisión.
 - **Merma:** mercadería descartada.
-- **Unidad mínima:** unidad en que se guarda el stock (unidad o media pieza).
+- **Unidad mínima:** unidad entera en que se guarda toda cantidad: la **unidad** para productos `unidad`; el **gramo** para productos `peso` (ADR-005). Antes del 25/10/2026 era la media pieza para fiambres (histórico).
+- **Producto por peso (`peso`):** fiambre que se vende, carga, cuenta y rinde por peso. Comercialmente en kg (entrada con hasta 3 decimales; presentación con 3 decimales fijos), con precio por kg; se guarda en gramos enteros.
+- **Gramo (unidad canónica):** representación entera de las cantidades de productos `peso` en la base y en el ledger (`28,680 kg` = `28680`).
+- **Presupuesto:** documento interno e informativo con número, fecha, hora, datos del cliente y detalle de productos, precios e importes. IVA 21% sólo como etiqueta y sin descuentos. No es venta ni factura y no mueve stock ni dinero (§7.10). No confundir con la cotización comercial del proyecto (§4, §15).
 
 ---
 
@@ -606,7 +751,8 @@ Estado: abierto | resuelto (solo con prueba)
 | 1.8 | 20/10/2026 | **ADR-002 aprobada** (precios comerciales independientes de pieza y media pieza): §7.1 (precio, cantidad canónica vs presentación comercial, subtotal, decimales), §8 (`productos`, `venta_items`), criterios de aceptación y cierre del pendiente de §15; claves operativas del prototipo `localStorage` v2 → v3 con inicialización limpia. Sin cambios en ADR-001 ni en SQL. |
 | 1.9 | 21/10/2026 | **ADR-003 aprobada — Precio derivado de media pieza** (supera a ADR-002 solo en la política de precio de media pieza; ADR-002 queda histórica): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube) calculada en centavos enteros; cantidad canónica en medias sin cambios; snapshot histórico conserva la media aplicada sin re-derivarla. §4, §7.1, §8 (`productos`, `venta_items`), §12 y §15; claves operativas del prototipo `localStorage` v3 → v4 con inicialización limpia. Sin cambios en ADR-001 ni SQL aprobado. |
 | 2.0 | 22/10/2026 | **ADR-001 aprobada para validación controlada:** P1 selecciona Topología D; P19 adopta dos aprobaciones; P20 permite migraciones dependientes de ADR-001 sólo en local/staging. §10, §12, §13 y §15 alineados. P2–P17 siguen pendientes, P18 queda como decisión futura separada y producción continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final. Sin backend, SQL ni migraciones en este cambio. |
+| 2.1 | 25/10/2026 | **Reunión con el cliente — ADR-005 aprobada (fiambres por peso):** los fiambres dejan de venderse por pieza/media pieza y pasan a venderse por peso (kg ingresado con hasta 3 decimales y mostrado con 3 fijos, gramos enteros como canónico, precio por kg, nunca `float`; redondeo monetario completamente pendiente, D-R1). ADR-003 queda REEMPLAZADA por ADR-005 y ADR-002 sigue histórica. Origen del precio del presupuesto y ciclo de vida: pendientes. **Nuevo módulo Presupuestos** (Fase 1, entrega pendiente): documento interno sin efecto de stock ni dinero, IVA 21% sólo informativo, sin descuentos, snapshot de cliente y producto, dueño/encargado (vendedor pendiente) y productos `unidad` y `peso`. §2, §4, §5, §7.1, §7.4, §7.5, §7.10 (nueva), §8, §9, §11, §12, §14, §15, §16. Desambiguación «presupuesto» ↔ «cotización comercial del proyecto». **Sin código, SQL, migraciones ni pruebas en este cambio**; la implementación requiere una tarea posterior autorizada. ADR-001 sin cambios. |
 
 ---
 
-*Fin de BLUEPRINT.md v2.0*
+*Fin de BLUEPRINT.md v2.1*
