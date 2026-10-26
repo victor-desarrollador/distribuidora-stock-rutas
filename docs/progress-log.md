@@ -1,4 +1,109 @@
 ---
+## 26/10/2026 — Cierre de staging: Etapa 2 — Stock (stock-ingreso + stock-cuarentena-merma) — PASS
+
+**Entorno:** staging, project ref `rtsncntppghdynzhezzg` (ref verificado por el runner antes de cada conexión) · **Código:** `main` = `0458f21544b0ed82a2bc7f57f6807d2a72d0d97e` · **Commit funcional del slice:** `f0b02abe27c5a479e2c6c0a5fae292114f576b31` · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y validar con fixtures temporales, transacciones revertidas y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, cambios de código/SQL/tests, merge ni deploy. Esta entrada complementa las de los slices 1 y 2 de la Etapa 2, cuyas líneas «STAGING: NOT TOUCHED» reflejan el momento de aquellas entradas y quedan superadas por ésta **sólo en cuanto al estado de staging**.
+
+**Etapa 2 — Stock: VALIDADA EN STAGING · Producción: NO AUTORIZADA · ADR-005: todavía NO implementada** (la validación corresponde al modelo de cantidades vigente en el SQL, anterior al cambio a gramos).
+
+### Migración
+- Estado previo, verificado por SQL de sólo lectura: 9 migraciones aplicadas, hasta `20261025021032_stock_operaciones_ingreso`; `20261025033454` no aplicada; todos los conteos de negocio y de Auth en 0.
+- El humano aplicó `20261025033454_stock_cuarentena_merma.sql` el 26/10/2026: el dry-run listó sólo esa migración, `supabase db push --linked` terminó OK y un segundo push respondió «Remote database is up to date.».
+- Catálogo: la versión `20261025033454 stock_cuarentena_merma` figura **exactamente una vez** en `supabase_migrations.schema_migrations`; `migration list --linked` muestra **10/10 alineadas**; ninguna versión posterior inesperada.
+
+### Validación funcional (Data API con JWT reales + SQL administrativo)
+- Método: dos empresas temporales `stgcm-9b967f-*` (B sólo como fixture adversarial de aislamiento) y seis usuarios temporales:
+  - dueño A;
+  - encargado A;
+  - vendedor/piloto A con `user_metadata.rol = "dueno"` engañoso;
+  - encargado A inactivo;
+  - usuario sin perfil;
+  - dueño B.
+
+  La contraseña fue aleatoria por corrida y no se imprimió. Las credenciales se pasaron sólo por variables `PG*` del proceso hijo y el SQL por stdin; no se imprimieron DSN, JWT ni keys.
+- **Regresión de `registrar_ingreso`:** 12/12.
+- **`mover_a_cuarentena`: PASS.**
+  - Dueño y encargado OK, con una operación y un movimiento depósito → cuarentena, cuyo destino resuelve el servidor.
+  - Motivo con trim, huella v1 igual al literal canónico, saldos derivados correctos y stock exacto a 0 permitido.
+  - 24/24 negativos sin efectos en el ledger ni reserva de la clave:
+    - anon y `service_role`: `42501`;
+    - vendedor, inactivo y sin perfil: `PT403`;
+    - cruces de empresa: `PT404`;
+    - cantidad 0, negativa o NULL, motivo vacío, en blanco o NULL, y clave NULL: `PT400`;
+    - origen cuarentena o camión: `PT400 stock_origen_invalido`;
+    - origen o producto inexistente: `PT404`;
+    - producto inactivo: `PT409`;
+    - stock insuficiente: `PT409`.
+- **`registrar_merma`: PASS.**
+  - Dueño y encargado OK con los seis códigos de Blueprint §7.7, `otro` con texto (trim) y código con `btrim`.
+  - Movimiento depósito → NULL y huellas con y sin texto correctas.
+  - 24/24 negativos: los mismos que en cuarentena más código fuera del catálogo, en mayúsculas o NULL, `otro` sin texto o en blanco y origen cuarentena bloqueado (D4).
+  - Una aserción del runner dio falso negativo por un índice de columnas mal tomado; la fila impresa mostraba los datos correctos (`motivo_codigo = otro`, texto con trim, actor encargado).
+- **Idempotencia: PASS (10/10).**
+  - El replay con la misma clave y el mismo payload normalizado devuelve el mismo id, sin efectos.
+  - Responden `PT409 stock_conflicto_idempotencia` los conflictos por cantidad, motivo, código, texto, producto y tipo (clave de cuarentena reutilizada en merma).
+  - La misma UUID usada por otro actor crea una operación nueva.
+- **RLS, grants y Topología D: PASS (30/30 por HTTP, además del catálogo).**
+  - Las fachadas `public` son SECURITY INVOKER de `postgres`; las implementaciones `privado` son SECURITY DEFINER de `propietario_rpc`; todas con `search_path=''`.
+  - La ACL de EXECUTE es `{owner, authenticated}`; PUBLIC, anon y `service_role` no tienen EXECUTE.
+  - Dueño y encargado leen sólo filas de su empresa; vendedor, inactivo y sin perfil leen 0 filas (no depende de `user_metadata`); anon y `service_role` reciben `42501`.
+  - UPDATE, DELETE e INSERT directos sobre `operaciones` y `movimientos_stock` se rechazan para dueño, encargado, vendedor, anon y `service_role`, y el ledger queda sin cambios.
+  - `privado` no está expuesto por la Data API.
+- **Aislamiento transaccional: PASS (21/21).**
+  - `READ COMMITTED` acepta la operación.
+  - `REPEATABLE READ` y `SERIALIZABLE` se rechazan con `PT500 stock_error_interno`, tanto en `privado.*` como en las fachadas, sin operación, sin movimiento, con stock intacto y sin reservar la clave.
+  - La misma clave reutilizada después en `READ COMMITTED` funciona, con una operación y un movimiento.
+
+### Concurrencia (dos conexiones reales; S1 retiene el lock 3 s)
+| Caso | Resultado |
+|---|---|
+| C1 cuarentena 7 ‖ merma 7 sobre 10 | una OK, la otra `stock_insuficiente`; saldo 3 |
+| C2 cuarentena 4 ‖ merma 5 sobre 10 | ambas OK (S2 esperó ~3,95 s); saldo 1 |
+| C3 productos distintos | sin bloqueo cruzado: S2 terminó 1,5–1,8 s antes de que S1 liberara el lock (3/3) |
+| C4 misma clave y mismo payload | mismo `operaciones.id`, una operación, un movimiento; saldo 7 |
+| C5 cuarentena 6 ‖ 6 sobre 10 | una OK, la otra `stock_insuficiente`; depósito 4, cuarentena 6 |
+| S2 en `REPEATABLE READ`/`SERIALIZABLE` con el lock retenido | `PT500` sin esperar; clave no reservada |
+
+- Ningún saldo negativo; al final había 47 operaciones con 47 movimientos.
+- C3 se repitió con la tolerancia documentada del arnés local (< 1,0 s), porque una RPC sin contención tarda en staging 0,47–1,13 s medidos en el servidor. La evidencia determinante es que S2 terminó mientras S1 todavía retenía el lock.
+
+### pgTAP (suite completa ejecutada en staging, cada archivo en su transacción revertida)
+- **942 aserciones / 939 ok / 3 not ok** en 11 archivos:
+  - `stock_cuarentena_merma` 150/150, `stock_ingreso` 119/119, `ubicaciones` 82/82;
+  - los dos archivos de aislamiento, 16/16 cada uno;
+  - `clientes_catalogo` 183/183, `grants_default_privileges` 32/32;
+  - `hardening_adr001` 51/51: las aserciones O-4, que en local salen SKIP, corrieron contra el objeto real.
+- Las 3 fallas (`auth_base_rls #5`, `camiones_catalogo #10`, `productos_catalogo #15`) **no son defectos del producto**. Son listas cerradas de funciones SECURITY DEFINER armadas para local, donde no existe `public.rls_auto_enable()`. En staging ese objeto existe y se conserva por O-4, sin EXECUTE para PUBLIC, anon, `authenticated` ni `service_role`.
+- **Propuesta separada, no implementada en esta rama:** `fix/pgtap-listas-definer-portables`.
+- La huella de catálogo (roles, extensiones, funciones, relaciones, policies, default ACL y conteos) es idéntica antes y después de la suite.
+
+### Advisors
+- `supabase db advisors --linked`: «No issues found».
+- `supabase db lint --linked`: «No schema errors found».
+
+### Cleanup
+- Se eliminaron sólo los fixtures del run (por id y prefijo): ledger, productos, ubicaciones, camión, perfiles, usuarios Auth, identities, sesiones, tokens y entradas de `audit_log_entries`.
+- Conteos finales iguales a los iniciales (todos en 0); huella de catálogo idéntica a la inicial; sin datos residuales; el archivo temporal de contraseña se borró.
+- Los runners quedaron fuera del repositorio.
+
+### Security review (solo lectura, 26/10/2026)
+- Revisión de `f0b02ab` con `/security-review` como insumo.
+- **Sin hallazgos Critical, High ni Medium.** Se verificaron:
+  - Topología D, `search_path` y owner;
+  - ACL de EXECUTE, grants por columna y ledger append-only;
+  - policies de INSERT por tipo y FK compuestas por `empresa_id`;
+  - identidad desde el `sub` del JWT y rol/empresa desde `perfiles`;
+  - idempotencia (reserva antes de las validaciones mutables, huella con tipo);
+  - lock con saldo leído después, guard de aislamiento, `service_role` y no exposición de `privado`.
+- La security review humana e independiente que exige `AGENTS.md` §2.3 sigue siendo competencia del humano y de los auditores.
+
+### Riesgos conocidos (no bloquean la Etapa 2)
+1. El arnés de concurrencia no está versionado (se reconstruyó ad hoc fuera del repositorio para esta validación).
+2. El CI no ejecuta Supabase (ni pgTAP ni el arnés).
+3. Las listas cerradas de pgTAP no son totalmente portables entre local y staging (ver propuesta `fix/pgtap-listas-definer-portables`).
+
+**STAGING: VALIDADO · PRODUCCIÓN: NO TOCADA / NO AUTORIZADA · CODE/SQL/TESTS: NOT MODIFIED · ADR-005: NO IMPLEMENTADA · SECRETS EXPOSED: NO.**
+
+---
 ## 25/10/2026 — Documental (cierre): ADR-005 §2.3.1 limitada al desbordamiento (M-3 / L-1)
 
 **Rama:** `docs/fiambres-peso-presupuestos` (base `b60a6d1`). **Sólo documental**, autorizada por decisión humana tras la segunda revisión documental completa.
