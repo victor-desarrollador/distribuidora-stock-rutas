@@ -1,4 +1,61 @@
 ---
+## 26/10/2026 — Documental: cierre humano de ADR-005 D-R1–D-R4 (sin implementación; sin commit)
+
+**Rama:** `docs/cerrar-decisiones-peso` desde `main` = `ce4e8700b166b524e2da5eb290066f96e2b4ef8b`. **Tarea sólo documental:** sin código, SQL, migraciones, pruebas, frontend, Supabase, staging ni producción. Sin commit hasta la revisión humana.
+
+### Decisiones humanas registradas (26/10/2026)
+- **D-R1, redondeo monetario por peso:**
+  - el importe exacto `gramos × precio_por_kg / 1000` se calcula sin `float` y puede tener más de 2 decimales;
+  - **cada línea `peso` se redondea una sola vez al peso entero** con **empate 0,50 hacia arriba** (`$1.543,20 → $1.543`; `$1.544,50 → $1.545`);
+  - el aporte de las líneas `peso` al total es la **suma de sus importes ya redondeados**, nunca recalculada desde valores exactos; el total de un documento es la suma de los importes finales de cada línea según la regla de su tipo;
+  - aplica **sólo a líneas `peso`** de ventas, presupuestos y valorizaciones por peso que dependan de la regla;
+  - `numeric(14,2)` sigue siendo el tipo monetario general (`1545.00`); no se cambia a `integer`.
+- **D-R2, peso efectivamente medido:** cada operación (ingreso, carga, venta, devolución del cliente y conteo de regreso) registra el peso medido en esa operación; en la carga, el mismo valor en gramos es débito del depósito y crédito del camión. Sin balanza, integración, Bluetooth, captura automática ni punto físico de pesaje definidos.
+- **D-R3, diferencias de pesaje:** sin tolerancia automática en Fase 1; toda diferencia distinta de cero, incluso de 1 gramo, se registra. No implica faltante culpable ni sanciones o descuentos automáticos.
+- **D-R4, datos del modelo anterior:** reinicio limpio; una cantidad en medias piezas nunca se interpreta como gramos. Local/staging sin migración semántica; prototipo con claves `localStorage` nuevas, sin leer, copiar, reinterpretar ni borrar automáticamente las anteriores. Producción sin autorización.
+- **Aclaración humana (AskUserQuestion):** D-R1 rige sólo para líneas `peso`. Queda **pendiente nuevo** si el importe final de las líneas `unidad` (precio con hasta 2 decimales) conserva centavos o se redondea al peso entero y, por lo tanto, si un documento mixto `peso` + `unidad` puede terminar con centavos.
+
+### Qué se hizo
+- `docs/decisions/005-fiambres-por-peso-gramos.md` v1.0 → **v1.1**: §2.3.3 con D-R1; §2.4 (D-R2), §2.5 (D-R3) y §2.6 (D-R4) nuevas. §5 pasa a «decisiones cerradas», con la pregunta original y la decisión, el pendiente derivado de `unidad` y la tabla original conservada como historial. También se tocaron §6 (consecuencias y pruebas futuras) y §7 (fuente MDN `Math.round`). Estado sin cambios: **APROBADA**, sin autorizar migraciones, implementación ni producción.
+- `docs/decisions/README.md`: fila de ADR-005 (v1.1, D-R1–D-R4 cerradas).
+- `BLUEPRINT.md` v2.1 → **v2.2**:
+  - §2, §7.1 (D-R1, D-R2, D-R3, D-R4 y coexistencia con `numeric(14,2)`), §7.4, §7.5, §7.8 (sin tolerancia) y §7.10.6;
+  - §8 (`venta_items`) y §11;
+  - §12 (casos de redondeo, empate, total, peso medido, diferencia de 1 g y datos anteriores, como requisitos futuros);
+  - §14 (la migración a peso es el siguiente bloque técnico) y §15 (D-R1–D-R4 tachadas como resueltas; pendiente nuevo de `unidad`);
+  - §16 y §17.
+- `docs/PRD.md` 0.11 → **0.12**: §0, §7.1 (flujo de presupuesto), §9, criterios de aceptación, §21 y §22.
+- `docs/architecture/analisis-base-datos.md`: en la fila `venta_items`, la mención «D-R1 pendiente» pasa a la regla cerrada (única línea afectada).
+- **Correcciones de la revisión documental, sin cambiar decisiones:**
+  - LOW-1: Blueprint §7.5 pasa a ser una recomendación («conviene diseñar la venta por peso sobre el modelo ya migrado; el orden lo autoriza el humano según §14»).
+  - LOW-2: para líneas `unidad`, «la fórmula vigente es `cantidad × precio_unitario`; permanece pendiente si el importe final conserva centavos o se redondea al peso entero». Se quitó «exacto» del Blueprint y de ADR-005.
+  - LOW-3: el pendiente nombra explícitamente el efecto sobre documentos mixtos `peso` + `unidad`, con el ejemplo del problema `3 × $1.234,56 = $3.703,68` (no es una decisión).
+  - INFO: en ADR-005 §6, «no se borran automáticamente las claves anteriores», igual que D-R4; no autoriza borrado manual ni migración de claves.
+- **Corrección post-auditoría (commit rechazado `2e4c754`):** se eliminaron las frases que generalizaban a todas las líneas el «importe ya redondeado según D-R1» o el «total = suma de líneas redondeadas» (ADR-005 §2.3.3, §2.3.4, §5 y §6; Blueprint §2, §7.1, §7.5, §7.10.6, §12, §15 y §17; PRD §7.1, §9, criterios de aceptación, §21 y historial). Queda así: D-R1 aplica sólo a líneas `peso`; el total es la suma de los importes finales de cada línea según la regla de su tipo; las líneas `unidad` y los centavos de documentos mixtos siguen pendientes. No se resolvió ninguna decisión adicional.
+
+### Pendientes que siguen abiertos (no se resolvió ninguno)
+- **Presupuestos:** numeración, ciclo de vida, vigencia, conversión a venta, vendedor/piloto, cliente no registrado, cuenta, origen y edición del precio, y entrega.
+- **Otros:** DNI y cuenta de clientes; base de valorización de faltantes (`BLUEPRINT.md` §15, prioridad media); redondeo de líneas `unidad`. IVA 21% sigue siendo sólo visual y no hay descuentos.
+
+### Skills usadas
+- **source-driven-development:** documentación oficial de PostgreSQL 17:
+  - `numeric` es exacto y recomendado para importes;
+  - «the numeric type rounds ties away from zero», que para importes positivos equivale a 0,50 hacia arriba;
+  - redondeo implícito al guardar con más escala que la declarada.
+
+  MDN `Math.round` redondea los empates hacia +∞ sobre `Number` de doble precisión, por eso la regla se formula sobre el decimal exacto. Ejemplos verificados con aritmética entera exacta (BigInt) en Node: `1250 g × $1.234,56` = `1543,2` → `1543`; `1250 g × $1.235,60` = `1544,5` → `1545`; dos líneas de `1543,4` → `3086` (no `3087`).
+- **api-and-interface-design:** el importe final de cada línea (para `peso`, el redondeado por D-R1) es el valor guardado y el total se deriva de esos valores (snapshot, sin recálculo); no se diseñaron RPC ni columnas.
+- **grilling:** se mapeó el árbol de decisiones. La única rama abierta (las líneas `unidad`) se planteó al humano, que eligió registrarla como pendiente.
+
+### Cómo se verificó
+`rg` de D-R1–D-R4 en `BLUEPRINT.md` y `docs/`, `git diff --check`, `git status --short`, `git diff --stat` y `git diff --name-status`. No se corrió la suite técnica: la tarea es documental y no toca código.
+
+### Siguiente bloque técnico
+**Migración al modelo por peso** (productos, ledger en gramos, RPC, pgTAP/Vitest y prototipo), con su propio preámbulo, plan autorizado y security review. No está autorizada por esta entrada.
+
+**CODE/SQL/MIGRATIONS/TESTS: NOT MODIFIED · STAGING: NOT TOUCHED · PRODUCTION: NOT TOUCHED · COMMIT: NOT CREATED.**
+
+---
 ## 26/10/2026 — Cierre de staging: Etapa 2 — Stock (stock-ingreso + stock-cuarentena-merma) — PASS
 
 **Entorno:** staging, project ref `rtsncntppghdynzhezzg` (ref verificado por el runner antes de cada conexión) · **Código:** `main` = `0458f21544b0ed82a2bc7f57f6807d2a72d0d97e` · **Commit funcional del slice:** `f0b02abe27c5a479e2c6c0a5fae292114f576b31` · **Autorización humana explícita:** aplicar la migración en staging (hecho por el humano) y validar con fixtures temporales, transacciones revertidas y cleanup. **Producción no tocada.** Sin `db push` por parte de Claude, cambios de código/SQL/tests, merge ni deploy. Esta entrada complementa las de los slices 1 y 2 de la Etapa 2, cuyas líneas «STAGING: NOT TOUCHED» reflejan el momento de aquellas entradas y quedan superadas por ésta **sólo en cuanto al estado de staging**.
