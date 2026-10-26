@@ -1,8 +1,8 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 2.1 (documento de trabajo controlado; propuestas no aprobadas identificadas)
-**Fecha:** 25/10/2026 (hora local Argentina)
+**Versión:** 2.2 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Fecha:** 26/10/2026 (hora local Argentina)
 **Estado:** Apto para inventario técnico, planificación y validación controlada de ADR-001 exclusivamente en local/staging. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
 > Este documento es la fuente de referencia del proyecto. Todo agente (Claude Code, OpenCode, Codex) y toda persona que trabaje en el repositorio debe leerlo antes de escribir código. Si algo del código contradice este documento, el documento manda hasta que se registre una decisión que lo cambie (ver sección 13: ADR).
@@ -31,7 +31,7 @@ Todo lo que no sirva a ese objetivo queda fuera de la Fase 1.
 - El dueño o encargado puede **retirar efectivo en cualquier momento del recorrido**: queda fecha/hora de registro del servidor, hora declarada del hecho si difiere, quién entrega, quién recibe, importe, camión, jornada y confirmación de **ambas personas**.
 - Gastos del recorrido con dinero recaudado: **solo con autorización** del dueño/encargado y comprobante/motivo registrados (detalle pendiente).
 - El cierre con diferencias lo aprueba **dueño o encargado**, sin eliminar la diferencia registrada.
-- **Unidades (decisión del cliente del 25/10/2026; ADR-005, aprobada):** los **lácteos** y productos por unidad se venden y controlan por **cantidad/unidad entera**. Los **fiambres** se venden y controlan **por peso**: comercialmente se expresan **en kg**, se ingresan con **hasta 3 decimales** y se muestran con **3 decimales fijos** (`28,680 kg`), el precio es **por kg** y la representación canónica es un **entero en gramos**. La pieza y la media pieza **dejaron de existir** como unidad de venta, stock o precio (reemplaza la regla vigente del 13/10 al 25/10/2026; histórico en ADR-002/ADR-003). Nunca se usa `float`. El prototipo demo todavía implementa pieza/media pieza y requiere un cambio posterior autorizado (ver §7.1).
+- **Unidades (decisión del cliente del 25/10/2026; ADR-005, aprobada):** los **lácteos** y productos por unidad se venden y controlan por **cantidad/unidad entera**. Los **fiambres** se venden y controlan **por peso**: comercialmente se expresan **en kg**, se ingresan con **hasta 3 decimales** y se muestran con **3 decimales fijos** (`28,680 kg`), el precio es **por kg** y la representación canónica es un **entero en gramos**. La pieza y la media pieza **dejaron de existir** como unidad de venta, stock o precio (reemplaza la regla vigente del 13/10 al 25/10/2026; histórico en ADR-002/ADR-003). Nunca se usa `float`. Decisiones humanas del 26/10/2026 (ADR-005 D-R1–D-R4): el importe de cada línea `peso` se redondea una sola vez al **peso entero** (0,50 hacia arriba) y el total suma el importe final de cada línea según la regla de su tipo (la de las líneas `unidad` y, con ella, los centavos de un documento mixto siguen pendientes); cada operación registra el **peso efectivamente medido**; Fase 1 **no aplica tolerancia** a diferencias de pesaje; el modelo anterior de pieza/media pieza se **reinicia limpio**, sin conversión. El prototipo demo todavía implementa pieza/media pieza y requiere un cambio posterior autorizado (ver §7.1).
 - **Presupuestos (decisión del cliente del 25/10/2026):** el sistema debe generar **presupuestos** internos para clientes, con IVA 21% **sólo como etiqueta informativa** y **sin descuentos**. Un presupuesto **no** es venta ni factura, **no** mueve stock ni dinero y **no** integra ARCA (ver §7.10).
 - Vencimientos: el cliente pidió **control de vencimientos asociado a productos, sin trazabilidad por lote**. **PROPUESTA TÉCNICA NO APROBADA:** anotar fecha de vencimiento en cada ingreso de mercadería, sin asignar ventas a ingresos ni prometer saldos disponibles por partida. Ver secciones 4, 5 y 8.
 - Devoluciones: **tratamiento según producto**. No exigen aprobación humana general para retornar al stock vendible, pero **nunca** se reingresará automáticamente mercadería no apta: debe cumplir reglas verificables de aptitud, origen y conservación; criterios pendientes.
@@ -127,12 +127,28 @@ Backend:   Supabase — Auth · PostgreSQL · RLS · RPC (funciones SQL) · Stor
   - `unidad`: `cantidad × precio_unitario`;
   - `peso`: `cantidad_kg × precio_por_kg` = `gramos × precio_por_kg / 1000`.
 
-  Con gramos enteros y precios con 2 decimales, el valor exacto puede tener hasta 5 decimales. Cómo se convierte ese valor exacto al importe monetario final es la **política de redondeo monetario pendiente** (ADR-005 D-R1, §15): destino, regla de empate, momento en que se aplica y escala intermedia **no están decididos**. Hasta que se decida no se fija fórmula SQL ni de dominio. La implementación deberá definir explícitamente el momento y la regla de redondeo según la política que se apruebe, sin punto flotante, y no debe depender del redondeo implícito de `numeric(14,2)`.
+- **Redondeo monetario del importe por peso (ADR-005 D-R1, decisión humana del 26/10/2026):**
+  - el **importe exacto** `gramos × precio_por_kg / 1000` se calcula con aritmética exacta (enteros o `numeric`), nunca con `float`, `real` ni `double precision`; puede tener más de 2 decimales (hasta 5 con gramos enteros y precios con 2 decimales);
+  - **cada línea `peso` se redondea una sola vez** al **peso entero más cercano**, con **empate 0,50 hacia arriba**: para importes positivos, una fracción menor que 0,50 va al peso inferior y una fracción mayor o igual que 0,50 va al peso superior (`$1.543,20 → $1.543`; `$1.544,49 → $1.544`; `$1.544,50 → $1.545`; `$1.544,99 → $1.545`);
+  - el **total del documento** es la **suma de los importes finales determinados para cada línea según la regla aplicable a su tipo de producto**: para líneas `peso` esa regla ya está definida por D-R1 (se suman sus importes ya redondeados, sin recalcularlos desde cantidades y precios exactos); para líneas `unidad` la regla monetaria final sigue **pendiente**; por lo tanto, el comportamiento final de centavos en documentos mixtos `peso` + `unidad` también sigue **pendiente**;
+  - aplica conceptualmente a **ventas**, **presupuestos** y a cualquier otra valorización por peso cuyo importe dependa de esta regla; no se extiende a módulos todavía no definidos;
+  - **tipo monetario:** `numeric(14,2)` sigue siendo el tipo monetario general y representa el importe redondeado con centavos `.00` (por ejemplo, `1545.00`). Esta decisión **no** cambia el tipo SQL del dinero a `integer`; un cambio de esquema requeriría una decisión posterior. El redondeo se aplica de forma explícita en la implementación, nunca confiando en el redondeo implícito al guardar en `numeric(14,2)`;
+  - **líneas `unidad`:** la fórmula vigente es `cantidad × precio_unitario`; permanece **pendiente** (§15) decidir si el importe final de una línea `unidad` se conserva con centavos o se redondea al peso entero, y qué consecuencia tiene eso sobre el total de un documento mixto (`peso` + `unidad`). Ejemplo del problema, no decisión: `3 × $1.234,56 = $3.703,68`; qué importe comercial final corresponde a esa línea y si, por lo tanto, un documento mixto puede terminar con centavos sigue pendiente. D-R1 aplica únicamente a líneas `peso` y no lo resuelve.
+- **Peso efectivamente medido (ADR-005 D-R2, decisión humana del 26/10/2026):** cada operación de mercadería por peso registra el **peso efectivamente medido para esa operación**, en gramos enteros (presentado en kg con 3 decimales fijos). Nunca se arrastra como verdad un peso teórico anterior:
+  - **ingreso:** el peso realmente recibido, que entra al depósito;
+  - **carga:** el peso realmente cargado al camión; el mismo valor en gramos es el débito del depósito y el crédito del camión de esa operación;
+  - **venta:** el peso efectivamente entregado al cliente, que descuenta el stock del camión;
+  - **devolución del cliente:** el peso efectivamente recibido de vuelta; su clasificación posterior sigue las reglas vigentes de aptitud y cuarentena (§7.7);
+  - **conteo de regreso:** el peso físicamente pesado al regreso, que se compara contra el esperado (§7.8, §7.9.2).
+
+  El sistema registra el peso informado o medido. **No** se definen modelo o marca de balanza, integración electrónica, Bluetooth, captura automática ni la obligación de pesar en un punto físico específico.
+- **Diferencias de pesaje (ADR-005 D-R3, decisión humana del 26/10/2026):** Fase 1 **no aplica tolerancia automática**. Toda diferencia distinta de cero entre el peso real y el esperado, incluso de 1 gramo, se registra como diferencia (§7.8).
 - **Historial:** cada ítem de venta o de presupuesto conserva la cantidad canónica, el precio aplicado (unitario o por kg) y el importe. Un documento histórico se reconstruye con esos valores, **sin volver a calcularlos** (ADR-005 §2.3).
 - **Estado actual del código (no cumple esta regla; requiere una tarea autorizada):**
   - **SQL local/staging:** `productos` admite `forma_venta in ('unidad','pieza')`, el precio de pieza completa y `stock_minimo` en medias piezas (`20261023140000_catalogo_productos.sql`). El ledger `movimientos_stock.cantidad integer` ya es compatible con gramos (ADR-005 §6).
   - **Prototipo demo (`apps/web/src/`):** implementa pieza/media pieza con precio derivado (ADR-003) sobre las claves `_demo_v4` (`distribuidora_productos_demo_v4`, `distribuidora_jornadas_demo_v4`, `distribuidora_ventas_demo_v4`, `distribuidora_cobros_demo_v4`, `distribuidora_movimientos_demo_v4`, `distribuidora_retornos_demo_v4`, `distribuidora_camiones_demo_v4`; `clientes` en `distribuidora_clientes_demo_v2` y la sesión en `distribuidora_sesion_demo_v1`).
-  - Al cambiarlo se aplica el criterio ya aprobado para cambios de semántica: **versión nueva de las claves operativas, inicialización limpia y sin leer, copiar, reinterpretar ni borrar las anteriores**. Una media pieza guardada nunca se reinterpreta como gramo. La versión exacta se fija en esa tarea.
+  - Al cambiarlo se aplica el criterio ya aprobado para cambios de semántica: **versión nueva de las claves operativas, inicialización limpia y sin leer, copiar, reinterpretar ni borrar automáticamente las anteriores**. Una media pieza guardada nunca se reinterpreta como gramo. La versión exacta se fija en esa tarea.
+- **Datos del modelo anterior (ADR-005 D-R4, decisión humana del 26/10/2026): reinicio limpio.** No existe conversión automática ni reinterpretación: **una cantidad histórica expresada en medias piezas nunca se interpreta como gramos**. En local y staging, los datos operativos de prueba del modelo anterior no se migran semánticamente a gramos; la implementación futura aplica el modelo nuevo e inicializa fixtures compatibles, sin copiar saldos en medias piezas como si fueran gramos. Al cierre de la validación de la Etapa 2 (26/10/2026, `docs/progress-log.md`) staging quedó sin datos de negocio; eso es evidencia de ese momento y no garantiza que siga vacío. En el prototipo demo rige el criterio de versionado de claves del punto anterior. Producción no está autorizada y no hay autorización para migrar datos productivos.
 
 ### 7.2 Ubicaciones de stock
 
@@ -169,7 +185,7 @@ Cada usuario pertenece a una única empresa: un perfil 1:1 con `auth.users`, con
 - `operacion` — ejecución lógica que originó el movimiento (ver §7.9);
 - `jornada` cuando aplique (opcional según tipo);
 - `producto`;
-- `cantidad` — entero positivo en unidad mínima: unidad entera para productos `unidad`, **gramos** para productos `peso` (§7.1, ADR-005);
+- `cantidad` — entero positivo en unidad mínima: unidad entera para productos `unidad`, **gramos** para productos `peso` (§7.1, ADR-005); en productos `peso` es el **peso efectivamente medido en esa operación** (ADR-005 D-R2);
 - `ubicacion_origen` (nullable) y `ubicacion_destino` (nullable) — al menos uno no nulo;
 - `tipo_movimiento`;
 - `actor` (usuario);
@@ -204,7 +220,7 @@ Flujo lógico: `abierta → cargada → en_reparto → ventas_finalizadas → re
 
 - **Una sola jornada por (`empresa_id`, `camion_id`, `fecha`)**, aunque otra del mismo día esté cerrada; no habrá segunda salida por camión ese día.
 - El vendedor registra ventas digitales con conexión. Sin conexión usa talonario numerado; **debe transcribir, guardar en servidor y declarar completas** las ventas en papel antes de que el encargado inicie el **conteo formal**. El camión puede ingresar físicamente al predio; el sistema solo bloquea el proceso administrativo.
-- Identificar origen de venta (`digital`/`papel`), serie y número de nota (cuando aplique), usuario, instante de registro del servidor, jornada, cliente, ítems, precios históricos y pagos. Cada ítem guarda la cantidad en unidad mínima (unidades o gramos), el precio aplicado (unitario o por kg) y el importe (§7.1). **La venta por peso no se diseña hasta resolver el redondeo monetario (ADR-005 D-R1) y el pesaje en ruta (ADR-005 D-R2)**.
+- Identificar origen de venta (`digital`/`papel`), serie y número de nota (cuando aplique), usuario, instante de registro del servidor, jornada, cliente, ítems, precios históricos y pagos. Cada ítem guarda la cantidad en unidad mínima (unidades o gramos), el precio aplicado (unitario o por kg) y el importe (§7.1). En un ítem `peso`, la cantidad es el **peso efectivamente entregado** al cliente (ADR-005 D-R2) y el importe es el redondeado por línea según D-R1. El total de la venta es la suma de los importes finales de cada línea según la regla aplicable a su tipo de producto (§7.1): D-R1 para `peso`; para `unidad`, y por lo tanto para los centavos de una venta mixta, sigue pendiente. Conviene diseñar la venta por peso sobre el modelo por peso ya migrado; el orden de ejecución lo autoriza el humano según §14.
 - La validación de duplicados se realiza por empresa, serie y número **en todo el histórico**, no solamente dentro de una jornada; también idempotencia por solicitud. Notas anuladas se preservan con motivo y sin efecto de stock/dinero. Registrar saltos de numeración y resolución.
 - **Anulación — PROPUESTA NO APROBADA:** vendedor anula solo sus propias ventas antes de finalizar ventas (`ventas_finalizadas`) y con motivo obligatorio; luego solo dueño/encargado con operación compensatoria. Toda anulación aparece en rendición y auditoría. No implementar sin aprobación.
 - **Precios/descuentos — PROPUESTA NO APROBADA:** el vendedor no puede modificar precios ni otorgar descuentos en Fase 1; utiliza el precio configurado. Registrar precio de lista y precio aplicado históricos; excepciones futuras requieren nueva decisión.
@@ -245,6 +261,8 @@ esperado_fisico = carga + entradas_al_camion - salidas_del_camion
 diferencia_fisica = contado_total_de_todas_las_aptitudes - esperado_fisico
 contado_total = contado_apto + contado_cuarentena + contado_no_apto
 ```
+
+**Productos `peso` (ADR-005 D-R2, D-R3):** esperado, contado y diferencia se calculan en gramos enteros y el contado es el peso físicamente pesado al regreso. **Fase 1 no aplica tolerancia automática:** cualquier diferencia distinta de cero, incluso de 1 gramo, se registra como diferencia. No se descuenta automáticamente ningún porcentaje, cantidad de gramos permitida, merma natural ni error de balanza, y no se compensa ni normaliza. Registrar la diferencia no implica un faltante culpable: queda visible y auditable, y su responsabilidad o tratamiento se determinan con las reglas de cierre y regularización que correspondan (§7.9.3). No hay sanciones ni descuentos automáticos.
 
 Las devoluciones de cliente efectivamente recibidas se registran como entradas al camión **una vez**; una devolución no implica stock vendible automáticamente. El resultado no debe cambiar por reclasificación entre apto/cuarentena si el total físico permanece constante. Se documenta destino y motivo de cada partida.
 
@@ -382,10 +400,11 @@ Los presupuestos **no tienen descuentos**: ni por línea, ni global, ni porcenta
 #### 7.10.6 Importe y total
 
 - Importe de línea `unidad` = `cantidad × precio_unitario`.
-- Importe de línea `peso` = `gramos × precio_por_kg / 1000`, con el **redondeo monetario pendiente** (ADR-005 D-R1).
-- Total = suma de los importes de las líneas (requisito del cliente). Cómo se aplica el redondeo monetario a importes y total lo define D-R1.
+- Importe de línea `peso`: el importe exacto `gramos × precio_por_kg / 1000`, redondeado **una sola vez al peso entero** con empate 0,50 hacia arriba (ADR-005 D-R1, §7.1). Resultado final en pesos enteros.
+- Total = **suma de los importes finales determinados para cada línea según la regla aplicable a su tipo de producto** (requisito del cliente: total = suma de importes). Para líneas `peso` la regla es D-R1: se suman sus importes ya redondeados, sin recalcularlos desde cantidades y precios exactos. Para líneas `unidad` la regla monetaria final sigue pendiente y, por lo tanto, también el comportamiento final de centavos de un presupuesto mixto.
+- Línea `unidad`: la fórmula vigente es `cantidad × precio_unitario`; está pendiente (§15) si su importe final se conserva con centavos o se redondea al peso entero y, por lo tanto, si el total de un presupuesto mixto (`peso` + `unidad`) puede terminar con centavos (ejemplo del problema: `3 × $1.234,56 = $3.703,68`).
 
-Montos en `numeric(14,2)`, nunca `float`.
+Montos en `numeric(14,2)`, nunca `float`; un importe en pesos enteros se representa con centavos `.00`.
 
 #### 7.10.7 Snapshot histórico
 
@@ -454,7 +473,7 @@ Como el número, la fecha/hora del servidor y los snapshots los debe fijar el se
 | `talonarios` | [PROPUESTA TÉCNICA] | serie, numero_desde, numero_hasta, asignado_a, estado, fecha_asignacion |
 | `notas_talonario` | [PROPUESTA TÉCNICA] | talonario_id, numero, jornada_id, estado (`utilizada`/`anulada`/`justificada`), venta_id nullable, motivo, registrado_por |
 | `ventas` | [APROBADA CONCEPTUALMENTE] | operacion_id, jornada_id, cliente_id, origen (digital/papel), serie_talonario, numero_nota, total, estado |
-| `venta_items` | [APROBADA CONCEPTUALMENTE] | venta_id, producto_id, cantidad (entero en unidad mínima: unidades o gramos), precio aplicado (unitario o por kg), importe. **Historial de precios aplicados** para reconstruir el cobro sin recalcular (ADR-005 §2.3): **PROPUESTA TÉCNICA pendiente** (forma SQL exacta no aprobada; redondeo del importe por peso pendiente, ADR-005 D-R1). El prototipo todavía usa el snapshot pieza/media de ADR-002/ADR-003 |
+| `venta_items` | [APROBADA CONCEPTUALMENTE] | venta_id, producto_id, cantidad (entero en unidad mínima: unidades o gramos), precio aplicado (unitario o por kg), importe. **Historial de precios aplicados** para reconstruir el cobro sin recalcular (ADR-005 §2.3): **PROPUESTA TÉCNICA pendiente** (forma SQL exacta no aprobada). El importe de un ítem `peso` es el redondeado por línea al peso entero (ADR-005 D-R1) y se guarda en `numeric(14,2)` con centavos `.00`. El prototipo todavía usa el snapshot pieza/media de ADR-002/ADR-003 |
 | `presupuestos` | [PROPUESTA TÉCNICA] (requisito confirmado, §7.10) | empresa_id, número (formato y secuencia pendientes), creado_en (servidor), actor, cliente_id (referencia), snapshot de nombre, cuenta y DNI del cliente, total, estado (sólo si se aprueba un ciclo de vida, pendiente). **No** referencia jornada, operación de stock ni pagos |
 | `presupuesto_items` | [PROPUESTA TÉCNICA] (requisito confirmado, §7.10) | presupuesto_id, producto_id (referencia), snapshot de código, descripción y forma de venta, cantidad (entero en unidad mínima), precio aplicado, IVA informativo (21%), importe. **Sin** columnas de descuento ni de IVA calculado |
 | `venta_pagos` | [APROBADA CONCEPTUALMENTE] | operacion_id, venta_id, medio (efectivo/transferencia/a_cuenta; otros pendientes), importe, referencia, estado (`declarada`/`verificada` para transferencias), verificado_por, verificado_at |
@@ -517,7 +536,7 @@ Si el vendedor/piloto puede generar o consultar presupuestos está **pendiente**
 
 Exportación CSV y filtros de fecha donde corresponda.
 
-**Cantidades en reportes (ADR-005):** las cantidades de productos `peso` (cargado, vendido, devuelto, esperado, contado, diferencia, stock y mínimo) se calculan en gramos enteros y se muestran **en kg con 3 decimales fijos**. Las de productos `unidad`, en unidades. «Faltantes en unidades» del reporte 2 significa «en la unidad comercial de cada producto» (unidades o kg). La valorización en pesos de las diferencias por peso depende del redondeo pendiente (ADR-005 D-R1). Un listado o una consulta de presupuestos no es uno de estos reportes y no forma parte de la rendición.
+**Cantidades en reportes (ADR-005):** las cantidades de productos `peso` (cargado, vendido, devuelto, esperado, contado, diferencia, stock y mínimo) se calculan en gramos enteros y se muestran **en kg con 3 decimales fijos**. Las de productos `unidad`, en unidades. «Faltantes en unidades» del reporte 2 significa «en la unidad comercial de cada producto» (unidades o kg). Una diferencia por peso de cualquier magnitud, incluso de 1 gramo, se informa como diferencia (sin tolerancia, ADR-005 D-R3). La base de valorización de los faltantes (precio de venta histórico, costo u otro) sigue pendiente (§15); cuando esa valorización dependa del importe por peso, su conversión a pesos sigue D-R1. Un listado o una consulta de presupuestos no es uno de estos reportes y no forma parte de la rendición.
 
 ---
 
@@ -536,7 +555,13 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] Ningún cálculo de cantidades ni de dinero usa `float`/`double precision`/`real`.
 - [ ] Un producto `unidad` sigue aceptando sólo enteros; `Lácteos` + `peso` y `Fiambres` + `unidad` se rechazan.
 - [ ] Un precio con más de 2 decimales se rechaza; un documento histórico usa el precio aplicado y el importe guardados, sin recalcularlos.
-- [ ] Importe por peso: casos de redondeo monetario **cuando se apruebe la política** (ADR-005 D-R1); hasta entonces no se escribe una prueba que asuma una regla.
+- [ ] Importe por peso (ADR-005 D-R1): `1,250 kg × $1.234,56/kg` = `$1.543,20` exacto → importe `$1.543`.
+- [ ] Importe por peso, empate: `1,250 kg × $1.235,60/kg` = `$1.544,50` exacto → importe `$1.545` (0,50 hacia arriba); `$1.544,49` → `$1.544`; `$1.544,99` → `$1.545`.
+- [ ] Importe por peso: el redondeo se aplica una sola vez por línea; en un documento con líneas `peso`, el aporte de esas líneas al total es la suma de sus importes ya redondeados y no se recalcula desde cantidades y precios exactos (por ejemplo, dos líneas de `1,250 kg × $1.234,72/kg` = `$1.543,40` exactos cada una: total `$1.543 + $1.543 = $3.086`, no `$3.087`, que resultaría de redondear el total exacto `$3.086,80`).
+- [ ] Importe por peso: el cálculo intermedio es exacto y no usa `float`; el redondeo es explícito y no depende del redondeo implícito de `numeric(14,2)`.
+- [ ] Peso real (ADR-005 D-R2): el movimiento de cada operación (ingreso, carga, venta, devolución y conteo) usa el peso medido en esa operación, no un peso teórico anterior; en la carga, el débito del depósito y el crédito del camión son el mismo valor en gramos.
+- [ ] Sin tolerancia (ADR-005 D-R3): una diferencia de 1 gramo entre contado y esperado se registra como diferencia.
+- [ ] Datos anteriores (ADR-005 D-R4): ninguna cantidad en medias piezas (SQL local/staging o claves `localStorage` anteriores) se lee ni se interpreta como gramos; el modelo nuevo arranca con inicialización limpia.
 - [ ] El saldo de cada ubicación coincide con la suma de sus movimientos.
 
 **Jornada**
@@ -570,7 +595,7 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 **Presupuestos (§7.10)**
 - [ ] Generar un presupuesto no crea `movimientos_stock` ni cambia `stock_actual`.
 - [ ] Generar un presupuesto no crea pagos, deuda ni saldo a cuenta, y no afecta jornadas ni rendiciones.
-- [ ] El importe de cada línea es `cantidad × precio` y el total es la suma de los importes; no se suma, resta ni desglosa IVA.
+- [ ] El importe de una línea `peso` es `gramos × precio_por_kg / 1000` redondeado una vez al peso entero (0,50 hacia arriba, ADR-005 D-R1). El total es la suma de los importes finales de cada línea según la regla de su tipo; la prueba del importe de líneas `unidad` y de los centavos de un presupuesto mixto se escribe cuando se resuelva ese pendiente (§15). No se suma, resta ni desglosa IVA.
 - [ ] Cada línea muestra `21%` como IVA informativo; no existe ningún campo ni cálculo de descuento.
 - [ ] Una línea `peso` muestra la cantidad en kg con 3 decimales fijos y una línea `unidad`, en unidades enteras.
 - [ ] Cambiar después el nombre, el código, la descripción o el precio del producto, o los datos del cliente, no altera un presupuesto ya guardado (snapshot).
@@ -665,9 +690,9 @@ Estado: abierto | resuelto (solo con prueba)
 | 5. Operación digital 1B | **Pantalla de autoventa online Android**, creación de clientes desde celular, **registro de retiros en vivo con doble confirmación** e interfaz de gastos (pagos mixtos ya en 1A). | Tests de ventas digitales, retiro e idempotencia |
 | 6. Reportes | Reportes de la sección 11 + CSV. | Revisión con el dueño |
 | 7. Prueba real | Una semana usando el sistema en paralelo con el papel. | Lista de ajustes acordada |
-| Presupuestos | Módulo de §7.10 (Fase 1). **Etapa y entrega pendientes de acuerdo comercial.** Depende de productos con forma de venta `peso` (ADR-005), de los campos DNI/cuenta de clientes (pendientes) y del redondeo D-R1. No depende de jornadas, carga, ventas ni rendición, y no se agrega a ninguna de esas etapas. | Tests de §12 «Presupuestos» en verde |
+| Presupuestos | Módulo de §7.10 (Fase 1). **Etapa y entrega pendientes de acuerdo comercial.** Depende de productos con forma de venta `peso` (ADR-005), de los campos DNI/cuenta de clientes (pendientes) y del redondeo D-R1 (resuelto el 26/10/2026). No depende de jornadas, carga, ventas ni rendición, y no se agrega a ninguna de esas etapas. | Tests de §12 «Presupuestos» en verde |
 
-**Cambio de modelo a peso (ADR-005).** Los slices ya implementados en local de las Etapas 1 y 2 (productos y stock) usan `pieza` y medias piezas. Una **tarea posterior específica y autorizada** (migración nueva, RPC, pruebas pgTAP/Vitest y prototipo) debe adaptarlos a `peso` y gramos. Como carga, ventas, retornos y conteos (Etapas 3–4) dependen de la unidad mínima, conviene ejecutarla antes de diseñarlos; el orden exacto lo autoriza el humano.
+**Cambio de modelo a peso (ADR-005).** Los slices ya implementados en local de las Etapas 1 y 2 (productos y stock) usan `pieza` y medias piezas. Una **tarea posterior específica y autorizada** (migración nueva, RPC, pruebas pgTAP/Vitest y prototipo) debe adaptarlos a `peso` y gramos. Como carga, ventas, retornos y conteos (Etapas 3–4) dependen de la unidad mínima, conviene ejecutarla antes de diseñarlos; el orden exacto lo autoriza el humano. Con D-R1–D-R4 resueltas (26/10/2026), esa migración al modelo por peso es el **siguiente bloque técnico**; no está autorizada por este documento.
 
 ---
 
@@ -690,10 +715,11 @@ Estado: abierto | resuelto (solo con prueba)
 - [ ] **Vencimientos — propuesta:** fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. Requiere aprobación comercial.
 - [x] ~~**Precio media pieza:** resuelto por ADR-003 (21/10/2026)~~ — **superado** por ADR-005 (25/10/2026): ya no existe la media pieza; los fiambres se venden por peso.
 - [x] **Unidad de los fiambres:** resuelto por ADR-005 (25/10/2026): por peso, kg ingresado con hasta 3 decimales y mostrado con 3 decimales fijos, gramos enteros como canónico y precio por kg.
-- [ ] **Redondeo monetario por peso (ADR-005 D-R1):** cómo se convierte el valor exacto de `gramos × precio_por_kg / 1000` al importe final: destino (por ejemplo, centavos o pesos), regla de empate, momento en que se aplica (por línea, sobre el total u otro) y escala intermedia. Nada de esto está decidido. Bloquea importes de venta y presupuesto y la valorización de diferencias.
-- [ ] **Pesaje en la operación (ADR-005 D-R2):** cómo y dónde se pesa en ingreso, carga, venta en ruta, devolución y conteo de regreso.
-- [ ] **Diferencias de pesaje (ADR-005 D-R3):** tolerancia o no ante diferencias de balanza o pérdida natural de peso. Hasta que se decida, toda diferencia es una diferencia.
-- [ ] **Datos existentes con medias piezas en local/staging (ADR-005 D-R4):** reinicio limpio o migración explícita; nunca una reinterpretación silenciosa.
+- [x] **Redondeo monetario por peso (ADR-005 D-R1):** resuelto por decisión humana del 26/10/2026: cálculo intermedio exacto, cada línea `peso` redondeada una sola vez al peso entero con empate 0,50 hacia arriba; el aporte de las líneas `peso` al total es la suma de esos importes redondeados (líneas `unidad` y documentos mixtos: pendiente, ítem siguiente); `numeric(14,2)` sigue siendo el tipo monetario general (§7.1).
+- [ ] **Redondeo de líneas `unidad` y documentos mixtos:** la fórmula vigente es `cantidad × precio_unitario` (precio con hasta 2 decimales). Falta decidir (a) si el importe final de una línea `unidad` se conserva con centavos o se redondea al peso entero y (b) qué consecuencia tiene eso sobre el total de un documento mixto con líneas `peso` + `unidad`, es decir, si puede terminar con centavos. Ejemplo del problema, no decisión: `3 × $1.234,56 = $3.703,68`. D-R1 aplica únicamente a líneas `peso` y no lo resuelve (aclaración humana del 26/10/2026).
+- [x] **Pesaje en la operación (ADR-005 D-R2):** resuelto por decisión humana del 26/10/2026: cada operación registra el peso efectivamente medido para esa operación (ingreso, carga, venta, devolución, conteo de regreso); sin balanza, integración ni punto de pesaje definidos (§7.1).
+- [x] **Diferencias de pesaje (ADR-005 D-R3):** resuelto por decisión humana del 26/10/2026: sin tolerancia automática en Fase 1; toda diferencia distinta de cero se registra (§7.1, §7.8).
+- [x] **Datos existentes con medias piezas en local/staging (ADR-005 D-R4):** resuelto por decisión humana del 26/10/2026: reinicio limpio, sin conversión ni reinterpretación; versionado limpio de claves en el prototipo (§7.1).
 - [ ] **Presupuestos — numeración:** secuencia por empresa o no, formato visible, reinicio anual o no, unicidad y qué pasa con el número de un presupuesto anulado.
 - [ ] **Presupuestos — ciclo de vida:** si tiene estados (no hay ningún estado definido; cualquier nombre es una decisión pendiente), si se puede editar o anular después de guardado y quién puede hacerlo.
 - [ ] **Presupuestos — vigencia:** si tiene fecha de vencimiento o plazo de validez y si se muestra.
@@ -731,6 +757,8 @@ Estado: abierto | resuelto (solo con prueba)
 - **Unidad mínima:** unidad entera en que se guarda toda cantidad: la **unidad** para productos `unidad`; el **gramo** para productos `peso` (ADR-005). Antes del 25/10/2026 era la media pieza para fiambres (histórico).
 - **Producto por peso (`peso`):** fiambre que se vende, carga, cuenta y rinde por peso. Comercialmente en kg (entrada con hasta 3 decimales; presentación con 3 decimales fijos), con precio por kg; se guarda en gramos enteros.
 - **Gramo (unidad canónica):** representación entera de las cantidades de productos `peso` en la base y en el ledger (`28,680 kg` = `28680`).
+- **Peso efectivamente medido:** peso real informado o medido en una operación concreta (ingreso, carga, venta, devolución o conteo); es la cantidad que registra esa operación (ADR-005 D-R2).
+- **Importe de línea por peso:** importe exacto `gramos × precio_por_kg / 1000` redondeado una sola vez al peso entero, con empate 0,50 hacia arriba (ADR-005 D-R1).
 - **Presupuesto:** documento interno e informativo con número, fecha, hora, datos del cliente y detalle de productos, precios e importes. IVA 21% sólo como etiqueta y sin descuentos. No es venta ni factura y no mueve stock ni dinero (§7.10). No confundir con la cotización comercial del proyecto (§4, §15).
 
 ---
@@ -752,7 +780,8 @@ Estado: abierto | resuelto (solo con prueba)
 | 1.9 | 21/10/2026 | **ADR-003 aprobada — Precio derivado de media pieza** (supera a ADR-002 solo en la política de precio de media pieza; ADR-002 queda histórica): media no configurable, mitad del precio de pieza redondeada al peso entero (`.50` sube) calculada en centavos enteros; cantidad canónica en medias sin cambios; snapshot histórico conserva la media aplicada sin re-derivarla. §4, §7.1, §8 (`productos`, `venta_items`), §12 y §15; claves operativas del prototipo `localStorage` v3 → v4 con inicialización limpia. Sin cambios en ADR-001 ni SQL aprobado. |
 | 2.0 | 22/10/2026 | **ADR-001 aprobada para validación controlada:** P1 selecciona Topología D; P19 adopta dos aprobaciones; P20 permite migraciones dependientes de ADR-001 sólo en local/staging. §10, §12, §13 y §15 alineados. P2–P17 siguen pendientes, P18 queda como decisión futura separada y producción continúa bloqueada hasta pruebas, auditoría independiente y aceptación humana final. Sin backend, SQL ni migraciones en este cambio. |
 | 2.1 | 25/10/2026 | **Reunión con el cliente — ADR-005 aprobada (fiambres por peso):** los fiambres dejan de venderse por pieza/media pieza y pasan a venderse por peso (kg ingresado con hasta 3 decimales y mostrado con 3 fijos, gramos enteros como canónico, precio por kg, nunca `float`; redondeo monetario completamente pendiente, D-R1). ADR-003 queda REEMPLAZADA por ADR-005 y ADR-002 sigue histórica. Origen del precio del presupuesto y ciclo de vida: pendientes. **Nuevo módulo Presupuestos** (Fase 1, entrega pendiente): documento interno sin efecto de stock ni dinero, IVA 21% sólo informativo, sin descuentos, snapshot de cliente y producto, dueño/encargado (vendedor pendiente) y productos `unidad` y `peso`. §2, §4, §5, §7.1, §7.4, §7.5, §7.10 (nueva), §8, §9, §11, §12, §14, §15, §16. Desambiguación «presupuesto» ↔ «cotización comercial del proyecto». **Sin código, SQL, migraciones ni pruebas en este cambio**; la implementación requiere una tarea posterior autorizada. ADR-001 sin cambios. |
+| 2.2 | 26/10/2026 | **Cierre humano de ADR-005 D-R1–D-R4:** D-R1 (sólo líneas `peso`), importe redondeado una vez por línea al peso entero (0,50 hacia arriba), sumado al total sin recálculo, `numeric(14,2)` como tipo monetario general; D-R2, peso efectivamente medido en cada operación; D-R3, sin tolerancia automática de pesaje en Fase 1; D-R4, reinicio limpio del modelo pieza/media pieza, sin reinterpretación. Nuevo pendiente: redondeo de líneas `unidad` y centavos de documentos mixtos. §2, §7.1, §7.4, §7.5, §7.8, §7.10, §8, §11, §12, §14, §15, §16. **Sin código, SQL, migraciones ni pruebas**; la migración al modelo por peso requiere una tarea posterior autorizada. |
 
 ---
 
-*Fin de BLUEPRINT.md v2.1*
+*Fin de BLUEPRINT.md v2.2*

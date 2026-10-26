@@ -1,19 +1,19 @@
 # PRD — Sistema de Control de Stock y Rendición
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 25/10/2026
-**Versión:** 0.11
-**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v2.1; **no lo reemplaza**.
+**Fecha:** 26/10/2026
+**Versión:** 0.12
+**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v2.2; **no lo reemplaza**.
 **Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
 
 ---
 
 ## 0. Cómo leer este documento
 
-- **Fuente de verdad:** `BLUEPRINT.md` v2.1, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR vigentes y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
+- **Fuente de verdad:** `BLUEPRINT.md` v2.2, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR vigentes y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
 - **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
 - **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
-- **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.5, **APROBADA PARA VALIDACIÓN CONTROLADA**), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (`reemplazada` por ADR-005; histórica, sin autoridad normativa), **ADR-005 — Fiambres por peso y unidad mínima en gramos** (estado `aprobada`; no autoriza migraciones ni implementación). ADR-001 resolvió P1/P19/P20, P2–P4, P5–P7 y, para validación controlada, P11 (§18.2); P8–P10 y P12–P17 siguen pendientes y P18 es una decisión futura separada. Su estado permite validación sólo local/staging y no autoriza producción. ADR-002 es histórica y superada. ADR-003 regía el precio derivado de media pieza; desde el 25/10/2026 ADR-005 la reemplaza en su totalidad: los fiambres se venden por peso, en kg en pantalla, con gramos enteros como canónico y precio por kg.
+- **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.5, **APROBADA PARA VALIDACIÓN CONTROLADA**), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (`reemplazada` por ADR-005; histórica, sin autoridad normativa), **ADR-005 — Fiambres por peso y unidad mínima en gramos** (estado `aprobada`; D-R1–D-R4 cerradas por decisión humana el 26/10/2026; no autoriza migraciones ni implementación). ADR-001 resolvió P1/P19/P20, P2–P4, P5–P7 y, para validación controlada, P11 (§18.2); P8–P10 y P12–P17 siguen pendientes y P18 es una decisión futura separada. Su estado permite validación sólo local/staging y no autoriza producción. ADR-002 es histórica y superada. ADR-003 regía el precio derivado de media pieza; desde el 25/10/2026 ADR-005 la reemplaza en su totalidad: los fiambres se venden por peso, en kg en pantalla, con gramos enteros como canónico y precio por kg.
 - **Fase 2:** lo listado en Blueprint §5 permanece fuera de Fase 1.
 - Este documento **no inventa** decisiones ausentes: donde falta definición, remite a «Decisiones pendientes» (§21), a «Dependencias de ADR» (§22) y al Blueprint §15.
 
@@ -154,8 +154,8 @@ Requisito confirmado por el cliente el 25/10/2026 (Blueprint §7.10). Fase 1; la
 4. Indicar la cantidad: en **kg, con hasta 3 decimales**, para productos `peso`; en unidades enteras para productos `unidad`.
 5. Registrar el precio aplicado a cada línea (por kg o unitario). El origen de ese precio (por ejemplo, automático desde el catálogo), si es editable y quién puede modificarlo están pendientes; sin descuentos en ningún caso.
 6. Mostrar `21%` en la columna `% IVA` de cada línea, **sólo como etiqueta**.
-7. Calcular el importe de cada línea: `cantidad × precio`. El redondeo por peso está pendiente (ADR-005 D-R1).
-8. Mostrar el total, que es la suma de los importes.
+7. Calcular el importe de cada línea: `cantidad × precio`. En una línea `peso`, el importe exacto se redondea **una sola vez al peso entero**, con empate 0,50 hacia arriba (ADR-005 D-R1): el importe final queda en pesos enteros. Para una línea `unidad` (fórmula vigente `cantidad × precio_unitario`) está pendiente si el importe final conserva centavos o se redondea al peso entero, y si un presupuesto mixto (`peso` + `unidad`) puede terminar con centavos (ejemplo del problema: `3 × $1.234,56 = $3.703,68`).
+8. Mostrar el total, que es la **suma de los importes finales de cada línea según la regla aplicable a su tipo de producto**: para líneas `peso`, sus importes ya redondeados por D-R1 (sin recalcularlos desde valores exactos); para líneas `unidad`, la regla final sigue pendiente, y con ella si un presupuesto mixto puede terminar con centavos.
 9. Guardar el presupuesto con número, fecha y hora del servidor y snapshot de los datos del cliente y de los productos, y poder consultarlo después.
 
 **Contenido.**
@@ -213,7 +213,10 @@ Requisito confirmado por el cliente el 25/10/2026 (Blueprint §7.10). Fase 1; la
   - Nunca `float` ni conversiones en punto flotante.
   - **Precio:** unitario para `unidad` y **por kg** para `peso`; no existen la pieza ni la media pieza.
   - Ejemplo de consistencia categoría/unidad *(no es una regla de nombres)*: `Queso cremoso en bote` → Lácteos/`unidad`; un fiambre fraccionado → Fiambres/`peso`.
-  - **Pendientes:** redondeo monetario del importe por peso (D-R1), pesaje en la operación (D-R2), tolerancia de diferencias de pesaje (D-R3; hasta entonces, toda diferencia cuenta) y tratamiento de los datos locales/staging en medias piezas (D-R4).
+  - **Importe por peso (D-R1, 26/10/2026):** el importe exacto se calcula sin `float` y se redondea **una vez por línea al peso entero**, con empate 0,50 hacia arriba; esos importes se suman al total sin recalcularlos desde valores exactos. Aplica a las líneas `peso` de ventas y presupuestos. El total de un documento es la suma de los importes finales de cada línea según la regla de su tipo. El dinero sigue en el tipo monetario general de dos decimales (un importe entero se ve como `$1.545`). Para líneas `unidad` está pendiente si el importe final conserva centavos o se redondea al peso entero, y su efecto sobre el total de un documento mixto (`peso` + `unidad`).
+  - **Peso real (D-R2, 26/10/2026):** cada operación (ingreso, carga, venta, devolución del cliente y conteo de regreso) registra el **peso efectivamente medido** en esa operación; no se arrastra un peso teórico anterior. No se definen balanza, integración ni punto físico de pesaje.
+  - **Sin tolerancia (D-R3, 26/10/2026):** Fase 1 no aplica tolerancia automática; cualquier diferencia de peso, incluso de 1 gramo, se registra como diferencia. Eso no la convierte en un faltante culpable: su tratamiento sigue las reglas de cierre y regularización.
+  - **Reinicio limpio (D-R4, 26/10/2026):** los datos del modelo anterior (medias piezas) nunca se interpretan como gramos; en local/staging y en el prototipo demo el modelo nuevo arranca con datos limpios (claves `localStorage` nuevas, sin leer, copiar, reinterpretar ni borrar automáticamente las anteriores).
 - **Tipos de movimiento** (Blueprint §7.4): `ingreso`, `carga_camion`, `venta`, `retorno_camion`, `devolucion_cliente`, `a_cuarentena`, `cuarentena_apta`, `merma`, `faltante_rendicion`, `sobrante_rendicion`, `ajuste`.
 - **No se permiten saldos negativos silenciosos.** Si una venta en papel aún no registrada hace que una venta posterior exceda el saldo informático, se registra una **incidencia de conciliación** y se exige regularización trazable por dueño/encargado; la venta física nunca se borra ni se inventa stock (Blueprint §7.4).
 - **Ajustes** con motivo obligatorio y permiso de administrador (Blueprint §7.4).
@@ -326,8 +329,8 @@ Recuperación general: las correcciones sobre registros confirmados se hacen con
 
 Un módulo se considera terminado cuando cumple las **pruebas obligatorias** de Blueprint §12 y «nada se da por terminado sin prueba» (Blueprint §3.5). Criterios por área (no exhaustivos; el detalle está en Blueprint §12):
 
-- **Stock:** cargar descuenta depósito y suma camión por la misma cantidad; no se carga más que lo disponible; no se carga cuarentena; un fiambre `peso` guarda gramos enteros (`1,250 kg` → `1250`) y conserva el peso exacto al cargar, vender y retornar; más de 3 decimales de kg se rechaza; ningún cálculo usa `float`; el documento histórico conserva el precio aplicado y el importe; el saldo de cada ubicación coincide con la suma de movimientos.
-- **Presupuestos:** no crean movimientos de stock, pagos ni deuda; importe = cantidad × precio y total = suma de importes; IVA 21% sólo visual; sin descuentos; el snapshot no cambia si cambian el producto o el cliente; sólo dueño/encargado de la misma empresa (vendedor según decisión pendiente).
+- **Stock:** cargar descuenta depósito y suma camión por la misma cantidad; no se carga más que lo disponible; no se carga cuarentena; un fiambre `peso` guarda gramos enteros (`1,250 kg` → `1250`), registra el peso medido en cada operación y conserva el peso exacto al cargar, vender y retornar; una diferencia de 1 gramo se informa como diferencia; ningún dato en medias piezas se interpreta como gramos; el importe por peso se redondea una vez por línea al peso entero (`$1.543,20` → `$1.543`; `$1.544,50` → `$1.545`); más de 3 decimales de kg se rechaza; ningún cálculo usa `float`; el documento histórico conserva el precio aplicado y el importe; el saldo de cada ubicación coincide con la suma de movimientos.
+- **Presupuestos:** no crean movimientos de stock, pagos ni deuda; importe = cantidad × precio (línea `peso` redondeada al peso entero, D-R1; línea `unidad` según el pendiente) y total = suma de los importes finales de cada línea según la regla de su tipo; IVA 21% sólo visual; sin descuentos; el snapshot no cambia si cambian el producto o el cliente; sólo dueño/encargado de la misma empresa (vendedor según decisión pendiente).
 - **Jornada:** no hay dos jornadas por camión y fecha (aunque una esté cerrada); el vendedor no registra el conteo de regreso; las notas de papel pendientes bloquean el conteo formal; no se cierra sin conteo; una jornada cerrada rechaza toda modificación.
 - **Rendición:** pago mixto suma el total; `a_cuenta` no suma al efectivo esperado; retiro confirmado por ambos descuenta caja exactamente una vez; dos solicitudes del mismo retiro producen una sola operación; gastos no autorizados no reducen la caja; devoluciones no se duplican; al cerrar, el stock del camión queda en 0.
 - **Ventas en papel:** número duplicado en cualquier jornada de la misma empresa/serie se rechaza; un salto de numeración genera aviso.
@@ -408,9 +411,9 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 12. **Vencimientos** — fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. *(PROPUESTA NO APROBADA.)*
 13. ~~**Precio media pieza**~~ — resuelto por ADR-003 (21/10/2026) y **superado** por ADR-005 (25/10/2026): ya no existe la media pieza; los fiambres se venden por peso.
 14. **Fechas** — día operativo, zona horaria del negocio y corte de jornada (también afecta la fecha y la hora del presupuesto).
-15. **Redondeo monetario por peso (ADR-005 D-R1)** — cómo se convierte el valor exacto de `gramos × precio_por_kg / 1000` al importe final: destino, regla de empate, momento en que se aplica y escala intermedia. Nada de esto está decidido.
-16. **Pesaje en la operación (D-R2)** y **diferencias de pesaje (D-R3)**.
-17. **Datos locales/staging en medias piezas (D-R4)** — reinicio limpio o migración explícita.
+15. ~~**Redondeo monetario por peso (ADR-005 D-R1)**~~ — resuelto (26/10/2026) para líneas `peso`: una vez por línea al peso entero, 0,50 hacia arriba, sumadas al total sin recálculo. **Sigue pendiente:** si el importe final de una línea `unidad` conserva centavos o se redondea al peso entero, y si, por lo tanto, un documento mixto (`peso` + `unidad`) puede terminar con centavos (ejemplo: `3 × $1.234,56 = $3.703,68`).
+16. ~~**Pesaje en la operación (D-R2)** y **diferencias de pesaje (D-R3)**~~ — resueltos (26/10/2026): peso efectivamente medido en cada operación; sin tolerancia automática en Fase 1.
+17. ~~**Datos locales/staging en medias piezas (D-R4)**~~ — resuelto (26/10/2026): reinicio limpio, sin reinterpretación.
 18. **Presupuestos** — numeración (secuencia, formato, reinicio, unicidad, anulación), ciclo de vida/estados, vigencia, conversión a venta, permiso del vendedor/piloto, cliente no registrado, origen del precio de cada línea, si es editable y quién puede modificarlo, y entrega (1A/1B).
 19. **Clientes — DNI y cuenta** — agregarlos a la ficha (hoy no existen), obligatoriedad, formato, unicidad y significado de «cuenta».
 
@@ -423,7 +426,7 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 ## 22. Dependencias de ADR
 
 - **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (`docs/decisions/001-rpc-privilegiadas.md`): **versión 1.5**, estado **APROBADA PARA VALIDACIÓN CONTROLADA** (`docs/decisions/README.md`). P1 seleccionó Topología D; P19/P20 fijaron dos etapas y migraciones sólo local/staging; P5–P7 (22/10/2026), P2–P4 (23/10/2026) y P11 (24/10/2026, para validación controlada) quedaron resueltas por decisión humana. P8–P10 y P12–P17 siguen pendientes, P18 es futura/separada y producción continúa bloqueada.
-- **ADR-005 — Fiambres por peso y unidad mínima en gramos** (`docs/decisions/005-fiambres-por-peso-gramos.md`): **APROBADA** (25/10/2026). Reemplaza a ADR-003 en su totalidad (ADR-003 queda histórica, sin autoridad normativa). **No autoriza** migraciones ni implementación: el cambio de modelo (productos, stock, prototipo, pruebas) requiere una tarea posterior específica, con security review. D-R1–D-R4 siguen pendientes.
+- **ADR-005 — Fiambres por peso y unidad mínima en gramos** (`docs/decisions/005-fiambres-por-peso-gramos.md`): **APROBADA** (25/10/2026). Reemplaza a ADR-003 en su totalidad (ADR-003 queda histórica, sin autoridad normativa). **No autoriza** migraciones ni implementación: el cambio de modelo (productos, stock, prototipo, pruebas) requiere una tarea posterior específica, con security review. D-R1–D-R4 quedaron cerradas por decisión humana el 26/10/2026 (redondeo por línea al peso entero, peso medido por operación, sin tolerancia, reinicio limpio); el redondeo de líneas `unidad` sigue pendiente.
 - **Otras reglas con estado de propuesta** (no son ADR, pero bloquean implementación): stock negativo transitorio, anulación de ventas, prohibición de descuentos, retiro que excede el saldo y vencimientos por partida (Blueprint §7.4–§7.6, §15).
 - **Regla de estado:** una ADR `aprobada para validación controlada` sólo se implementa en local/staging y dentro de sus decisiones resueltas; producción requiere estado `aprobada` tras aceptación humana final. Un agente no puede aprobar una ADR (`docs/decisions/README.md`; AGENTS.md §3).
 
@@ -444,3 +447,4 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 | 0.9 | 22/10/2026 | Acompaña a `BLUEPRINT.md` v2.0 y ADR-001 v1.3: Topología D y gobernanza P19/P20 aprobadas para validación controlada local/staging. P2–P17 pendientes, P18 separada y producción bloqueada. Sin backend, SQL ni migraciones. |
 | 0.10 | 23/10/2026 | Alinea las referencias a ADR-001 v1.5: P5–P7 (22/10/2026) y P2–P4 (23/10/2026) resueltas por decisión humana; P8–P17 pendientes, P18 separada y producción bloqueada. Sin cambios de requisitos de producto. |
 | 0.11 | 25/10/2026 | Acompaña a `BLUEPRINT.md` v2.1 tras la reunión con el cliente: **ADR-005** (fiambres por peso; kg ingresado con hasta 3 decimales y mostrado con 3 fijos, gramos enteros, precio por kg, sin `float`; D-R1 completamente pendiente; ADR-003 reemplazada) en §0, RF-01, §9, §13, §17 y §21–§22. **Nuevo RF-12 / §7.1 Presupuestos**: dueño/encargado (vendedor pendiente), productos `unidad` y `peso`, IVA 21% sólo visual, sin descuentos, total = suma de importes, snapshot, sin efecto de stock ni dinero. Pendientes nuevos 15–19. Sin código, SQL ni migraciones. |
+| 0.12 | 26/10/2026 | Acompaña a `BLUEPRINT.md` v2.2: cierre humano de **ADR-005 D-R1–D-R4** (sólo líneas `peso`: importe redondeado una vez por línea al peso entero con 0,50 hacia arriba, sumado al total sin recálculo; peso efectivamente medido por operación; sin tolerancia automática; reinicio limpio de datos pieza/media pieza) en §0, §7.1, §9, criterios de aceptación, §21 y §22. Nuevo pendiente: redondeo de líneas `unidad` y centavos de documentos mixtos. Pendientes de Presupuestos sin cambios. Sin código, SQL ni migraciones. |

@@ -2,10 +2,10 @@
 
 **Fecha:** 25/10/2026
 **Estado:** APROBADA (aprobación humana explícita del dueño del proyecto, 25/10/2026, a partir de una reunión con el cliente)
-**Versión:** 1.0
+**Versión:** 1.1 (26/10/2026: cierre humano de D-R1–D-R4, §2.3–§2.6 y §5)
 **Reemplaza:** la política de unidades pieza/media pieza de `BLUEPRINT.md` §2 y §7.1 (decisión humana del 13/10 y del 18/10/2026) y, **en su totalidad**, a [ADR-003](003-precio-derivado-media-pieza.md) (ver §4). [ADR-002](002-precios-independientes-pieza-media.md) ya estaba superada y sigue siendo histórica.
 
-> **Alcance.** Esta ADR fija la **regla de negocio** y la **representación canónica** de las cantidades de fiambres. **No autoriza** migraciones, cambios de SQL, RPC, RLS, grants, cambios en el frontend, pruebas ni cambios en el prototipo. Su implementación requiere una **tarea posterior específica** de cambio de modelo y de migración, con su propio preámbulo (`AGENTS.md` §1.3), su plan autorizado y su security review (toca `movimientos_stock`, ventas y precios: `AGENTS.md` §2.4). No modifica ADR-001 ni su estado (**APROBADA PARA VALIDACIÓN CONTROLADA**); producción sigue bloqueada.
+> **Alcance.** Esta ADR fija la **regla de negocio** y la **representación canónica** de las cantidades de fiambres. **No autoriza** migraciones, cambios de SQL, RPC, RLS, grants, cambios en el frontend, pruebas ni cambios en el prototipo. Su implementación requiere una **tarea posterior específica** de cambio de modelo y de migración, con su propio preámbulo (`AGENTS.md` §1.3), su plan autorizado y su security review (toca `movimientos_stock`, ventas y precios: `AGENTS.md` §2.4). No modifica ADR-001 ni su estado (**APROBADA PARA VALIDACIÓN CONTROLADA**); producción sigue bloqueada. El cierre de D-R1–D-R4 (26/10/2026) **tampoco** autoriza migraciones ni implementación: sólo completa la regla de negocio.
 
 ---
 
@@ -49,7 +49,7 @@ Los nombres `unidad` y `peso` son los **valores conceptuales**. El nombre y el t
 
 ### 2.3 Dinero
 
-1. Los importes y precios se siguen guardando en PostgreSQL como **`numeric(14,2)`**, nunca `float`. Los precios admiten como máximo 2 decimales; más de 2 se rechaza; se mantiene la validación mínima `>= 0`. La aritmética monetaria es exacta mediante enteros o `numeric`; nunca se usa punto flotante. Si un cálculo excede el rango representable o produce desbordamiento, la operación falla con error y nunca devuelve un valor aproximado. Un resultado exacto con más de 2 decimales **no** es por sí mismo un error: la conversión del valor monetario exacto al importe final se rige por D-R1 (§2.3.3, §5).
+1. Los importes y precios se siguen guardando en PostgreSQL como **`numeric(14,2)`**, nunca `float`. Los precios admiten como máximo 2 decimales; más de 2 se rechaza; se mantiene la validación mínima `>= 0`. La aritmética monetaria es exacta mediante enteros o `numeric`; nunca se usa punto flotante. Si un cálculo excede el rango representable o produce desbordamiento, la operación falla con error y nunca devuelve un valor aproximado. Un resultado exacto con más de 2 decimales **no** es por sí mismo un error: la conversión del valor monetario exacto al importe final se rige por D-R1 (§2.3.3).
 2. Conceptualmente, el importe de una línea `peso` es:
 
    ```text
@@ -58,10 +58,46 @@ Los nombres `unidad` y `peso` son los **valores conceptuales**. El nombre y el t
    ```
 
    y el de una línea `unidad`, `cantidad × precio_unitario` (sin cambios).
-3. Con gramos enteros y un precio con 2 decimales, el valor exacto del importe `peso` puede tener **hasta 5 decimales** (por ejemplo, `1 g × 0,01 $/kg = 0,00001`). Cómo se convierte ese valor exacto al importe monetario final es la **política de redondeo monetario pendiente (D-R1)**. Hasta que se decida:
-   - no se fija fórmula SQL ni de dominio, ni el destino del redondeo, ni la regla de empate, ni el momento en que se aplica, ni la escala intermedia;
-   - la implementación deberá definir explícitamente el momento y la regla de redondeo según la política que se apruebe. No se debe confiar en el redondeo implícito de la columna: PostgreSQL redondea en silencio un valor con más decimales que la escala declarada de un `numeric(p,s)`.
-4. **Historial:** cada ítem de venta (y de presupuesto) conserva la cantidad canónica, el **precio por kg o unitario aplicado** y el **importe** calculado según la política de D-R1. Un documento histórico se reconstruye con esos valores guardados, **sin volver a calcularlos** con la regla vigente.
+3. **Redondeo monetario del importe `peso` (D-R1, decisión humana del 26/10/2026).** Con gramos enteros y un precio con 2 decimales, el valor exacto del importe `peso` puede tener **hasta 5 decimales** (por ejemplo, `1 g × 0,01 $/kg = 0,00001`).
+   - **Cálculo intermedio exacto:** `importe_exacto = gramos × precio_por_kg / 1000`, con enteros o `numeric`; nunca `float`, `real` ni `double precision`. Puede tener más de 2 decimales.
+   - **Destino:** los importes comerciales finales de una línea `peso` se expresan en **pesos enteros**.
+   - **Momento:** **cada línea se redondea una sola vez**, al peso entero más cercano.
+   - **Empate: 0,50 hacia arriba.** Para importes positivos, una fracción menor que 0,50 va al peso inferior y una fracción mayor o igual que 0,50, al superior: `$1.543,20 → $1.543`; `$1.544,49 → $1.544`; `$1.544,50 → $1.545`; `$1.544,99 → $1.545`. La regla se formula sobre el valor decimal exacto, nunca sobre una representación en punto flotante. Para importes positivos coincide con `round(numeric)` de PostgreSQL («ties are broken by rounding away from zero», §7); D-R1 no fija la función concreta: eso lo hace la implementación.
+   - **Total:** el total del documento es la **suma de los importes finales determinados para cada línea según la regla aplicable a su tipo de producto**. Para líneas `peso`, esa regla es D-R1: se suman sus importes ya redondeados y **no** se recalculan desde cantidades y precios exactos (por ejemplo, dos líneas de `$1.543,40` exactos dan `$1.543 + $1.543 = $3.086`, no `$3.087`). Para líneas `unidad`, la regla monetaria final sigue **pendiente**; por lo tanto, el comportamiento final de centavos en documentos mixtos `peso` + `unidad` también sigue **pendiente**.
+   - **Alcance:** ventas, presupuestos y cualquier otra valorización por peso cuyo importe monetario dependa de esta regla. No se extiende a módulos todavía no definidos.
+   - **Tipo monetario:** `numeric(14,2)` sigue siendo el tipo monetario general y representa el importe redondeado con centavos `.00` (`1545.00`). D-R1 **no** cambia el tipo SQL del dinero a `integer`; eso requeriría una decisión de esquema posterior. La implementación aplica el redondeo de forma explícita: no debe confiar en el redondeo implícito de la columna, porque PostgreSQL redondea en silencio un valor con más decimales que la escala declarada de un `numeric(p,s)`.
+   - **Líneas `unidad`:** la fórmula vigente es `cantidad × precio_unitario`; permanece **pendiente** (§5) decidir si el importe final de una línea `unidad` se conserva con centavos o se redondea al peso entero, y qué consecuencia tiene eso sobre el total de un documento mixto (`peso` + `unidad`). Ejemplo del problema, no decisión: `3 × $1.234,56 = $3.703,68`. D-R1 se definió para el importe por peso y aplica únicamente a líneas `peso` (aclaración humana del 26/10/2026).
+4. **Historial:** cada ítem de venta (y de presupuesto) conserva la cantidad canónica, el **precio por kg o unitario aplicado** y su **importe final según la regla monetaria aplicable a ese tipo de línea**. Para líneas `peso`, dicha regla es D-R1; para líneas `unidad`, el tratamiento final de centavos sigue pendiente (§5). Un documento histórico se reconstruye con esos valores guardados, **sin volver a calcularlos** con la regla vigente.
+
+### 2.4 Peso efectivamente medido (D-R2, decisión humana del 26/10/2026)
+
+Cada operación de mercadería por peso registra el **peso efectivamente medido para esa operación**. No se arrastra como verdad un peso teórico anterior.
+
+| Operación | Peso que se registra |
+|---|---|
+| Ingreso | El peso realmente recibido; ingresa al depósito. |
+| Carga | El peso realmente cargado al camión. El mismo valor canónico en gramos es el débito del depósito y el crédito del camión de esa operación. |
+| Venta | El peso efectivamente entregado al cliente; descuenta el stock del camión. |
+| Devolución del cliente | El peso efectivamente recibido de vuelta. Su clasificación posterior sigue las reglas vigentes de aptitud y cuarentena. |
+| Conteo de regreso | El peso físicamente contado o pesado al regreso; se compara contra el stock esperado. |
+
+Unidad canónica: gramos enteros. Presentación: kg con 3 decimales fijos. El sistema registra el peso real informado o medido. **No** se definen modelo o marca de balanza, integración electrónica, dispositivo Bluetooth, captura automática ni la obligación de pesar en un punto físico específico.
+
+### 2.5 Diferencias de pesaje (D-R3, decisión humana del 26/10/2026)
+
+**Fase 1 no aplica tolerancia automática a diferencias de pesaje.** La diferencia es `peso_real − peso_esperado` (o la formulación equivalente de cada reporte) y cualquier valor distinto de cero, incluso de 1 gramo, se registra como diferencia. No se aplican automáticamente porcentaje de tolerancia, gramos permitidos, merma natural, error de balanza, compensación ni normalización.
+
+Una diferencia registrada **no** implica un faltante culpable: queda visible y auditable, y su responsabilidad o tratamiento se determinan con las reglas de cierre y regularización que correspondan (`BLUEPRINT.md` §7.8, §7.9.3). No hay sanciones ni descuentos automáticos.
+
+### 2.6 Datos del modelo anterior (D-R4, decisión humana del 26/10/2026)
+
+**Reinicio limpio del modelo pieza/media pieza.** No existe conversión automática ni reinterpretación.
+
+> Una cantidad histórica expresada en medias piezas **nunca** se interpreta como gramos.
+
+- **Local/staging:** los datos operativos de prueba del modelo anterior no se migran semánticamente a gramos. La implementación futura aplica el modelo nuevo, inicializa fixtures y datos de prueba compatibles y no copia saldos en medias piezas como si fueran gramos. Al cierre de la validación de la Etapa 2 en staging (26/10/2026, `docs/progress-log.md`) staging quedó sin datos de negocio; es evidencia de ese momento, no una garantía de que siga vacío.
+- **Prototipo demo/`localStorage`:** criterio de versionado ya aprobado: claves nuevas para el modelo por peso, inicialización limpia, sin leer las claves operativas anteriores, sin copiarlas, sin reinterpretarlas y sin borrarlas automáticamente. La versión exacta de las claves se define en la tarea de implementación.
+- **Producción:** no está autorizada y no hay autorización para migrar datos productivos. Esta ADR no diseña una migración productiva.
 
 ## 3. Alternativas descartadas
 
@@ -95,7 +131,24 @@ Los nombres `unidad` y `peso` son los **valores conceptuales**. El nombre y el t
 
 ADR-002 ya estaba **SUPERADA** por ADR-003 y sigue siendo histórica; su cantidad canónica en medias piezas y su presentación comercial también quedan reemplazadas por esta ADR.
 
-## 5. Decisiones pendientes que esta ADR no resuelve
+## 5. Decisiones D-R1–D-R4 (cerradas el 26/10/2026) y pendientes
+
+D-R1, D-R2, D-R3 y D-R4 quedaron **cerradas por decisión humana el 26/10/2026** (§2.3.3, §2.4, §2.5 y §2.6). Se conserva la formulación original de cada una para la trazabilidad:
+
+| ID | Pregunta original (25/10/2026) | Decisión (26/10/2026) |
+|---|---|---|
+| D-R1 | Política de redondeo monetario del importe por peso: destino, empate, momento y escala intermedia. | Cálculo intermedio exacto; cada línea `peso` se redondea una sola vez al peso entero con empate 0,50 hacia arriba; esos importes se suman al total sin recálculo; líneas `unidad` y documentos mixtos, pendientes; `numeric(14,2)` sigue siendo el tipo monetario general (§2.3.3). |
+| D-R2 | Pesaje en la operación: cómo y dónde se obtiene el peso en cada paso. | Cada operación registra el peso efectivamente medido para esa operación; sin balanza, integración ni punto físico definidos (§2.4). |
+| D-R3 | Diferencias de pesaje: tolerancia o diferencia ordinaria. | Sin tolerancia automática en Fase 1; toda diferencia distinta de cero se registra (§2.5). |
+| D-R4 | Datos existentes en local/staging en medias piezas. | Reinicio limpio, sin conversión ni reinterpretación; versionado limpio en el prototipo; producción sin autorización (§2.6). |
+
+**Pendiente derivado (no resuelto por esta ADR):**
+
+| ID | Pendiente | Por qué importa |
+|---|---|---|
+| — | **Redondeo de líneas `unidad` y documentos mixtos:** la fórmula vigente es `cantidad × precio_unitario` (precio con hasta 2 decimales). Falta decidir si el importe final de una línea `unidad` se conserva con centavos o se redondea al peso entero, y qué consecuencia tiene sobre el total de un documento mixto `peso` + `unidad` (si puede terminar con centavos). Ejemplo del problema, no decisión: `3 × $1.234,56 = $3.703,68`. | Define el importe y el total de ventas y presupuestos que incluyan productos `unidad`, solos o junto con productos `peso`. |
+
+Tabla original de pendientes (25/10/2026), conservada como historial:
 
 | ID | Pendiente | Por qué bloquea |
 |---|---|---|
@@ -107,15 +160,17 @@ ADR-002 ya estaba **SUPERADA** por ADR-003 y sigue siendo histórica; su cantida
 ## 6. Consecuencias (para la tarea posterior; nada se implementa ahora)
 
 - **Productos (`public.productos`, migración `20261023140000_catalogo_productos.sql`):** hoy hay `check (forma_venta in ('unidad','pieza'))`, la consistencia `fiambres ↔ pieza`, el comentario «precio de pieza completa (pieza); media derivada» y `stock_minimo` «en unidades o medias piezas». Hará falta una migración nueva (no la edición de una migración ya aplicada) para `peso`, el precio por kg y el `stock_minimo` en gramos. También hay que actualizar `crear_producto`/`actualizar_producto` y sus pruebas pgTAP.
-- **`movimientos_stock` / `stock_actual`:** el tipo entero se mantiene. Para productos `peso`, `cantidad` pasa a significar gramos. `integer` admite hasta 2.147.483.647, es decir unos 2.147 t por movimiento, y `stock_actual` suma en `bigint`. Las RPC vigentes (`registrar_ingreso`, `mover_a_cuarentena`, `registrar_merma`) reciben `p_cantidad integer` sin conocer la unidad, así que la tarea de migración tendrá que revisar si alcanza con eso o si hace falta una validación por forma de venta. Las huellas de idempotencia v1 no cambian de forma. Para el reinicio de datos rige D-R4.
-- **Carga, ventas, retornos, conteos y rendición** (todavía no implementados en SQL): se diseñan directamente en unidad mínima (gramos para `peso`). El esperado, el contado y la diferencia de rendición quedan en gramos y se muestran en kg. Hasta que se resuelva D-R1, la valorización de diferencias no puede definirse.
-- **Precios:** desaparece el precio de media pieza. `venta_items` conserva cantidad, precio aplicado (por kg o unitario) e importe (§2.3.4; política de redondeo pendiente, D-R1).
+- **`movimientos_stock` / `stock_actual`:** el tipo entero se mantiene. Para productos `peso`, `cantidad` pasa a significar gramos. `integer` admite hasta 2.147.483.647, es decir unos 2.147 t por movimiento, y `stock_actual` suma en `bigint`. Las RPC vigentes (`registrar_ingreso`, `mover_a_cuarentena`, `registrar_merma`) reciben `p_cantidad integer` sin conocer la unidad, así que la tarea de migración tendrá que revisar si alcanza con eso o si hace falta una validación por forma de venta. Las huellas de idempotencia v1 no cambian de forma. Para el reinicio de datos rige D-R4 (§2.6): nada en medias piezas se reinterpreta como gramos.
+- **Carga, ventas, retornos, conteos y rendición** (todavía no implementados en SQL): se diseñan directamente en unidad mínima (gramos para `peso`). El esperado, el contado y la diferencia de rendición quedan en gramos y se muestran en kg. Una diferencia de 1 gramo es una diferencia (D-R3). La base de valorización de los faltantes (precio de venta histórico, costo u otro) sigue pendiente en `BLUEPRINT.md` §15; cuando dependa del importe por peso, su conversión a pesos sigue D-R1.
+- **Precios:** desaparece el precio de media pieza. `venta_items` conserva cantidad, precio aplicado (por kg o unitario) e importe (§2.3.4; importe por peso redondeado por línea según D-R1).
 - **Pruebas:** dejan de ser requisito las pruebas de media pieza y de precio derivado (Blueprint §12). Las pruebas pgTAP y Vitest actuales que validan `pieza` y medias piezas (`productos_catalogo`, `apps/web/src/domain/cantidades.ts`, `precios.ts` y sus tests) se reemplazan en la tarea de implementación, no en esta.
-- **Prototipo demo (`apps/web/src/`):** sigue con el modelo pieza/media pieza de ADR-003 hasta que se autorice su cambio. Hay un riesgo de reinterpretación silenciosa: un `9` guardado en medias piezas leído como gramos daría 9 g. Al implementarlo debe aplicarse el mismo criterio ya aprobado para cambios de semántica (v1 → v2 → v3 → v4): **versión nueva de las claves operativas, con inicialización limpia y sin leer, copiar, reinterpretar ni borrar las claves anteriores**. El número de versión y las claves exactas se fijan en esa tarea.
-- **Documentación:** `BLUEPRINT.md` v2.1 y `docs/PRD.md` v0.11 reflejan esta decisión. `docs/requirements/migracion-unidades-prototipo.md` queda histórico en lo referido a pieza/media pieza.
+- **Prototipo demo (`apps/web/src/`):** sigue con el modelo pieza/media pieza de ADR-003 hasta que se autorice su cambio. Hay un riesgo de reinterpretación silenciosa: un `9` guardado en medias piezas leído como gramos daría 9 g. Al implementarlo debe aplicarse el mismo criterio ya aprobado para cambios de semántica (v1 → v2 → v3 → v4): **versión nueva de las claves operativas, con inicialización limpia y sin leer, copiar ni reinterpretar las claves anteriores; las claves anteriores no se borran automáticamente**. El número de versión y las claves exactas se fijan en esa tarea.
+- **Pruebas futuras (requisitos, no implementadas):** casos de D-R1 (`1,250 kg × $1.234,56` = `$1.543,20` → `$1.543`; `1,250 kg × $1.235,60` = `$1.544,50` → `$1.545`; las líneas `peso` se suman con sus importes ya redondeados), peso medido usado en el movimiento de cada operación, diferencia de 1 gramo registrada y datos anteriores nunca reinterpretados como gramos (`BLUEPRINT.md` §12).
+- **Documentación:** `BLUEPRINT.md` v2.2 y `docs/PRD.md` v0.12 reflejan esta decisión y el cierre de D-R1–D-R4. `docs/requirements/migracion-unidades-prototipo.md` queda histórico en lo referido a pieza/media pieza.
 
 ## 7. Fuentes
 
 - PostgreSQL, *Numeric Types* — `numeric` «is especially recommended for storing monetary amounts and other quantities where exactness is required»; `real` y `double precision` «are inexact»; rango de `integer` y `bigint`; «If the scale of a value to be stored is greater than the declared scale of the column, the system will round the value»; «the numeric type rounds ties away from zero»: https://www.postgresql.org/docs/current/datatype-numeric.html
 - PostgreSQL, *Mathematical Functions* — `round(v numeric, s integer)`: «Ties are broken by rounding away from zero»: https://www.postgresql.org/docs/current/functions-math.html
+- MDN, `Math.round()` — los empates en 0,5 van hacia +∞ y operan sobre `Number` de doble precisión; por eso D-R1 se aplica sobre el valor decimal exacto y no con `Math.round` sobre un `Number` calculado en punto flotante: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/round
 - MDN, `Number.MAX_SAFE_INTEGER` (2^53 − 1; aritmética de doble precisión en JavaScript): https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER

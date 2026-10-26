@@ -12,7 +12,7 @@ Una decisión por archivo: `NNN-titulo.md`. Ver `BLUEPRINT.md`, sección 13.
 | [002](002-precios-independientes-pieza-media.md) | Precios comerciales independientes de pieza y media pieza | 1.0 | SUPERADA por ADR-003 (precio de media pieza y `localStorage` v3); histórica |
 | [003](003-precio-derivado-media-pieza.md) | Precio derivado de media pieza | 1.0 | REEMPLAZADA por ADR-005 (25/10/2026); histórica, sin autoridad normativa |
 | [004](004-cobros-jornada-cerrada.md) | Cobros asociados a jornadas cerradas | 1.0 | PROPUESTA — NO APROBADA |
-| [005](005-fiambres-por-peso-gramos.md) | Fiambres por peso y unidad mínima en gramos | 1.0 | APROBADA (no autoriza migraciones ni implementación; D-R1–D-R4 pendientes) |
+| [005](005-fiambres-por-peso-gramos.md) | Fiambres por peso y unidad mínima en gramos | 1.1 | APROBADA (no autoriza migraciones ni implementación; D-R1–D-R4 cerradas el 26/10/2026, v1.1) |
 
 ADR-001 (v1.5) tiene resueltos P1 (Topología D), P19 (gobernanza en dos etapas), P20 (migraciones dependientes de ADR-001 sólo en local/staging), P5–P7 (un perfil 1:1, una sola empresa y un único rol por usuario; decisión humana del 22/10/2026) y P2–P4 (`public` expuesto y `privado` no expuesto; rol técnico `propietario_rpc`; tablas del owner de migraciones con RLS obligatoria y sin `FORCE` global; decisión humana del 23/10/2026). El 24/10/2026 se resolvieron, para validación controlada, P11 global (`service_role` denegado por defecto sobre objetos de negocio; única excepción vigente, SELECT sobre `public.productos`) y las observaciones O-3 y O-4 (§18.2). P8–P10 y P12–P17 siguen **PENDIENTES DE APROBACIÓN HUMANA** y P18 continúa como decisión futura separada. Su estado intermedio no equivale a aprobación productiva; producción sigue bloqueada.
 
