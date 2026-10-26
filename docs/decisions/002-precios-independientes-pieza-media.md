@@ -6,6 +6,8 @@
 
 > **Documento histórico.** Se conserva sin cambios de contenido. El precio de media pieza ya **no** es configurable: se deriva del precio de pieza (ADR-003). Las claves operativas vigentes son `_demo_v4`. Lo no reemplazado (cantidad canónica, presentación comercial, decimales, centavos enteros, implementación única del subtotal, historial de precios aplicados) sigue vigente y está reiterado en ADR-003.
 
+> **Nota posterior (25/10/2026).** [ADR-005](005-fiambres-por-peso-gramos.md) reemplaza el modelo pieza/media pieza: la cantidad canónica en medias piezas y la presentación comercial «N piezas + 1 media» tampoco siguen vigentes. Esta ADR es histórica en su totalidad y no conserva autoridad normativa; ADR-003 también quedó REEMPLAZADA por ADR-005. Los principios generales que siguen vigentes rigen por `BLUEPRINT.md` §7.1 y ADR-005 §2.
+
 > **Alcance.** Esta ADR autoriza el modelo de precios del **prototipo frontend** (`apps/web/`). **No aprueba** tablas, columnas, tipos ni restricciones SQL definitivas, ni migraciones, ni Supabase.
 
 ---

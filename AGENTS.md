@@ -239,7 +239,7 @@ Documentación, commits y mensajes al usuario en español (Argentina). Identific
 - **Tipos, interfaces y componentes React:** `PascalCase` cuando corresponda.
 - **Código React/UI existente:** se conserva el `camelCase`/`PascalCase` actual. **No se hacen renombres masivos por motivos cosméticos.**
 
-Ejemplos de dominio válidos que no se renombran: `piezas_a_medias`, `medias_a_piezas`, `calcular_esperado`, `unidad_para_categoria`, `validar_combinacion_categoria_unidad`. Identificadores de UI/legado como `unidadMedida`, `stockMinimo` o `productoEditando` tampoco se renombran por esta regla.
+Ejemplos de dominio válidos que no se renombran: `piezas_a_medias`, `medias_a_piezas`, `calcular_esperado`, `unidad_para_categoria`, `validar_combinacion_categoria_unidad` (los dos primeros son identificadores existentes del prototipo; su semántica de pieza/media quedó reemplazada por ADR-005 y se revisa en la tarea de migración, no por esta regla). Identificadores de UI/legado como `unidadMedida`, `stockMinimo` o `productoEditando` tampoco se renombran por esta regla.
 
 ## 8. Estructura del repositorio
 
@@ -282,7 +282,7 @@ Antes de pedir revisión: `lint`, `typecheck`, `test`, Playwright y `build` debe
 - Roles: dueño, encargado y vendedor/piloto.
 - El vendedor puede crear clientes, pero no editar fichas existentes.
 - Un camión tiene como máximo una jornada por día operativo.
-- Los fiambres se venden por pieza y media pieza.
+- Unidades ([ADR-005 — Fiambres por peso y unidad mínima en gramos](docs/decisions/005-fiambres-por-peso-gramos.md), aprobada): los productos `unidad` se manejan en cantidad entera; los fiambres (`peso`) se ingresan en kg con hasta 3 decimales, se muestran en kg con 3 decimales fijos y se guardan como gramos enteros. Nunca `float` para cantidades ni para dinero; el dinero sigue siendo exacto (`numeric`). La pieza/media pieza es histórica (ADR-002/ADR-003); el SQL local y el prototipo todavía la usan hasta una tarea de migración autorizada.
 - Las ventas admiten pagos combinados.
 - Los retiros de efectivo requieren doble confirmación.
 - Dueño y encargado pueden aprobar rendiciones.

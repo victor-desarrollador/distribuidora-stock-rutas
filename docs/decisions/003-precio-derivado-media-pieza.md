@@ -1,9 +1,11 @@
 # ADR-003 — Precio derivado de media pieza
 
 **Fecha:** 21/10/2026
-**Estado:** APROBADA (aprobación humana explícita del dueño del proyecto, 21/10/2026)
+**Estado:** REEMPLAZADA por [ADR-005](005-fiambres-por-peso-gramos.md) (25/10/2026). Fue APROBADA el 21/10/2026 (aprobación humana explícita del dueño del proyecto).
 **Versión:** 1.0
 **Supera a:** ADR-002, **únicamente** en la política de precio de media pieza (ver §4).
+
+> **Nota posterior (25/10/2026). REEMPLAZADA por [ADR-005](005-fiambres-por-peso-gramos.md), en su totalidad.** Los fiambres se venden por peso (kg, canónico en gramos enteros). Toda la semántica propia de esta ADR dependía del modelo pieza/media pieza (pieza completa, media pieza, precio derivado de la media, subtotal por piezas y media, snapshot del precio de media) y dejó de ser regla vigente. Esta ADR **no conserva autoridad normativa**: los principios generales que siguen vigentes (precios con 2 decimales como máximo y `>= 0`, aritmética monetaria exacta sin punto flotante, snapshot histórico del precio aplicado) rigen por `BLUEPRINT.md` §7.1 y ADR-005 §2, no por esta ADR. Que el prototipo demo todavía implemente esta ADR con las claves `_demo_v4` es estado actual del código, no una regla. El contenido de abajo se conserva sin cambios como registro histórico (ver ADR-005 §4).
 
 > **Alcance.** Esta ADR autoriza el modelo de precios del **prototipo frontend** (`apps/web/`). **No aprueba** tablas, columnas, tipos ni restricciones SQL definitivas, ni migraciones, ni Supabase. **No hay SQL aprobado.**
 

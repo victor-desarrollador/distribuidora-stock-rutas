@@ -1,8 +1,8 @@
 # Análisis de arquitectura de base de datos — Fase 1
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 22/10/2026
-**Versión:** 0.2
+**Fecha:** 22/10/2026 (actualización de unidades: 25/10/2026)
+**Versión:** 0.3
 **Estado:** documento de arquitectura. Deriva de `BLUEPRINT.md` y `docs/PRD.md`. **No autoriza por sí solo implementación**; ADR-001 v1.5 habilita validación controlada local/staging únicamente después de resolver las decisiones técnicas necesarias.
 
 ---
@@ -12,6 +12,14 @@
 Este documento consolida el análisis de arquitectura de base de datos para la Fase 1, a partir de las decisiones **aprobadas conceptualmente** en el Blueprint §7.9, §8 y §9. Su objetivo es servir de insumo para el **diseño SQL/RPC** posterior (que requiere aprobación humana y pruebas de seguridad antes de generar migraciones).
 
 > **Regla obligatoria:** ADR-001 está aprobada para validación controlada con Topología D. Las migraciones dependientes de esa ADR se permiten sólo en local/staging y una vez resueltas las P8–P17 necesarias (P2–P7 ya resueltas); producción sigue bloqueada hasta pruebas, auditoría independiente y aceptación humana final (Blueprint §10; AGENTS.md §3).
+
+> **Unidades de cantidad ([ADR-005](../decisions/005-fiambres-por-peso-gramos.md), aprobada el 25/10/2026).** En este documento se distinguen tres estados:
+>
+> - **Arquitectura anterior (histórica):** fiambres por pieza/media pieza, con unidad mínima en medias piezas (Blueprint v1.2–v2.0; ADR-002/ADR-003). Ya no es regla vigente.
+> - **Modelo objetivo vigente (ADR-005):** productos `unidad` en cantidad entera; productos `peso` (fiambres) en kg: se ingresan con hasta 3 decimales y se muestran con 3 decimales fijos; la representación canónica es en gramos enteros; precio por kg. Nunca `float` para cantidades ni para dinero. **Modelo objetivo aprobado por ADR-005; implementación pendiente.**
+> - **Implementación SQL actual (local/staging, todavía no migrada):** `productos` admite `forma_venta in ('unidad','pieza')`, precio de pieza completa y `stock_minimo` en medias piezas (`20261023140000_catalogo_productos.sql`). **Estado actual desactualizado respecto del modelo objetivo.** El ledger `movimientos_stock.cantidad integer` no cambia de tipo (ADR-005 §6). El cambio requiere una tarea de migración posterior autorizada, con security review.
+>
+> Las columnas, tipos y restricciones SQL definitivos para `peso` no se fijan en este documento: los define esa tarea.
 
 ---
 
@@ -40,7 +48,7 @@ Este documento consolida el análisis de arquitectura de base de datos para la F
 | `empresas` | **APROBADA CONCEPTUALMENTE** | Entidad dueña; FK `empresa_id` en tablas de negocio; RLS por empresa |
 | `perfiles` | **APROBADA CONCEPTUALMENTE** | Usuario auth + nombre + activo; empresa y rol leídos de tablas protegidas |
 | `roles` | **PROPUESTA TÉCNICA** | Sin tabla de membresías: un perfil 1:1 con `auth.users`, una empresa y un rol por usuario (decisión humana P5–P7, ADR-001 §18). **Roles funcionales (dueño, encargado, vendedor/piloto) APROBADOS**; tabla `roles` NO aprobada |
-| `productos` | **APROBADA CONCEPTUALMENTE** | Código, nombre, categoría, forma_venta (`unidad`/`pieza`), precios, stock_mínimo, activo |
+| `productos` | **APROBADA CONCEPTUALMENTE** | Código, nombre, categoría, forma_venta (`unidad`/`peso`; ADR-005), precio (unitario en `unidad`, por kg en `peso`), stock_mínimo (en unidad mínima: unidades o gramos), activo. Modelo objetivo aprobado por ADR-005; implementación pendiente. *Estado actual SQL local, desactualizado: `unidad`/`pieza` y medias piezas (§0)* |
 | `camiones` | **APROBADA CONCEPTUALMENTE** | Patente, nombre, activo |
 | `clientes` | **APROBADA CONCEPTUALMENTE** | Contraparte comercial; creable por vendedor, editable solo por encargado/dueño |
 | `ubicaciones` | **APROBADA CONCEPTUALMENTE** | Internas: `deposito`, `cuarentena`, `camion` (camion_id). **`merma` no es ubicación interna** (salida terminal) |
@@ -59,7 +67,7 @@ Este documento consolida el análisis de arquitectura de base de datos para la F
 | `talonarios` | **PROPUESTA TÉCNICA** | serie, numero_desde, numero_hasta, asignado_a, estado, fecha_asignacion |
 | `notas_talonario` | **PROPUESTA TÉCNICA** | talonario_id, numero, jornada_id, estado (`utilizada`/`anulada`/`justificada`), venta_id nullable, motivo, registrado_por |
 | `ventas` | **APROBADA CONCEPTUALMENTE** | operacion_id, jornada_id, cliente_id, origen (digital/papel), serie_talonario, numero_nota, total, estado |
-| `venta_items` | **APROBADA CONCEPTUALMENTE** | venta_id, producto_id, cantidad, precio_unitario, subtotal |
+| `venta_items` | **APROBADA CONCEPTUALMENTE** | venta_id, producto; cantidad en la unidad mínima del producto (unidades para `unidad`, gramos para `peso`); precio aplicado (unitario para `unidad`, por kg para `peso`); importe de la línea; snapshot histórico suficiente para reconstruir la venta sin recalcular. Modelo objetivo aprobado por ADR-005; implementación SQL pendiente (nombres y tipos de columnas no definidos; redondeo del importe por peso pendiente, ADR-005 D-R1) |
 | `venta_pagos` | **APROBADA CONCEPTUALMENTE** | operacion_id, venta_id, medio (efectivo/transferencia/a_cuenta; otros pendientes), importe, referencia, estado (`declarada`/`verificada` para transferencias), verificado_por, verificado_at |
 | `partidas_ingreso` | **F2 / PROPUESTA NO APROBADA** | producto_id, fecha_ingreso, fecha_vencimiento (nullable), cantidad_inicial. **No se mantienen saldos por partida ni se atribuye cada venta a un ingreso.** No implementar sin aprobación |
 | `auditoria` | **DERIVADA** | **No hay tabla genérica en Fase 1.** La trazabilidad surge de operaciones, ledgers, documentos, actor, timestamps, motivos, jornada y relaciones |
@@ -138,7 +146,7 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 | `operacion_id` | FK → operaciones | Obligatorio: cada movimiento pertenece a una operación |
 | `tipo_movimiento` | text / enum | ingreso, carga, venta, retorno, devolucion_cliente, a_cuarentena, cuarentena_apta, merma, regularizacion_faltante, regularizacion_sobrante, ajuste |
 | `producto_id` | FK → productos | Obligatorio |
-| `cantidad` | integer | **Entero positivo** en unidad mínima (unidad o medias piezas) |
+| `cantidad` | integer | **Entero positivo** en unidad mínima: unidad entera para `unidad`, gramos para `peso` (modelo objetivo aprobado por ADR-005; implementación pendiente). Antes de ADR-005: medias piezas para fiambres (histórico) |
 | `ubicacion_origen_id` | FK → ubicaciones | Nullable (ej. ingreso desde exterior) |
 | `ubicacion_destino_id` | FK → ubicaciones | Nullable (ej. venta/merma a exterior) |
 | `jornada_id` | FK → jornadas | Nullable según tipo |
@@ -335,4 +343,4 @@ rendiciones (1) ──< (muchas) rendicion_items (si se aprueba)
 
 ---
 
-*Fin de `docs/architecture/analisis-base-datos.md` v0.2*
+*Fin de `docs/architecture/analisis-base-datos.md` v0.3*
