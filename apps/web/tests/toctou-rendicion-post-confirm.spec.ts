@@ -7,14 +7,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const claves = {
-  productos: "distribuidora_productos_demo_v4",
-  camiones: "distribuidora_camiones_demo_v4",
+  productos: "distribuidora_productos_demo_v5",
+  camiones: "distribuidora_camiones_demo_v5",
   clientes: "distribuidora_clientes_demo_v2",
-  jornadas: "distribuidora_jornadas_demo_v4",
-  ventas: "distribuidora_ventas_demo_v4",
-  cobros: "distribuidora_cobros_demo_v4",
-  movimientos: "distribuidora_movimientos_demo_v4",
-  retornos: "distribuidora_retornos_demo_v4",
+  jornadas: "distribuidora_jornadas_demo_v5",
+  ventas: "distribuidora_ventas_demo_v5",
+  cobros: "distribuidora_cobros_demo_v5",
+  movimientos: "distribuidora_movimientos_demo_v5",
+  retornos: "distribuidora_retornos_demo_v5",
 } as const;
 
 const rawCorrupto = "{ventas dañadas en la ventana del confirm";

@@ -29,11 +29,13 @@ describe("salidasPorMovimiento", () => {
     unidadMedida: "unidad",
     cantidad: 3,
   };
+  // Ítem `peso` sólo como representación estructural (gramos enteros):
+  // salidasPorMovimiento es pura y no opera ni convierte cantidades.
   const queso: ProductoMovimiento = {
-    productoId: 2,
-    nombreProducto: "Queso cremoso",
-    unidadMedida: "pieza",
-    cantidad: 1,
+    productoId: 3,
+    nombreProducto: "Queso cremoso fraccionado",
+    unidadMedida: "peso",
+    cantidad: 1250,
   };
   const base = {
     id: "m1",

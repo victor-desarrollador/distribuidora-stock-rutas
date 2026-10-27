@@ -1,11 +1,14 @@
 // Pruebas del módulo puro de cálculo de rendición de UI.
 //
-// Fuente: BLUEPRINT.md §2 y §7.1 (unidad / pieza / media pieza; nunca
-// kilogramo) y §12 (sin diferencia, faltante y sobrante).
+// Fuente: BLUEPRINT.md §7.1 (unidad / peso, ADR-005), §7.8 y §12 (sin
+// diferencia, faltante y sobrante).
 //
-// `unidad` y `pieza` se concilian con el mismo algoritmo en cantidades
-// canónicas (enteros seguros; medias piezas para pieza). La conversión
-// pieza/media pieza pertenece a `domain/cantidades.test.ts`.
+// Estado B1:
+//   - `unidad` se concilia con el dominio canónico (enteros seguros).
+//   - `peso` todavía no se concilia (B4): su fila queda `no_soportada` y
+//     bloquea el cierre. Este archivo NO prueba conciliación en gramos ni la
+//     diferencia de 1 g (se escribe cuando B4 habilite ese camino).
+//   - `pieza` y `kg` no se concilian.
 // No toca stock, dinero, persistencia, Supabase, RPC ni RLS.
 
 import { describe, expect, it } from "vitest";
@@ -56,10 +59,11 @@ function fila(
   });
 }
 
-const PIEZA = {
-  productoId: 2,
+// Ítem `peso` estructural (gramos enteros); en B1 no se concilia.
+const PESO = {
+  productoId: 4,
   nombreProducto: "Jamón cocido",
-  unidadMedida: "pieza" as const,
+  unidadMedida: "peso" as const,
 };
 
 describe("unidad · dominio canónico", () => {
@@ -92,6 +96,10 @@ describe("unidad · dominio canónico", () => {
     expect(f.diferencia).toBeNull();
   });
 
+  it("una fila unidad válida NO bloquea la rendición", () => {
+    expect(bloqueaRendicion([fila({ cantidad: 10 }, { vendido: 4, contado: 6 })])).toBe(false);
+  });
+
   it("salidas > cargado: inconsistencia sin excepción hacia React", () => {
     expect(() => fila({ cantidad: 3 }, { vendido: 4, contado: 0 })).not.toThrow();
     const f = fila({ cantidad: 3 }, { vendido: 4, contado: 0 });
@@ -106,52 +114,54 @@ describe("unidad · dominio canónico", () => {
     expect(f.estado).toBe("inconsistente");
     expect(bloqueaRendicion([f])).toBe(true);
   });
-});
-
-describe("pieza · medias piezas canónicas (ya no existe pieza_legacy)", () => {
-  it("cargado 5, vendido 1, merma 1, reemplazos 1 → esperado 2", () => {
-    const f = fila({ ...PIEZA, cantidad: 5 }, { vendido: 1, merma: 1, reemplazos: 1, contado: 2 });
-    expect(f.estado).toBe("ok");
-    expect(f.esperado).toBe(2);
-    expect(f.diferencia).toBe(0);
-  });
-
-  it("contado 1 → diferencia -1 (faltante)", () => {
-    const f = fila({ ...PIEZA, cantidad: 5 }, { vendido: 1, merma: 1, reemplazos: 1, contado: 1 });
-    expect(f.estado).toBe("ok");
-    expect(f.diferencia).toBe(-1);
-  });
-
-  it("contado 3 → diferencia +1 (sobrante)", () => {
-    const f = fila({ ...PIEZA, cantidad: 5 }, { vendido: 1, merma: 1, reemplazos: 1, contado: 3 });
-    expect(f.diferencia).toBe(1);
-  });
-
-  it("una pieza válida NO bloquea la rendición", () => {
-    const f = fila({ ...PIEZA, cantidad: 5 }, { vendido: 1, contado: 4 });
-    expect(bloqueaRendicion([f])).toBe(false);
-  });
-
-  it("pieza válida y unidad válida se concilian juntas", () => {
-    const u = fila({ cantidad: 10 }, { vendido: 4, contado: 6 });
-    const p = fila({ ...PIEZA, cantidad: 5 }, { vendido: 1, contado: 4 });
-    expect(bloqueaRendicion([u, p])).toBe(false);
-  });
 
   it("componentes decimales o no seguros → inconsistente", () => {
     for (const vendido of [1.5, MAX + 1, -1, NaN, Infinity]) {
-      const f = fila({ ...PIEZA, cantidad: 5 }, { vendido, contado: 2 });
+      const f = fila({ cantidad: 5 }, { vendido, contado: 2 });
       expect(f.estado).toBe("inconsistente");
       expect(f.esperado).toBeNull();
       expect(bloqueaRendicion([f])).toBe(true);
     }
-    expect(fila({ ...PIEZA, cantidad: 4.5 }).estado).toBe("inconsistente");
-    expect(fila({ ...PIEZA, cantidad: MAX + 1 }).estado).toBe("inconsistente");
+    expect(fila({ cantidad: 4.5 }).estado).toBe("inconsistente");
+    expect(fila({ cantidad: MAX + 1 }).estado).toBe("inconsistente");
   });
 
   it("un contado no canónico se ignora (null), no se corrige", () => {
-    expect(fila({ ...PIEZA, cantidad: 5 }, { contado: 1.5 }).contado).toBeNull();
-    expect(fila({ ...PIEZA, cantidad: 5 }, { contado: MAX + 1 }).contado).toBeNull();
+    expect(fila({ cantidad: 5 }, { contado: 1.5 }).contado).toBeNull();
+    expect(fila({ cantidad: 5 }, { contado: MAX + 1 }).contado).toBeNull();
+  });
+});
+
+describe("peso · bloqueado en B1 (B4)", () => {
+  it("una fila peso queda no_soportada, sin esperado ni diferencia", () => {
+    const f = fila({ ...PESO, cantidad: 18000 }, { vendido: 0, contado: 18000 });
+    expect(f.estado).toBe("no_soportada");
+    expect(f.esperado).toBeNull();
+    expect(f.diferencia).toBeNull();
+  });
+
+  it("una fila peso bloquea la rendición", () => {
+    const f = fila({ ...PESO, cantidad: 18000 });
+    expect(bloqueaRendicion([f])).toBe(true);
+  });
+
+  it("una fila peso bloquea aunque las filas unidad sean conciliables", () => {
+    const u = fila({ cantidad: 10 }, { vendido: 4, contado: 6 });
+    const p = fila({ ...PESO, cantidad: 18000 });
+    expect(bloqueaRendicion([u, p])).toBe(true);
+  });
+});
+
+describe("unidad no soportada (defensivo en runtime)", () => {
+  it.each(["kg", "pieza"])("'%s' no se concilia y bloquea el cierre", (unidad) => {
+    const f = fila(
+      { productoId: 3, unidadMedida: unidad as unknown as ItemCarga["unidadMedida"], cantidad: 2 },
+      { contado: 2 }
+    );
+    expect(f.estado).toBe("no_soportada");
+    expect(f.esperado).toBeNull();
+    expect(f.diferencia).toBeNull();
+    expect(bloqueaRendicion([f])).toBe(true);
   });
 });
 
@@ -178,19 +188,6 @@ describe("overflow y acumulación inválida", () => {
   });
 });
 
-describe("unidad no soportada (defensivo en runtime)", () => {
-  it("kg no se concilia y bloquea el cierre", () => {
-    const f = fila(
-      { productoId: 3, unidadMedida: "kg" as unknown as ItemCarga["unidadMedida"], cantidad: 2 },
-      { contado: 2 }
-    );
-    expect(f.estado).toBe("no_soportada");
-    expect(f.esperado).toBeNull();
-    expect(f.diferencia).toBeNull();
-    expect(bloqueaRendicion([f])).toBe(true);
-  });
-});
-
 describe("bloqueaRendicion", () => {
   it("no bloquea cuando todas las filas son conciliables", () => {
     expect(bloqueaRendicion([fila({ cantidad: 10 }, { vendido: 4, contado: 6 })])).toBe(false);
@@ -213,48 +210,44 @@ describe("conteo: entrada de UI ↔ cantidad canónica", () => {
     expect(conteoValido(undefined)).toBeNull();
   });
 
-  it("unidad: entero simple; no admite media", () => {
-    expect(conteoDesdeEntrada("unidad", { texto: "7", media: false })).toBe(7);
-    expect(conteoDesdeEntrada("unidad", { texto: "0", media: false })).toBe(0);
-    expect(conteoDesdeEntrada("unidad", { texto: "7", media: true })).toBeNull();
-    expect(conteoDesdeEntrada("unidad", { texto: "1.5", media: false })).toBeNull();
-  });
-
-  it("pieza: piezas + media → medias canónicas", () => {
-    const c = (texto: string, media: boolean) =>
-      conteoDesdeEntrada("pieza", { texto, media });
-    expect(c("0", false)).toBe(0);
-    expect(c("0", true)).toBe(1);
-    expect(c("", true)).toBe(1);
-    expect(c("1", false)).toBe(2);
-    expect(c("1", true)).toBe(3);
-    expect(c("2", false)).toBe(4);
-    expect(c("2", true)).toBe(5);
+  it("unidad: entero simple", () => {
+    expect(conteoDesdeEntrada("unidad", { texto: "7" })).toBe(7);
+    expect(conteoDesdeEntrada("unidad", { texto: "0" })).toBe(0);
+    expect(conteoDesdeEntrada("unidad", { texto: "1.5" })).toBeNull();
   });
 
   it("vacío o indefinido → null (sin contar)", () => {
-    expect(conteoDesdeEntrada("pieza", { texto: " ", media: false })).toBeNull();
-    expect(conteoDesdeEntrada("pieza", undefined)).toBeNull();
+    expect(conteoDesdeEntrada("unidad", { texto: " " })).toBeNull();
+    expect(conteoDesdeEntrada("unidad", undefined)).toBeNull();
   });
 
-  it("pieza inválida u overflow → null, sin throw", () => {
-    for (const texto of ["1.5", "-1", "NaN", "Infinity", String(2 ** 52)]) {
-      for (const media of [true, false]) {
-        expect(() => conteoDesdeEntrada("pieza", { texto, media })).not.toThrow();
-        expect(conteoDesdeEntrada("pieza", { texto, media })).toBeNull();
-      }
+  it.each(["0", "1250", "1,250", "18,000"])(
+    "peso devuelve null en B1 (sin conteo en kg) para %j",
+    (texto) => {
+      expect(conteoDesdeEntrada("peso", { texto })).toBeNull();
+    }
+  );
+
+  it("'pieza' no es una unidad válida", () => {
+    expect(conteoDesdeEntrada("pieza" as never, { texto: "1" })).toBeNull();
+  });
+
+  it("unidad inválida u overflow → null, sin throw", () => {
+    for (const texto of ["1.5", "-1", "NaN", "Infinity", String(MAX + 1)]) {
+      expect(() => conteoDesdeEntrada("unidad", { texto })).not.toThrow();
+      expect(conteoDesdeEntrada("unidad", { texto })).toBeNull();
     }
   });
 
-  it("round trip canónico → UI → canónico (completar con esperados / cierre existente)", () => {
-    for (const unidad of ["unidad", "pieza"] as const) {
-      for (const c of [0, 1, 2, 3, 4, 5, 9]) {
-        const entrada = entrada_desde_cantidad(unidad, c)!;
-        expect(conteoDesdeEntrada(unidad, entrada)).toBe(c);
-      }
+  it("round trip unidad canónico → UI → canónico (completar con esperados / cierre existente)", () => {
+    for (const c of [0, 1, 2, 3, 4, 5, 9]) {
+      const entrada = entrada_desde_cantidad("unidad", c)!;
+      expect(conteoDesdeEntrada("unidad", entrada)).toBe(c);
     }
-    expect(entrada_desde_cantidad("pieza", 5)).toEqual({ texto: "2", media: true });
-    expect(entrada_desde_cantidad("pieza", 1)).toEqual({ texto: "0", media: true });
+  });
+
+  it("peso no reconstruye entrada en B1", () => {
+    expect(entrada_desde_cantidad("peso", 18000)).toBeNull();
   });
 });
 
@@ -266,7 +259,7 @@ describe("acumularSalidasProducto", () => {
     fecha: "2026-10-21T10:00:00.000Z",
     motivo: "x",
     tipo: "merma",
-    producto: { productoId, nombreProducto: "P", unidadMedida: "pieza", cantidad },
+    producto: { productoId, nombreProducto: "P", unidadMedida: "unidad", cantidad },
     clienteId: null,
     nombreCliente: null,
   });
@@ -281,7 +274,7 @@ describe("acumularSalidasProducto", () => {
     clienteId: 1,
     nombreCliente: "C",
     productoDevuelto: { productoId: 99, nombreProducto: "D", unidadMedida: "unidad", cantidad: 7 },
-    productoEntregado: { productoId, nombreProducto: "P", unidadMedida: "pieza", cantidad: entregado },
+    productoEntregado: { productoId, nombreProducto: "P", unidadMedida: "unidad", cantidad: entregado },
   });
 
   const venta = (cantidad: number, productoId = 1, jornadaId = "j1") => ({
@@ -294,12 +287,12 @@ describe("acumularSalidasProducto", () => {
     expect(salidas).toEqual({ vendido: 1, merma: 1, reemplazos: 1, valido: true });
 
     const f = calcularFilaMercaderia({
-      item: item({ productoId: 1, unidadMedida: "pieza", cantidad: 5 }),
+      item: item({ productoId: 1, cantidad: 5 }),
       vendido: salidas.vendido,
       merma: salidas.merma,
       reemplazos: salidas.reemplazos,
       acumulacionInvalida: !salidas.valido,
-      contado: conteoDesdeEntrada("pieza", { texto: "1", media: false }),
+      contado: conteoDesdeEntrada("unidad", { texto: "2" }),
     });
 
     expect(f.esperado).toBe(2);
@@ -334,7 +327,6 @@ describe("acumularSalidasProducto", () => {
     expect(acumularSalidasProducto(1, "j1", [venta(1.5)], []).valido).toBe(false);
   });
 });
-
 
 describe("M-1: mermaYCambios no muestra 0 falso cuando acumulación falló", () => {
   it("merma = 1, reemplazos = 2 → mermaYCambios === 3 (control positivo)", () => {
@@ -371,7 +363,6 @@ describe("M-1: mermaYCambios no muestra 0 falso cuando acumulación falló", () 
   });
 });
 
-
 describe("acumularCuarentena (informativo)", () => {
   const dev = (cantidad: number, productoId = 1): MovimientoReparto => ({
     id: `d${cantidad}`,
@@ -382,7 +373,7 @@ describe("acumularCuarentena (informativo)", () => {
     tipo: "devolucion",
     clienteId: 1,
     nombreCliente: "C",
-    producto: { productoId, nombreProducto: "P", unidadMedida: "pieza", cantidad },
+    producto: { productoId, nombreProducto: "P", unidadMedida: "unidad", cantidad },
   });
 
   it("suma exacta por producto, ignorando mermas y otras jornadas", () => {

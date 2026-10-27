@@ -3,6 +3,7 @@ import { useState } from "react";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 import { precio_valido } from "../domain/precios";
 import { es_cantidad_valida } from "../domain/cantidades";
+import { MENSAJE_PESO_NO_OPERABLE } from "../domain/productos";
 
 import {
   type Jornada,
@@ -71,12 +72,14 @@ function jornadaValida(j: unknown): j is Jornada {
       item !== null &&
       Number.isSafeInteger(item.productoId) &&
       typeof item.nombreProducto === "string" &&
-      ["unidad", "pieza"].includes(item.unidadMedida) &&
+      // Estructuralmente, `peso` (gramos enteros) es válido en v5; los flujos
+      // de B1 no lo generan (ver guards de preparación y cierre).
+      ["unidad", "peso"].includes(item.unidadMedida) &&
       // Validación canónica: entero seguro > 0 (dominio compartido)
       typeof item.cantidad === "number" &&
       es_cantidad_valida(item.cantidad) &&
       item.cantidad > 0 &&
-      // Precios: solo precioReferencia (precioMediaPieza se deriva)
+      // Precio: precioReferencia (unitario o por kg)
       precio_valido(item.precioReferencia)
     );
 
@@ -252,6 +255,11 @@ export function cerrarJornadaPersistida(
       return null;
     }
 
+    // B1: la rendición de productos `peso` no está migrada (B4).
+    if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
+      return null;
+    }
+
     if (!cierreValido(cierre)) return null;
 
     const productosContados = Object.keys(cierre.conteos);
@@ -309,6 +317,12 @@ export function crearPreparacionPersistida(
     retornosActuales: RetornoDeposito[]
   ) => string | null
 ): ResultadoCreacionPreparacion {
+  // B1: la carga de productos `peso` no está migrada (B2). Falla cerrado
+  // antes de leer o escribir.
+  if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
+    return { ok: false, error: MENSAJE_PESO_NO_OPERABLE };
+  }
+
   const lecturaJornadas = leerJornadasDiscriminado();
 
   if (!lecturaJornadas.ok) {

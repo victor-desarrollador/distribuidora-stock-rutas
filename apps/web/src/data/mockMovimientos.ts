@@ -10,6 +10,7 @@ export interface ProductoMovimiento {
   productoId: number;
   nombreProducto: string;
   unidadMedida: UnidadMedida;
+  // Entero canónico: unidades (unidad) o gramos (peso).
   cantidad: number;
 }
 

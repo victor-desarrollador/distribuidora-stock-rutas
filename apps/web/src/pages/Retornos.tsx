@@ -16,23 +16,24 @@ import type {
   ItemRetorno,
   RetornoDeposito,
 } from "../data/mockRetornos";
-import { maximo_piezas_segun_disponible } from "../domain/cantidades";
 import {
-  cantidad_a_texto,
   cantidad_aprobada_desde_entrada,
   cierre_sin_cambios,
   contado_desde_cierre,
   entrada_desde_cantidad,
   entrada_vacia,
-  media_aprobable,
   pendiente_retorno,
   type EntradaRetorno,
 } from "../domain/retornos";
+import {
+  cantidad_a_texto,
+  MENSAJE_PESO_NO_OPERABLE,
+} from "../domain/productos";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 import { revalidar_jornada_para_operacion } from "../domain/jornadas";
 
-const entradaInicial: EntradaRetorno = { texto: "", media: false };
+const entradaInicial: EntradaRetorno = { texto: "" };
 
 export default function Retornos() {
   const { jornadas, estadoLectura: estadoJornadas } = useJornadas();
@@ -154,7 +155,7 @@ export default function Retornos() {
   function completarConContado() {
     if (!jornada?.cierre || retornoExistente) return;
 
-    // Reconstruye piezas + media desde la cantidad canónica contada.
+    // Completa con lo contado. B1: un producto "peso" no tiene entrada (B4).
     setAprobados(
       Object.fromEntries(
         jornada.items.flatMap((item) => {
@@ -190,6 +191,13 @@ export default function Retornos() {
 
     if (!responsable.trim()) {
       setError("Ingresá el responsable de la recepción.");
+      return;
+    }
+
+    // B1: los retornos de productos `peso` no están migrados (B4). El hook
+    // también lo rechaza antes de leer o escribir.
+    if (filas.some((fila) => fila.unidadMedida !== "unidad")) {
+      setError(MENSAJE_PESO_NO_OPERABLE);
       return;
     }
 
@@ -482,81 +490,40 @@ export default function Retornos() {
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium">
-                        Cantidad aprobada para depósito *
-                        {fila.unidadMedida === "pieza"
-                          ? " (piezas enteras)"
-                          : ""}
-                      </span>
+                    {fila.unidadMedida === "peso" ? (
+                      // B1: sin input; el retorno por peso se habilita en B4.
+                      <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                        {MENSAJE_PESO_NO_OPERABLE}
+                      </p>
+                    ) : (
+                      <label className="block space-y-2">
+                        <span className="text-sm font-medium">
+                          Cantidad aprobada para depósito *
+                        </span>
 
-                      <input
-                        type="number"
-                        min="0"
-                        max={
-                          fila.unidadMedida === "pieza"
-                            ? maximo_piezas_segun_disponible(
-                                fila.contado ?? 0,
-                                fila.entrada.media
-                              )
-                            : (fila.contado ?? 0)
-                        }
-                        step="1"
-                        disabled={
-                          Boolean(retornoExistente) ||
-                          fila.contado === null
-                        }
-                        value={fila.entrada.texto}
-                        onChange={(e) =>
-                          setAprobados((prev) => ({
-                            ...prev,
-                            [String(fila.productoId)]: {
-                              texto: e.target.value,
-                              media: fila.entrada.media,
-                            },
-                          }))
-                        }
-                        className="min-h-12 w-40 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
-                        placeholder="0"
-                      />
-                    </label>
-
-                    {fila.unidadMedida === "pieza" && (
-                      <label className="flex items-center gap-2 text-sm">
                         <input
-                          type="checkbox"
-                          checked={fila.entrada.media}
+                          type="number"
+                          min="0"
+                          max={fila.contado ?? 0}
+                          step="1"
                           disabled={
                             Boolean(retornoExistente) ||
-                            fila.contado === null ||
-                            (!fila.entrada.media &&
-                              !media_aprobable(
-                                fila.contado,
-                                fila.entrada.texto
-                              ))
+                            fila.contado === null
                           }
+                          value={fila.entrada.texto}
                           onChange={(e) =>
                             setAprobados((prev) => ({
                               ...prev,
                               [String(fila.productoId)]: {
-                                texto: fila.entrada.texto,
-                                media: e.target.checked,
+                                texto: e.target.value,
                               },
                             }))
                           }
-                          className="h-4 w-4 rounded border-slate-300"
+                          className="min-h-12 w-40 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
+                          placeholder="0"
                         />
-                        <span>Media pieza</span>
                       </label>
                     )}
-
-                    {fila.unidadMedida === "pieza" &&
-                      fila.aprobado !== null && (
-                        <p className="text-xs text-slate-600">
-                          ={" "}
-                          {cantidad_a_texto("pieza", fila.aprobado)}
-                        </p>
-                      )}
                   </div>
                 </div>
               ))}

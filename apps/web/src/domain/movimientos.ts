@@ -1,12 +1,13 @@
 // Dominio puro de movimientos de reparto (merma, devolución, cambio) del
 // prototipo. Sin React, sin persistencia, sin Supabase ni RPC.
 //
-// Fuente: BLUEPRINT.md §7.1 (cantidades enteras; pieza en medias piezas) y
-// docs/requirements/migracion-unidades-prototipo.md §5 y §8.
+// Fuente: BLUEPRINT.md §7.1 y §7.4 (cantidades enteras en la unidad mínima;
+// ADR-005).
 //
 // No reimplementa conversiones: usa domain/cantidades.ts. La cantidad
 // persistida de un movimiento es siempre un entero canónico: unidades enteras
-// para "unidad", medias piezas para "pieza".
+// para "unidad", gramos para "peso". En B1 la entrada de UI sólo admite
+// "unidad": los movimientos `peso` se habilitan en B2.
 
 import type {
   MovimientoReparto,
@@ -17,17 +18,13 @@ import type { UnidadMedida } from "../data/mockProductos";
 import {
   cantidad_unidad_desde_texto,
   es_cantidad_valida,
-  recomponer_medias,
   sumar_cantidades_seguras,
   validar_cantidad,
 } from "./cantidades";
 
-/** Entrada de UI de una cantidad: texto del input entero + media opcional. */
+/** Entrada de UI de una cantidad: texto del input entero ("unidad"). */
 export interface EntradaCantidad {
-  /** "unidad": cantidad entera. "pieza": piezas completas. */
   texto: string;
-  /** Solo "pieza": checkbox de media pieza. En "unidad" debe ser false. */
-  media: boolean;
 }
 
 /**
@@ -40,29 +37,19 @@ export function cantidad_movimiento_desde_entrada(
   unidad: UnidadMedida,
   entrada: EntradaCantidad
 ): number | null {
-  const base = cantidad_unidad_desde_texto(entrada.texto);
-  if (base === null) return null;
+  // B1: `peso` no es operable todavía (B2); falla cerrado.
+  if (unidad !== "unidad") return null;
 
-  let canonica: number;
-  if (unidad === "pieza") {
-    // recomponer_medias lanza ante desbordamiento: el contrato de esta función
-    // es devolver null ante cualquier entrada inválida, sin propagar errores.
-    try {
-      canonica = recomponer_medias({ piezas: base, media: entrada.media });
-    } catch {
-      return null;
-    }
-  } else if (unidad === "unidad") {
-    if (entrada.media) return null;
-    canonica = base;
-  } else {
-    return null;
-  }
+  const canonica = cantidad_unidad_desde_texto(entrada.texto);
+  if (canonica === null) return null;
 
   return canonica > 0 ? canonica : null;
 }
 
-/** Item de movimiento válido: unidad soportada (sin kg) y cantidad entera > 0. */
+/**
+ * Item de movimiento válido en storage: `unidad` o `peso` (gramos) y cantidad
+ * entera > 0. `pieza` y cualquier otra unidad se rechazan.
+ */
 export function producto_movimiento_valido(
   p: unknown
 ): p is ProductoMovimiento {
@@ -73,7 +60,7 @@ export function producto_movimiento_valido(
   return (
     Number.isSafeInteger(productoId) &&
     typeof nombreProducto === "string" &&
-    (unidadMedida === "unidad" || unidadMedida === "pieza") &&
+    (unidadMedida === "unidad" || unidadMedida === "peso") &&
     typeof cantidad === "number" &&
     es_cantidad_valida(cantidad) &&
     cantidad > 0

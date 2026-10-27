@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const claves = {
-  jornadas: "distribuidora_jornadas_demo_v4",
-  ventas: "distribuidora_ventas_demo_v4",
-  cobros: "distribuidora_cobros_demo_v4",
+  jornadas: "distribuidora_jornadas_demo_v5",
+  ventas: "distribuidora_ventas_demo_v5",
+  cobros: "distribuidora_cobros_demo_v5",
 } as const;
 
 const jornadaAbierta = {

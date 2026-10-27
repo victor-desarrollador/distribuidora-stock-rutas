@@ -1,18 +1,26 @@
-import { describe, expect, it } from "vitest";
+// Pruebas del dominio de Retornos en B1 (ADR-005).
+//
+// Estado B1:
+//   - `unidad` funciona igual que antes (validación, entrada, pendiente,
+//     cierre sin cambios).
+//   - El storage v5 acepta estructuralmente `peso` con gramos enteros, pero
+//     la entrada de UI y la frontera de escritura lo rechazan hasta B4.
+//   - `pieza` se rechaza. No hay conteo ni retorno en kg.
+import { describe, expect, it, vi } from "vitest";
 
 import type { ItemRetorno, RetornoDeposito } from "../data/mockRetornos";
 import {
-  cantidad_a_texto,
   cantidad_aprobada_desde_entrada,
   cierre_sin_cambios,
   contado_desde_cierre,
   entrada_desde_cantidad,
   entrada_vacia,
   item_retorno_valido,
-  media_aprobable,
   pendiente_retorno,
   retorno_valido,
 } from "./retornos";
+import { cantidad_a_texto, MENSAJE_PESO_NO_OPERABLE } from "./productos";
+import { registrarRetornoOperacion } from "../hooks/useRetornos";
 
 const MAX = Number.MAX_SAFE_INTEGER;
 
@@ -63,48 +71,34 @@ describe("item_retorno_valido: unidad", () => {
   it("aprobada mayor que contada es inválida, sin tolerancia", () => {
     expect(item_retorno_valido(item("unidad", 5, 6))).toBe(false);
   });
+});
 
-  it("kg no es una unidad válida", () => {
+describe("item_retorno_valido: storage v5", () => {
+  it("peso con gramos enteros es estructuralmente válido", () => {
+    expect(item_retorno_valido(item("peso", 18000, 17999))).toBe(true);
+    expect(item_retorno_valido(item("peso", 9, 0))).toBe(true);
+  });
+
+  it("peso con gramos fraccionarios es inválido", () => {
+    expect(item_retorno_valido(item("peso", 1250.5, 0))).toBe(false);
+    expect(item_retorno_valido(item("peso", 1250, 0.5))).toBe(false);
+  });
+
+  it("peso: aprobado mayor que contado es inválido, sin tolerancia (1 g)", () => {
+    expect(item_retorno_valido(item("peso", 1250, 1251))).toBe(false);
+  });
+
+  it.each(["pieza", "media_pieza", "kg"])("rechaza la unidad '%s'", (unidad) => {
     expect(
-      item_retorno_valido({ ...item("unidad", 5, 1), unidadMedida: "kg" })
+      item_retorno_valido({ ...item("unidad", 5, 1), unidadMedida: unidad })
     ).toBe(false);
   });
 });
 
-describe("item_retorno_valido: pieza (contado 5 medias)", () => {
-  it.each([0, 1, 2, 3, 5])("aprobado %i medias es válido", (a) => {
-    expect(item_retorno_valido(item("pieza", 5, a))).toBe(true);
-  });
-
-  it("aprobado 6 es inválido", () => {
-    expect(item_retorno_valido(item("pieza", 5, 6))).toBe(false);
-  });
-});
-
 describe("cantidad_aprobada_desde_entrada", () => {
-  it("pieza: piezas + media → canónico (contado 5)", () => {
-    const aprobar = (texto: string, media: boolean) =>
-      cantidad_aprobada_desde_entrada("pieza", { texto, media }, 5);
-    expect(aprobar("0", true)).toBe(1);
-    expect(aprobar("1", false)).toBe(2);
-    expect(aprobar("1", true)).toBe(3);
-    expect(aprobar("2", false)).toBe(4);
-    expect(aprobar("2", true)).toBe(5);
-    expect(aprobar("0", false)).toBe(0);
-  });
-
-  it("pieza: no puede superar lo contado (6 medias)", () => {
-    expect(
-      cantidad_aprobada_desde_entrada("pieza", { texto: "3", media: false }, 5)
-    ).toBeNull();
-    expect(
-      cantidad_aprobada_desde_entrada("pieza", { texto: "2", media: true }, 4)
-    ).toBeNull();
-  });
-
-  it("unidad: entero, sin media, sin superar lo contado", () => {
-    const aprobar = (texto: string, media = false) =>
-      cantidad_aprobada_desde_entrada("unidad", { texto, media }, 5);
+  it("unidad: entero sin superar lo contado", () => {
+    const aprobar = (texto: string) =>
+      cantidad_aprobada_desde_entrada("unidad", { texto }, 5);
     expect(aprobar("0")).toBe(0);
     expect(aprobar("5")).toBe(5);
     expect(aprobar("6")).toBeNull();
@@ -112,63 +106,59 @@ describe("cantidad_aprobada_desde_entrada", () => {
     expect(aprobar("-1")).toBeNull();
     expect(aprobar("NaN")).toBeNull();
     expect(aprobar("Infinity")).toBeNull();
-    expect(aprobar("2", true)).toBeNull();
-  });
-
-  it("overflow en pieza → null, sin throw", () => {
-    for (const media of [true, false]) {
-      expect(() =>
-        cantidad_aprobada_desde_entrada(
-          "pieza",
-          { texto: String(2 ** 52), media },
-          MAX
-        )
-      ).not.toThrow();
-      expect(
-        cantidad_aprobada_desde_entrada(
-          "pieza",
-          { texto: String(2 ** 52), media },
-          MAX
-        )
-      ).toBeNull();
-    }
   });
 
   it("contado inválido → null", () => {
     expect(
-      cantidad_aprobada_desde_entrada("unidad", { texto: "1", media: false }, 1.5)
+      cantidad_aprobada_desde_entrada("unidad", { texto: "1" }, 1.5)
+    ).toBeNull();
+  });
+
+  it.each(["0", "1", "1250", "1,250"])(
+    "peso devuelve null en B1 (sin entrada en kg) para %j",
+    (texto) => {
+      expect(
+        cantidad_aprobada_desde_entrada("peso", { texto }, 18000)
+      ).toBeNull();
+    }
+  );
+
+  it("'pieza' no es una unidad válida", () => {
+    expect(
+      cantidad_aprobada_desde_entrada("pieza" as never, { texto: "1" }, 5)
     ).toBeNull();
   });
 });
 
-describe("completar con contado: entrada_desde_cantidad", () => {
-  it.each([
-    [1, { texto: "0", media: true }],
-    [2, { texto: "1", media: false }],
-    [3, { texto: "1", media: true }],
-    [5, { texto: "2", media: true }],
-    [0, { texto: "0", media: false }],
-  ])("pieza %i medias se reconstruye", (c, esperado) => {
-    expect(entrada_desde_cantidad("pieza", c)).toEqual(esperado);
-  });
-
+describe("entrada_desde_cantidad", () => {
   it("unidad se rellena con el entero", () => {
-    expect(entrada_desde_cantidad("unidad", 7)).toEqual({
-      texto: "7",
-      media: false,
-    });
+    expect(entrada_desde_cantidad("unidad", 7)).toEqual({ texto: "7" });
+    expect(entrada_desde_cantidad("unidad", 0)).toEqual({ texto: "0" });
   });
 
-  it("round trip: la entrada reconstruida vuelve a la misma cantidad", () => {
-    for (const c of [0, 1, 2, 3, 4, 5, 9]) {
-      const e = entrada_desde_cantidad("pieza", c)!;
-      expect(cantidad_aprobada_desde_entrada("pieza", e, c)).toBe(c);
+  it("round trip unidad: la entrada reconstruida vuelve a la misma cantidad", () => {
+    for (const c of [0, 1, 5, 9]) {
+      const e = entrada_desde_cantidad("unidad", c)!;
+      expect(cantidad_aprobada_desde_entrada("unidad", e, c)).toBe(c);
     }
   });
 
+  it("peso devuelve null en B1 (sin entrada en kg)", () => {
+    expect(entrada_desde_cantidad("peso", 18000)).toBeNull();
+    expect(entrada_desde_cantidad("peso", 0)).toBeNull();
+  });
+
   it("cantidad inválida → null", () => {
-    expect(entrada_desde_cantidad("pieza", 1.5)).toBeNull();
+    expect(entrada_desde_cantidad("unidad", 1.5)).toBeNull();
     expect(entrada_desde_cantidad("unidad", -1)).toBeNull();
+  });
+});
+
+describe("entrada_vacia", () => {
+  it("vacía sólo sin texto", () => {
+    expect(entrada_vacia({ texto: " " })).toBe(true);
+    expect(entrada_vacia({ texto: "" })).toBe(true);
+    expect(entrada_vacia({ texto: "0" })).toBe(false);
   });
 });
 
@@ -184,25 +174,17 @@ describe("pendiente_retorno (exacto)", () => {
     expect(() => pendiente_retorno(5.5, 1)).toThrow();
     expect(() => pendiente_retorno(5, -1)).toThrow();
   });
-
-  it("se muestra según unidad", () => {
-    expect(cantidad_a_texto("unidad", 3)).toBe("3 un.");
-    expect(cantidad_a_texto("pieza", 3)).toBe("1 pieza y media");
-  });
 });
 
-describe("media_aprobable y entrada_vacia", () => {
-  it("contado 5: con 2 piezas todavía entra una media; con 3 no", () => {
-    expect(media_aprobable(5, "2")).toBe(true);
-    expect(media_aprobable(5, "3")).toBe(false);
-    expect(media_aprobable(5, "")).toBe(true);
-    expect(media_aprobable(5, "1.5")).toBe(false);
+describe("presentación de cantidades (helper canónico de domain/productos)", () => {
+  it("unidad: '3 un.'", () => {
+    expect(cantidad_a_texto("unidad", 3)).toBe("3 un.");
   });
 
-  it("vacía solo sin texto y sin media", () => {
-    expect(entrada_vacia({ texto: " ", media: false })).toBe(true);
-    expect(entrada_vacia({ texto: "", media: true })).toBe(false);
-    expect(entrada_vacia({ texto: "0", media: false })).toBe(false);
+  it("peso: gramos → kg con 3 decimales fijos", () => {
+    expect(cantidad_a_texto("peso", 18000)).toBe("18,000 kg");
+    expect(cantidad_a_texto("peso", 2500)).toBe("2,500 kg");
+    expect(cantidad_a_texto("peso", 9)).toBe("0,009 kg");
   });
 });
 
@@ -231,12 +213,24 @@ describe("cierre_sin_cambios y contado_desde_cierre", () => {
 });
 
 describe("retorno_valido", () => {
-  it("válido con ítems de unidad y pieza", () => {
+  it("válido con ítems unidad", () => {
+    expect(
+      retorno_valido(retorno([item("unidad", 5, 2, 1), item("unidad", 3, 3, 2)]))
+    ).toBe(true);
+  });
+
+  it("estructuralmente válido con un ítem peso en gramos (storage v5)", () => {
+    expect(
+      retorno_valido(retorno([item("unidad", 5, 2, 1), item("peso", 18000, 17500, 4)]))
+    ).toBe(true);
+  });
+
+  it("rechaza un ítem pieza", () => {
     expect(
       retorno_valido(
-        retorno([item("unidad", 5, 2, 1), item("pieza", 5, 3, 2)])
+        retorno([{ ...item("unidad", 5, 3, 2), unidadMedida: "pieza" }])
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("rechaza productoId duplicado", () => {
@@ -261,5 +255,38 @@ describe("retorno_valido", () => {
     expect(retorno_valido(retorno([], { items: null }))).toBe(false);
     expect(retorno_valido(retorno([item("unidad", 5, 6)]))).toBe(false);
     expect(retorno_valido(null)).toBe(false);
+  });
+});
+
+describe("registrarRetornoOperacion: guard de peso en B1 (B4)", () => {
+  function registrar(r: RetornoDeposito) {
+    const cargar = vi.fn(() => ({
+      ok: true as const,
+      retornos: [] as RetornoDeposito[],
+      estado: "valido" as const,
+    }));
+    const guardar = vi.fn();
+    const validar = vi.fn().mockReturnValue(null);
+    const error = registrarRetornoOperacion(r, validar, cargar, guardar);
+    return { error, cargar, guardar, validar };
+  }
+
+  it("un retorno con un ítem peso se rechaza sin leer, validar ni persistir", () => {
+    const { error, cargar, guardar, validar } = registrar(
+      retorno([item("unidad", 5, 2, 1), item("peso", 18000, 18000, 4)])
+    );
+
+    expect(error).toBe(MENSAJE_PESO_NO_OPERABLE);
+    expect(cargar).not.toHaveBeenCalled();
+    expect(validar).not.toHaveBeenCalled();
+    expect(guardar).not.toHaveBeenCalled();
+  });
+
+  it("un retorno unidad válido se persiste", () => {
+    const r = retorno([item("unidad", 5, 2, 1)]);
+    const { error, guardar } = registrar(r);
+
+    expect(error).toBeNull();
+    expect(guardar).toHaveBeenCalledWith([r]);
   });
 });

@@ -1,8 +1,11 @@
-// Pruebas del versionado de persistencia localStorage: v1 → v2
-// (docs/requirements/migracion-unidades-prototipo.md §7-bis y §8) y claves
-// operativas v4 del precio derivado de media pieza
-// (docs/decisions/003-precio-derivado-media-pieza.md). Ninguna
-// clave anterior se lee, copia, reinterpreta ni borra.
+// Pruebas del versionado de persistencia localStorage del prototipo y de sus
+// fronteras de lectura/escritura fail-closed.
+//
+// Modelo vigente (ADR-005): claves operativas `_demo_v5`, productos `unidad`
+// (unidades enteras) o `peso` (gramos enteros). D-R4: reinicio limpio. Las
+// claves operativas anteriores (v4 en medias piezas, v3, v2, v1) no se leen,
+// copian, migran, reinterpretan ni borran: una cantidad legacy en medias
+// piezas nunca aparece como gramos.
 // Vitest corre en entorno node: se simula localStorage sobre globalThis.
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 
@@ -20,6 +23,7 @@ import {
   confirmarSalidaPersistida,
   crearJornadaPersistida,
   leerJornadas,
+  leerJornadasDiscriminado,
 } from "./useJornadas";
 import {
   cargarVentas,
@@ -51,7 +55,8 @@ import {
   registrarCobroOperacion,
   registrarCobroPersistido,
 } from "./useCobros";
-import { CLAVES_STORAGE } from "../data/clavesStorage";
+import { CLAVE_CLIENTES, CLAVES_STORAGE } from "../data/clavesStorage";
+import { cantidad_a_texto, MENSAJE_PESO_NO_OPERABLE } from "../domain/productos";
 
 // --- Simulación de localStorage para entorno node ---
 
@@ -93,6 +98,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// Lee todos los hooks operativos y de catálogo del demo.
+function leerTodo() {
+  cargarProductos();
+  leerJornadas();
+  cargarVentas();
+  leerCobros();
+  leerMovimientos();
+  leerRetornos();
+  cargarCamiones();
+}
+
 // --- Datos v1 incompatibles (para demostrar que no se reinterpretan) ---
 
 const productoV1ConKg: Producto[] = [
@@ -107,63 +123,435 @@ const productoV1ConKg: Producto[] = [
   },
 ];
 
-const productoV1PiezasEnteras: Producto[] = [
+const productoV1PiezasEnteras = [
   {
     id: 998,
     nombre: "Jamón legacy piezas enteras",
     categoria: "Fiambres",
     unidadMedida: "pieza",
-    stock: 18, // 18 piezas enteras, no 18 medias piezas
+    stock: 18, // 18 piezas enteras
     precio: 12500,
     stockMinimo: 5,
   },
 ];
 
-describe("Inicialización v4: sin datos v4 → usa mocks canónicos", () => {
-  it("productos: sin clave v4 devuelve productosIniciales (sin kg)", () => {
+describe("Inicialización v5: sin datos v5 → fixtures nuevos", () => {
+  it("productos: sin clave v5 devuelve productosIniciales (unidad | peso)", () => {
     const productos = cargarProductos();
-    expect(productos.length).toBe(6);
+    expect(productos).toEqual(productosIniciales);
     expect(
       productos.every(
-        (p) => p.unidadMedida === "unidad" || p.unidadMedida === "pieza"
+        (p) => p.unidadMedida === "unidad" || p.unidadMedida === "peso"
       )
     ).toBe(true);
   });
 
-  it("jornadas: sin clave v4 devuelve arreglo vacío", () => {
+  it("los fiambres iniciales están en gramos enteros", () => {
+    const fiambres = cargarProductos().filter((p) => p.categoria === "Fiambres");
+    expect(fiambres.length).toBeGreaterThan(0);
+    fiambres.forEach((p) => {
+      expect(p.unidadMedida).toBe("peso");
+      expect(Number.isSafeInteger(p.stock)).toBe(true);
+      expect(Number.isSafeInteger(p.stockMinimo)).toBe(true);
+    });
+  });
+
+  it("jornadas: sin clave v5 devuelve arreglo vacío", () => {
     expect(leerJornadas()).toEqual([]);
   });
 
-  it("ventas: sin clave v4 devuelve arreglo vacío", () => {
+  it("ventas: sin clave v5 devuelve arreglo vacío", () => {
     expect(cargarVentas()).toEqual([]);
   });
 
-  it("movimientos: sin clave v4 devuelve arreglo vacío", () => {
+  it("movimientos: sin clave v5 devuelve arreglo vacío", () => {
     expect(leerMovimientos()).toEqual([]);
   });
 
-  it("retornos: sin clave v4 devuelve arreglo vacío", () => {
+  it("retornos: sin clave v5 devuelve arreglo vacío", () => {
     expect(leerRetornos()).toEqual([]);
   });
 
-  it("camiones: sin clave v4 devuelve camionesIniciales", () => {
-    const camiones = cargarCamiones();
-    expect(camiones.length).toBeGreaterThan(0);
+  it("camiones: sin clave v5 devuelve camionesIniciales", () => {
+    expect(cargarCamiones()).toEqual(camionesIniciales);
   });
 
   it("clientes (v2, sin cambios): sin clave devuelve clientesIniciales", () => {
-    const clientes = cargarClientes();
-    expect(clientes.length).toBeGreaterThan(0);
+    expect(cargarClientes()).toEqual(clientesIniciales);
   });
 
-  it("cobros: sin clave v4 devuelve arreglo vacío", () => {
+  it("cobros: sin clave v5 devuelve arreglo vacío", () => {
     expect(leerCobros()).toEqual([]);
+  });
+
+  it("inicializar no persiste nada", () => {
+    leerTodo();
+    expect(mockLS.setItem).not.toHaveBeenCalled();
   });
 });
 
-describe("v1 NO se migra: datos v1 incompatibles no se leen como v4", () => {
-  it("productos: clave v1 con 'kg' no contamina v4", () => {
-    // Hay datos v1 pero no v2: se usan los mocks canónicos (v2), no el v1.
+describe("Claves operativas: las siete rotan juntas a v5", () => {
+  it("las siete claves son exactamente las del modelo por peso", () => {
+    expect(CLAVES_STORAGE).toEqual({
+      productos: "distribuidora_productos_demo_v5",
+      jornadas: "distribuidora_jornadas_demo_v5",
+      ventas: "distribuidora_ventas_demo_v5",
+      cobros: "distribuidora_cobros_demo_v5",
+      movimientos: "distribuidora_movimientos_demo_v5",
+      retornos: "distribuidora_retornos_demo_v5",
+      camiones: "distribuidora_camiones_demo_v5",
+    });
+  });
+
+  it("clientes conserva su clave v2", () => {
+    expect(CLAVE_CLIENTES).toBe("distribuidora_clientes_demo_v2");
+  });
+});
+
+// --- D-R4: claves v4 (modelo pieza/media pieza) ---
+
+const CLAVES_V4_ANTERIORES = {
+  productos: "distribuidora_productos_demo_v4",
+  jornadas: "distribuidora_jornadas_demo_v4",
+  ventas: "distribuidora_ventas_demo_v4",
+  cobros: "distribuidora_cobros_demo_v4",
+  movimientos: "distribuidora_movimientos_demo_v4",
+  retornos: "distribuidora_retornos_demo_v4",
+  camiones: "distribuidora_camiones_demo_v4",
+} as const;
+
+// Payloads v4 legacy realistas: el 9 significa 9 medias piezas (4 piezas y
+// media). Nunca puede aparecer como 9 g ni como 0,009 kg.
+const LEGACY_V4: Record<keyof typeof CLAVES_V4_ANTERIORES, string> = {
+  productos: JSON.stringify([
+    {
+      id: 4,
+      nombre: "Jamón cocido",
+      categoria: "Fiambres",
+      unidadMedida: "pieza",
+      stock: 9,
+      precio: 12500,
+      stockMinimo: 9,
+    },
+  ]),
+  jornadas: JSON.stringify([
+    {
+      id: "j-legacy",
+      camionId: 1,
+      chofer: "Luis",
+      zona: "Norte",
+      fechaCreacion: "2026-10-20T08:00:00.000Z",
+      fechaSalida: null,
+      estado: "preparacion",
+      items: [
+        {
+          productoId: 4,
+          nombreProducto: "Jamón cocido",
+          unidadMedida: "pieza",
+          cantidad: 9,
+          precioReferencia: 12500,
+        },
+      ],
+    },
+  ]),
+  ventas: JSON.stringify([
+    {
+      id: "v-legacy",
+      jornadaId: "j-legacy",
+      camionId: 1,
+      clienteId: 1,
+      nombreCliente: "Cliente",
+      fecha: "2026-10-20T10:00:00.000Z",
+      medioPago: "efectivo",
+      items: [
+        {
+          productoId: 4,
+          nombreProducto: "Jamón cocido",
+          unidadMedida: "pieza",
+          cantidad: 9,
+          precioUnitario: 12500,
+          precioMediaPieza: 6250,
+          subtotal: 56250,
+        },
+      ],
+      total: 56250,
+    },
+  ]),
+  cobros: JSON.stringify([
+    {
+      id: "c-legacy",
+      clienteId: 1,
+      nombreCliente: "Cliente",
+      jornadaId: null,
+      fecha: "2026-10-20T10:00:00.000Z",
+      importe: 9,
+      medio: "efectivo",
+      referencia: "",
+      observaciones: "",
+    },
+  ]),
+  movimientos: JSON.stringify([
+    {
+      id: "m-legacy",
+      jornadaId: "j-legacy",
+      camionId: 1,
+      fecha: "2026-10-20T10:00:00.000Z",
+      motivo: "Otro",
+      tipo: "merma",
+      producto: {
+        productoId: 4,
+        nombreProducto: "Jamón cocido",
+        unidadMedida: "pieza",
+        cantidad: 9,
+      },
+      clienteId: null,
+      nombreCliente: null,
+    },
+  ]),
+  retornos: JSON.stringify([
+    {
+      id: "r-legacy",
+      jornadaId: "j-legacy",
+      camionId: 1,
+      fecha: "2026-10-20T18:00:00.000Z",
+      responsable: "Ana",
+      observaciones: "",
+      items: [
+        {
+          productoId: 4,
+          nombreProducto: "Jamón cocido",
+          unidadMedida: "pieza",
+          cantidadContada: 9,
+          cantidadAprobada: 9,
+        },
+      ],
+    },
+  ]),
+  camiones: JSON.stringify([{ id: 9, nombre: "Camión legacy" }]),
+};
+
+function sembrarV4() {
+  for (const [nombre, clave] of Object.entries(CLAVES_V4_ANTERIORES)) {
+    mockLS._store.set(clave, LEGACY_V4[nombre as keyof typeof LEGACY_V4]);
+  }
+}
+
+describe("D-R4: las claves v4 (medias piezas) no se leen, copian, migran ni borran", () => {
+  it("las siete claves vigentes difieren de las v4", () => {
+    for (const [nombre, clave] of Object.entries(CLAVES_STORAGE)) {
+      expect(clave).not.toBe(
+        CLAVES_V4_ANTERIORES[nombre as keyof typeof CLAVES_V4_ANTERIORES]
+      );
+    }
+  });
+
+  it("con v4 presente y sin v5, cada hook arranca limpio con los fixtures nuevos", () => {
+    sembrarV4();
+
+    expect(cargarProductos()).toEqual(productosIniciales);
+    expect(leerJornadas()).toEqual([]);
+    expect(cargarVentas()).toEqual([]);
+    expect(leerCobros()).toEqual([]);
+    expect(leerMovimientos()).toEqual([]);
+    expect(leerRetornos()).toEqual([]);
+    expect(cargarCamiones()).toEqual(camionesIniciales);
+  });
+
+  it("v4 no se lee: ningún getItem apunta a una clave v4", () => {
+    sembrarV4();
+    leerTodo();
+
+    for (const clave of Object.values(CLAVES_V4_ANTERIORES)) {
+      expect(mockLS.getItem).not.toHaveBeenCalledWith(clave);
+    }
+    expect(mockLS.key).not.toHaveBeenCalled();
+  });
+
+  it("v4 no se copia ni se migra: no se escribe ninguna clave v5", () => {
+    sembrarV4();
+    leerTodo();
+
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    for (const clave of Object.values(CLAVES_STORAGE)) {
+      expect(mockLS._store.has(clave)).toBe(false);
+    }
+  });
+
+  it("v4 no se borra: queda byte a byte intacta", () => {
+    sembrarV4();
+    leerTodo();
+
+    expect(mockLS.removeItem).not.toHaveBeenCalled();
+    expect(mockLS.clear).not.toHaveBeenCalled();
+    for (const [nombre, clave] of Object.entries(CLAVES_V4_ANTERIORES)) {
+      expect(mockLS._store.get(clave)).toBe(
+        LEGACY_V4[nombre as keyof typeof LEGACY_V4]
+      );
+    }
+  });
+
+  it("el 9 legacy (4 piezas y media) nunca aparece como 9 g ni 0,009 kg", () => {
+    sembrarV4();
+
+    const productos = cargarProductos();
+    const jamon = productos.find((p) => p.id === 4);
+    expect(jamon).toMatchObject({ unidadMedida: "peso", stock: 18000, stockMinimo: 5000 });
+    expect(productos.some((p) => p.unidadMedida === "peso" && p.stock === 9)).toBe(false);
+    expect(productos.some((p) => p.stockMinimo === 9)).toBe(false);
+    expect(
+      productos
+        .filter((p) => p.unidadMedida === "peso")
+        .map((p) => cantidad_a_texto("peso", p.stock))
+    ).not.toContain("0,009 kg");
+
+    expect(leerJornadas()).toEqual([]);
+    expect(leerMovimientos()).toEqual([]);
+    expect(leerRetornos()).toEqual([]);
+  });
+});
+
+describe("Payload v5 con datos del modelo anterior: falla cerrado", () => {
+  it("un producto v5 con 'pieza' invalida el payload (fixtures, sin persistir)", () => {
+    const crudo = JSON.stringify([
+      {
+        id: 4,
+        nombre: "Jamón cocido",
+        categoria: "Fiambres",
+        unidadMedida: "pieza",
+        stock: 9,
+        precio: 12500,
+        stockMinimo: 9,
+      },
+    ]);
+    mockLS._store.set(CLAVES_STORAGE.productos, crudo);
+
+    expect(leerProductos().ok).toBe(false);
+    expect(cargarProductos()).toEqual(productosIniciales);
+    expect(mockLS._store.get(CLAVES_STORAGE.productos)).toBe(crudo);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+  });
+
+  it("{ unidadMedida: 'pieza', cantidad: 9 } en v5 nunca se carga como { peso, 9 }", () => {
+    const jornada = JSON.parse(LEGACY_V4.jornadas) as unknown[];
+    mockLS._store.set(CLAVES_STORAGE.jornadas, JSON.stringify(jornada));
+
+    const lectura = leerJornadasDiscriminado();
+    expect(lectura.ok).toBe(false);
+    expect(leerJornadas()).toEqual([]);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+  });
+
+  it("un movimiento y un retorno v5 con 'pieza' invalidan su payload", () => {
+    mockLS._store.set(CLAVES_STORAGE.movimientos, LEGACY_V4.movimientos);
+    mockLS._store.set(CLAVES_STORAGE.retornos, LEGACY_V4.retornos);
+    mockLS._store.set(CLAVES_STORAGE.ventas, LEGACY_V4.ventas);
+
+    expect(leerMovimientos()).toEqual([]);
+    expect(leerRetornos()).toEqual([]);
+    expect(cargarVentas()).toEqual([]);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("Payload v5 válido con peso en gramos enteros", () => {
+  it("productos: Fiambres + peso en gramos se acepta", () => {
+    const datos: Producto[] = [
+      {
+        id: 4,
+        nombre: "Jamón cocido",
+        categoria: "Fiambres",
+        unidadMedida: "peso",
+        stock: 28680,
+        precio: 12500,
+        stockMinimo: 5000,
+      },
+    ];
+    mockLS._store.set(CLAVES_STORAGE.productos, JSON.stringify(datos));
+    expect(cargarProductos()).toEqual(datos);
+  });
+
+  it("productos: gramos fraccionarios invalidan el payload", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.productos,
+      JSON.stringify([
+        {
+          id: 4,
+          nombre: "Jamón cocido",
+          categoria: "Fiambres",
+          unidadMedida: "peso",
+          stock: 1250.5,
+          precio: 12500,
+          stockMinimo: 0,
+        },
+      ])
+    );
+    expect(cargarProductos()).toEqual(productosIniciales);
+  });
+
+  it("jornadas, movimientos y retornos: peso en gramos es estructuralmente válido", () => {
+    const jornada = {
+      id: "j-peso",
+      camionId: 1,
+      chofer: "Luis",
+      zona: "Norte",
+      fechaCreacion: "2026-10-27T08:00:00.000Z",
+      fechaSalida: null,
+      estado: "preparacion",
+      items: [
+        {
+          productoId: 4,
+          nombreProducto: "Jamón cocido",
+          unidadMedida: "peso",
+          cantidad: 18000,
+          precioReferencia: 12500,
+        },
+      ],
+    };
+    const movimiento = {
+      id: "m-peso",
+      jornadaId: "j-peso",
+      camionId: 1,
+      fecha: "2026-10-27T10:00:00.000Z",
+      motivo: "Otro",
+      tipo: "merma",
+      producto: {
+        productoId: 4,
+        nombreProducto: "Jamón cocido",
+        unidadMedida: "peso",
+        cantidad: 1250,
+      },
+      clienteId: null,
+      nombreCliente: null,
+    };
+    const retorno = {
+      id: "r-peso",
+      jornadaId: "j-peso",
+      camionId: 1,
+      fecha: "2026-10-27T18:00:00.000Z",
+      responsable: "Ana",
+      observaciones: "",
+      items: [
+        {
+          productoId: 4,
+          nombreProducto: "Jamón cocido",
+          unidadMedida: "peso",
+          cantidadContada: 16750,
+          cantidadAprobada: 16750,
+        },
+      ],
+    };
+    mockLS._store.set(CLAVES_STORAGE.jornadas, JSON.stringify([jornada]));
+    mockLS._store.set(CLAVES_STORAGE.movimientos, JSON.stringify([movimiento]));
+    mockLS._store.set(CLAVES_STORAGE.retornos, JSON.stringify([retorno]));
+
+    expect(leerJornadas()).toEqual([jornada]);
+    expect(leerMovimientos()).toEqual([movimiento]);
+    expect(leerRetornos()).toEqual([retorno]);
+  });
+});
+
+describe("v1 NO se migra: datos v1 incompatibles no se leen como v5", () => {
+  it("productos: clave v1 con 'kg' no contamina v5", () => {
     mockLS._store.set(
       "distribuidora_productos_demo_v1",
       JSON.stringify(productoV1ConKg)
@@ -171,17 +559,11 @@ describe("v1 NO se migra: datos v1 incompatibles no se leen como v4", () => {
 
     const productos = cargarProductos();
 
-    // v4 se inicializa desde productosIniciales (sin kg)
-    expect(productos.length).toBe(6);
-    expect(
-      productos.every(
-        (p) => p.unidadMedida === "unidad" || p.unidadMedida === "pieza"
-      )
-    ).toBe(true);
+    expect(productos).toEqual(productosIniciales);
     expect(productos.some((p) => p.id === 999)).toBe(false);
   });
 
-  it("productos: clave v1 con piezas enteras no se reinterpretan como medias piezas", () => {
+  it("productos: clave v1 con piezas enteras no se reinterpreta", () => {
     mockLS._store.set(
       "distribuidora_productos_demo_v1",
       JSON.stringify(productoV1PiezasEnteras)
@@ -189,16 +571,15 @@ describe("v1 NO se migra: datos v1 incompatibles no se leen como v4", () => {
 
     const productos = cargarProductos();
 
-    // Jamón cocido en v4 tiene 36 medias piezas (18 piezas × 2), no 18.
+    // Jamón cocido v5 usa el fixture nuevo en gramos: ni 18 ni 36.
     const jamon = productos.find((p) => p.nombre === "Jamón cocido");
-    expect(jamon?.stock).toBe(36);
-    // El dato v1 con id 998 no aparece.
+    expect(jamon?.stock).toBe(18000);
     expect(productos.some((p) => p.id === 998)).toBe(false);
   });
 });
 
-describe("v1 NO se elimina: la clave v1 sigue intacta tras inicializar v4", () => {
-  it("productos: la clave v1 permanece después de leer v4", () => {
+describe("v1 NO se elimina: la clave v1 sigue intacta tras inicializar v5", () => {
+  it("productos: la clave v1 permanece después de leer v5", () => {
     mockLS._store.set(
       "distribuidora_productos_demo_v1",
       JSON.stringify(productoV1ConKg)
@@ -212,12 +593,12 @@ describe("v1 NO se elimina: la clave v1 sigue intacta tras inicializar v4", () =
   });
 });
 
-describe("v4 ya existe: se respeta y no se reinicializa", () => {
-  it("productos: si existe clave v4, se usa ese dato y no productosIniciales", () => {
-    const datosV4: Producto[] = [
+describe("v5 ya existe: se respeta y no se reinicializa", () => {
+  it("productos: si existe clave v5, se usa ese dato y no productosIniciales", () => {
+    const datosV5: Producto[] = [
       {
         id: 777,
-        nombre: "Producto ya guardado en v2",
+        nombre: "Producto ya guardado en v5",
         categoria: "Lácteos",
         unidadMedida: "unidad",
         stock: 5,
@@ -228,100 +609,52 @@ describe("v4 ya existe: se respeta y no se reinicializa", () => {
 
     mockLS._store.set(
       CLAVES_STORAGE.productos,
-      JSON.stringify(datosV4)
+      JSON.stringify(datosV5)
     );
 
     const productos = cargarProductos();
 
-    expect(productos).toEqual(datosV4);
+    expect(productos).toEqual(datosV5);
     expect(productos[0].id).toBe(777);
     expect(productos).toHaveLength(1);
   });
 });
 
-describe("Frontera de persistencia: combinación categoría ↔ unidad", () => {
-  it("Lácteos + pieza en v4 no se acepta como producto válido", () => {
+describe("Frontera de persistencia: combinación categoría ↔ forma de venta", () => {
+  const producto = (categoria: string, unidadMedida: string) => ({
+    id: 9001,
+    nombre: `Producto ${categoria} + ${unidadMedida}`,
+    categoria,
+    unidadMedida,
+    stock: 4,
+    precio: 1000,
+    stockMinimo: 1,
+  });
+
+  it.each([
+    ["Lácteos", "pieza"],
+    ["Lácteos", "peso"],
+    ["Fiambres", "unidad"],
+    ["Fiambres", "pieza"],
+    ["Fiambres", "media_pieza"],
+    ["Fiambres", "kg"],
+  ])("%s + %s en v5 invalida el payload", (categoria, unidad) => {
     mockLS._store.set(
       CLAVES_STORAGE.productos,
-      JSON.stringify([
-        {
-          id: 9001,
-          nombre: "Producto inválido Lácteos + pieza",
-          categoria: "Lácteos",
-          unidadMedida: "pieza",
-          stock: 4,
-          precio: 1000,
-          stockMinimo: 1,
-        },
-      ])
+      JSON.stringify([producto(categoria, unidad)])
     );
-
-    // Semántica vigente del hook: si un elemento del payload es
-    // inválido, todo el payload se rechaza y se arranca desde los
-    // mocks canónicos. El producto inválido no se incorpora al
-    // estado válido de la app.
+    // Semántica vigente del hook: un elemento inválido rechaza todo el
+    // payload y se arranca desde los fixtures. Nada se corrige.
     expect(cargarProductos()).toEqual(productosIniciales);
   });
 
-  it("Fiambres + unidad en v4 no se acepta como producto válido", () => {
-    mockLS._store.set(
-      CLAVES_STORAGE.productos,
-      JSON.stringify([
-        {
-          id: 9002,
-          nombre: "Producto inválido Fiambres + unidad",
-          categoria: "Fiambres",
-          unidadMedida: "unidad",
-          stock: 4,
-          precio: 1000,
-          stockMinimo: 1,
-        },
-      ])
-    );
-
-    expect(cargarProductos()).toEqual(productosIniciales);
-  });
-
-  it("Lácteos + unidad en v4 sigue aceptándose", () => {
-    const datosV4: Producto[] = [
-      {
-        id: 9003,
-        nombre: "Producto válido Lácteos + unidad",
-        categoria: "Lácteos",
-        unidadMedida: "unidad",
-        stock: 4,
-        precio: 1000,
-        stockMinimo: 1,
-      },
-    ];
-
-    mockLS._store.set(
-      CLAVES_STORAGE.productos,
-      JSON.stringify(datosV4)
-    );
-
-    expect(cargarProductos()).toEqual(datosV4);
-  });
-
-  it("Fiambres + pieza en v4 sigue aceptándose", () => {
-    const datosV4: Producto[] = [
-      {
-        id: 9004,
-        nombre: "Producto válido Fiambres + pieza",
-        categoria: "Fiambres",
-        unidadMedida: "pieza",
-        stock: 8,
-        precio: 9900,
-        stockMinimo: 2,
-      },
-    ];
-
-    mockLS._store.set(
-      CLAVES_STORAGE.productos,
-      JSON.stringify(datosV4)
-    );
-
-    expect(cargarProductos()).toEqual(datosV4);
+  it.each([
+    ["Lácteos", "unidad"],
+    ["Fiambres", "peso"],
+  ])("%s + %s en v5 se acepta", (categoria, unidad) => {
+    const datos = [producto(categoria, unidad)];
+    mockLS._store.set(CLAVES_STORAGE.productos, JSON.stringify(datos));
+    expect(cargarProductos()).toEqual(datos);
   });
 });
 
@@ -335,8 +668,8 @@ const CLAVES_V2_ANTERIORES = {
   camiones: "distribuidora_camiones_demo_v2",
 } as const;
 
-// Claves v3 de ADR-002 (superada por ADR-003). Solo existen en esta prueba,
-// para demostrar que los hooks no las leen, copian ni borran.
+// Claves v3 de ADR-002 (histórica). Solo existen en esta prueba, para
+// demostrar que los hooks no las leen, copian ni borran.
 const CLAVES_V3_ANTERIORES = {
   productos: "distribuidora_productos_demo_v3",
   jornadas: "distribuidora_jornadas_demo_v3",
@@ -358,7 +691,7 @@ describe("v3 (ADR-002) NO se lee, copia ni borra", () => {
     }
   });
 
-  it("con datos v3 presentes y sin v4, cada hook arranca limpio y v3 queda intacta", () => {
+  it("con datos v3 presentes y sin v5, cada hook arranca limpio y v3 queda intacta", () => {
     for (const clave of Object.values(CLAVES_V3_ANTERIORES)) {
       mockLS._store.set(clave, dato_v3);
     }
@@ -374,38 +707,23 @@ describe("v3 (ADR-002) NO se lee, copia ni borra", () => {
     for (const clave of Object.values(CLAVES_V3_ANTERIORES)) {
       expect(mockLS.getItem(clave)).toBe(dato_v3);
     }
-    // Nada se copió a v4.
+    // Nada se copió a v5.
     for (const clave of Object.values(CLAVES_STORAGE)) {
       expect(mockLS.setItem).not.toHaveBeenCalledWith(clave, expect.anything());
     }
   });
 });
 
-describe("v2 NO se lee, copia ni borra: las siete claves operativas pasan a v4", () => {
-  it("las siete claves compartidas terminan en _v4 y difieren de v2", () => {
-    const claves = Object.entries(CLAVES_STORAGE);
-    expect(claves).toHaveLength(7);
-    for (const [nombre, clave] of claves) {
-      expect(clave).toMatch(/_demo_v4$/);
+describe("v2 NO se lee, copia ni borra", () => {
+  it("las siete claves compartidas difieren de v2", () => {
+    for (const [nombre, clave] of Object.entries(CLAVES_STORAGE)) {
       expect(clave).not.toBe(
         CLAVES_V2_ANTERIORES[nombre as keyof typeof CLAVES_V2_ANTERIORES]
       );
     }
   });
 
-  it("las siete claves son exactamente las de ADR-003", () => {
-    expect(CLAVES_STORAGE).toEqual({
-      productos: "distribuidora_productos_demo_v4",
-      jornadas: "distribuidora_jornadas_demo_v4",
-      ventas: "distribuidora_ventas_demo_v4",
-      cobros: "distribuidora_cobros_demo_v4",
-      movimientos: "distribuidora_movimientos_demo_v4",
-      retornos: "distribuidora_retornos_demo_v4",
-      camiones: "distribuidora_camiones_demo_v4",
-    });
-  });
-
-  it("con datos v2 presentes y sin v4, cada hook arranca limpio", () => {
+  it("con datos v2 presentes y sin v5, cada hook arranca limpio", () => {
     for (const clave of Object.values(CLAVES_V2_ANTERIORES)) {
       mockLS._store.set(clave, JSON.stringify([{ id: 1, dato: "v2" }]));
     }
@@ -419,51 +737,41 @@ describe("v2 NO se lee, copia ni borra: las siete claves operativas pasan a v4",
     expect(cargarCamiones().length).toBeGreaterThan(0);
   });
 
-  it("las claves v2 quedan intactas tras inicializar v4", () => {
+  it("las claves v2 quedan intactas tras inicializar v5", () => {
     for (const clave of Object.values(CLAVES_V2_ANTERIORES)) {
       mockLS._store.set(clave, JSON.stringify([{ id: 1, dato: "v2" }]));
     }
 
-    cargarProductos();
-    leerJornadas();
-    cargarVentas();
-    leerCobros();
-    leerMovimientos();
-    leerRetornos();
-    cargarCamiones();
+    leerTodo();
 
     for (const clave of Object.values(CLAVES_V2_ANTERIORES)) {
       expect(mockLS.getItem(clave)).toBe(
         JSON.stringify([{ id: 1, dato: "v2" }])
       );
     }
-    // Nada se copió a v4.
+    // Nada se copió a v5.
     for (const clave of Object.values(CLAVES_STORAGE)) {
       expect(mockLS.setItem).not.toHaveBeenCalledWith(clave, expect.anything());
     }
   });
 
   it("clientes conserva su clave v2", () => {
-    mockLS._store.set(
-      "distribuidora_clientes_demo_v2",
-      JSON.stringify([{ id: 1 }])
-    );
+    mockLS._store.set(CLAVE_CLIENTES, JSON.stringify([{ id: 1 }]));
     cargarClientes();
-    expect(mockLS.getItem("distribuidora_clientes_demo_v2")).toBe(
-      JSON.stringify([{ id: 1 }])
-    );
+    expect(mockLS.getItem(CLAVE_CLIENTES)).toBe(JSON.stringify([{ id: 1 }]));
   });
 });
 
-describe("Frontera de persistencia: precios (ADR-003)", () => {
+describe("Frontera de persistencia: precios y snapshot de ventas (B1)", () => {
+  // Precio por kg del fiambre (ADR-005); precio unitario del lácteo.
   const fiambre = {
     id: 9100,
     nombre: "Fiambre de prueba",
     categoria: "Fiambres",
-    unidadMedida: "pieza",
-    stock: 8,
+    unidadMedida: "peso",
+    stock: 8000,
     precio: 10000,
-    stockMinimo: 2,
+    stockMinimo: 2000,
   };
   const lacteo = {
     id: 9101,
@@ -479,7 +787,7 @@ describe("Frontera de persistencia: precios (ADR-003)", () => {
     mockLS._store.set(CLAVES_STORAGE.productos, JSON.stringify(productos));
   }
 
-  it("acepta fiambre con precio válido y lácteo con precio válido", () => {
+  it("acepta fiambre (precio por kg) y lácteo (precio unitario) con precios válidos", () => {
     guardarProductos([fiambre, lacteo]);
     expect(cargarProductos()).toEqual([fiambre, lacteo]);
   });
@@ -501,11 +809,11 @@ describe("Frontera de persistencia: precios (ADR-003)", () => {
   });
 
   const itemJornada = {
-    productoId: 3,
-    nombreProducto: "Queso cremoso en pieza",
-    unidadMedida: "pieza",
+    productoId: 1,
+    nombreProducto: "Leche",
+    unidadMedida: "unidad",
     cantidad: 3,
-    precioReferencia: 10000,
+    precioReferencia: 2300,
   };
   const jornadaBase = {
     id: "j-1",
@@ -517,7 +825,7 @@ describe("Frontera de persistencia: precios (ADR-003)", () => {
     estado: "preparacion",
   };
 
-  it("jornadas: acepta ítem pieza con precio válido", () => {
+  it("jornadas: acepta ítem unidad con precio válido", () => {
     mockLS._store.set(
       CLAVES_STORAGE.jornadas,
       JSON.stringify([{ ...jornadaBase, items: [itemJornada] }])
@@ -525,14 +833,21 @@ describe("Frontera de persistencia: precios (ADR-003)", () => {
     expect(leerJornadas()).toHaveLength(1);
   });
 
+  it("jornadas: rechaza ítem con precio inválido", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.jornadas,
+      JSON.stringify([{ ...jornadaBase, items: [{ ...itemJornada, precioReferencia: -1 }] }])
+    );
+    expect(leerJornadas()).toEqual([]);
+  });
+
   const itemVenta = {
-    productoId: 3,
-    nombreProducto: "Queso cremoso en pieza",
-    unidadMedida: "pieza",
+    productoId: 1,
+    nombreProducto: "Leche",
+    unidadMedida: "unidad",
     cantidad: 3,
-    precioUnitario: 10000,
-    precioMediaPieza: 5000,
-    subtotal: 15000,
+    precioUnitario: 2300,
+    subtotal: 6900,
   };
   const ventaBase = {
     id: "v-1",
@@ -542,69 +857,54 @@ describe("Frontera de persistencia: precios (ADR-003)", () => {
     nombreCliente: "Cliente",
     fecha: "2026-10-20T10:00:00.000Z",
     medioPago: "efectivo",
-    total: 15000,
+    total: 6900,
   };
 
-  it("ventas: conserva el historial de precios y exige subtotal consistente", () => {
+  it("ventas: conserva el precio aplicado y exige subtotal consistente", () => {
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
       JSON.stringify([{ ...ventaBase, items: [itemVenta] }])
     );
     expect(cargarVentas()).toHaveLength(1);
 
-    // 3 medias cobradas como 3 × pieza (30000) no coincide con el dominio.
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
-      JSON.stringify([{ ...ventaBase, items: [{ ...itemVenta, subtotal: 30000 }] }])
+      JSON.stringify([{ ...ventaBase, items: [{ ...itemVenta, subtotal: 6901 }], total: 6901 }])
     );
     expect(cargarVentas()).toEqual([]);
+  });
 
-    // Pieza sin precio de media aplicado.
-    const { precioMediaPieza: _omitido, ...sinMedia } = itemVenta;
-    void _omitido;
+  it("ventas: una línea unidad con precioMediaPieza (legacy ADR-003) se rechaza", () => {
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
-      JSON.stringify([{ ...ventaBase, items: [sinMedia] }])
+      JSON.stringify([
+        { ...ventaBase, items: [{ ...itemVenta, precioMediaPieza: 1150 }] },
+      ])
     );
     expect(cargarVentas()).toEqual([]);
+  });
 
-    // Unidad con precio de media en el snapshot: no aplica, se rechaza.
+  it("ventas: una línea peso se rechaza hasta B3 (subtotal arbitrario, sin D-R1)", () => {
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
       JSON.stringify([
         {
           ...ventaBase,
-          total: 4600,
+          total: 123,
           items: [
             {
-              productoId: 1,
-              nombreProducto: "Leche",
-              unidadMedida: "unidad",
-              cantidad: 2,
-              precioUnitario: 2300,
-              precioMediaPieza: 1150,
-              subtotal: 4600,
+              productoId: 4,
+              nombreProducto: "Jamón cocido",
+              unidadMedida: "peso",
+              cantidad: 1250,
+              precioUnitario: 12500,
+              subtotal: 123,
             },
           ],
         },
       ])
     );
     expect(cargarVentas()).toEqual([]);
-  });
-
-  it("ventas: usa la media del snapshot aunque la regla vigente daría otra", () => {
-    // Regla vigente para pieza 10000 → media 5000; el snapshot guardó 6000.
-    mockLS._store.set(
-      CLAVES_STORAGE.ventas,
-      JSON.stringify([
-        {
-          ...ventaBase,
-          total: 16000,
-          items: [{ ...itemVenta, precioMediaPieza: 6000, subtotal: 16000 }],
-        },
-      ])
-    );
-    expect(cargarVentas()).toHaveLength(1);
   });
 });
 
@@ -620,11 +920,11 @@ describe("L2A — Frontera de persistencia: useJornadas fail closed en cantidad"
   };
 
   const itemValido = {
-    productoId: 3,
-    nombreProducto: "Queso cremoso en pieza",
-    unidadMedida: "pieza",
+    productoId: 1,
+    nombreProducto: "Leche",
+    unidadMedida: "unidad",
     cantidad: 3,
-    precioReferencia: 10000,
+    precioReferencia: 2300,
   };
 
   it("rechaza cantidad no entera (1.5)", () => {
@@ -661,23 +961,22 @@ describe("L2A — Frontera de persistencia: useJornadas fail closed en cantidad"
 });
 
 describe("L2B — Frontera de persistencia: useVentas total histórico", () => {
+  // Líneas unidad: subtotal = cantidad × precio unitario (comportamiento
+  // vigente; no resuelve el pendiente de líneas unidad de BLUEPRINT §15).
   const itemVenta = {
-    productoId: 3,
-    nombreProducto: "Queso cremoso en pieza",
-    unidadMedida: "pieza",
+    productoId: 1,
+    nombreProducto: "Leche",
+    unidadMedida: "unidad",
     cantidad: 3,
-    precioUnitario: 10000,
-    precioMediaPieza: 5000,
+    precioUnitario: 5000,
     subtotal: 15000,
   };
-  // cantidad=2 (2 medias = 1 pieza) → subtotal = 1 * 12500 = 12500
   const itemVenta2 = {
-    productoId: 4,
-    nombreProducto: "Jamón cocido",
-    unidadMedida: "pieza",
+    productoId: 2,
+    nombreProducto: "Yogur",
+    unidadMedida: "unidad",
     cantidad: 2,
-    precioUnitario: 12500,
-    precioMediaPieza: 6250,
+    precioUnitario: 6250,
     subtotal: 12500,
   };
   const ventaBase = {
@@ -839,15 +1138,15 @@ describe("movimientos: persistencia falla cerrado ante cantidades inválidas", (
     );
   };
 
-  it("pieza canónica entera y unidad entera son válidas", () => {
-    guardar(producto("pieza", 3));
-    expect(leerMovimientos()).toHaveLength(1);
+  it("unidad entera y peso en gramos enteros son válidos (storage v5)", () => {
     guardar(producto("unidad", 2));
+    expect(leerMovimientos()).toHaveLength(1);
+    guardar(producto("peso", 1250));
     expect(leerMovimientos()).toHaveLength(1);
   });
 
   it.each([1.5, 0, -1, "2"])("cantidad %j → lectura inválida (vacío)", (c) => {
-    guardar(producto("pieza", c));
+    guardar(producto("peso", c));
     expect(leerMovimientos()).toEqual([]);
     guardar(producto("unidad", c));
     expect(leerMovimientos()).toEqual([]);
@@ -856,12 +1155,12 @@ describe("movimientos: persistencia falla cerrado ante cantidades inválidas", (
   it("NaN e Infinity (serializados como null) → inválido", () => {
     guardar(producto("unidad", NaN));
     expect(leerMovimientos()).toEqual([]);
-    guardar(producto("pieza", Infinity));
+    guardar(producto("peso", Infinity));
     expect(leerMovimientos()).toEqual([]);
   });
 
-  it("kg no es una unidad válida", () => {
-    guardar(producto("kg", 1));
+  it.each(["kg", "pieza", "media_pieza"])("'%s' no es una unidad válida", (unidad) => {
+    guardar(producto(unidad, 1));
     expect(leerMovimientos()).toEqual([]);
   });
 
@@ -886,7 +1185,7 @@ describe("movimientos: persistencia falla cerrado ante cantidades inválidas", (
         const guardar_fn = vi.fn();
         const validar = vi.fn(() => null);
         const error = registrarMovimientoOperacion(
-          mov({ productoId: 1, nombreProducto: "P", unidadMedida: "pieza", cantidad: c }),
+          mov({ productoId: 1, nombreProducto: "P", unidadMedida: "unidad", cantidad: c }),
           validar,
           () => ({ ok: true, movimientos: [], estado: 'inicial' }),
           guardar_fn
@@ -899,7 +1198,7 @@ describe("movimientos: persistencia falla cerrado ante cantidades inválidas", (
 
     it("persiste un movimiento válido y rechaza duplicados", () => {
       const guardar_fn = vi.fn();
-      const m = mov({ productoId: 1, nombreProducto: "P", unidadMedida: "pieza", cantidad: 3 });
+      const m = mov({ productoId: 1, nombreProducto: "P", unidadMedida: "unidad", cantidad: 3 });
       expect(registrarMovimientoOperacion(m, () => null, () => ({ ok: true, movimientos: [], estado: 'inicial' }), guardar_fn)).toBeNull();
       expect(guardar_fn).toHaveBeenCalledWith([m]);
       expect(
@@ -923,8 +1222,8 @@ describe("movimientos: frontera REAL de escritura ante storage corrupto", () => 
     tipo: "merma",
     producto: {
       productoId: 1,
-      nombreProducto: "Jamón",
-      unidadMedida: "pieza",
+      nombreProducto: "Leche",
+      unidadMedida: "unidad",
       cantidad,
     },
     clienteId: null,
@@ -1067,7 +1366,7 @@ describe("retornos: frontera REAL de escritura", () => {
 
   const retorno = (
     jornadaId: string,
-    items: unknown[] = [item("pieza", 5, 3)]
+    items: unknown[] = [item("unidad", 5, 3)]
   ) =>
     ({
       id: `r-${jornadaId}`,
@@ -1161,7 +1460,7 @@ describe("retornos: frontera REAL de escritura", () => {
     ["NaN", item("unidad", 5, NaN)],
     ["Infinity", item("unidad", Infinity, 0)],
     ["negativo", item("unidad", 5, -1)],
-    ["aprobado > contado", item("pieza", 5, 6)],
+    ["aprobado > contado", item("unidad", 5, 6)],
     ["kg", item("kg", 5, 1)],
     ["no seguro", item("unidad", Number.MAX_SAFE_INTEGER + 1, 0)],
   ])("F. %s: rechaza sin tocar el storage", (_n, it_) => {
@@ -1206,12 +1505,16 @@ describe("retornos: frontera REAL de escritura", () => {
     expect(guardar).not.toHaveBeenCalled();
   });
 
-  it("lectura: kg y decimales en el storage invalidan el payload", () => {
+  it("lectura: kg, pieza y decimales invalidan el payload; peso en gramos es válido", () => {
     mockLS._store.set(CLAVE, JSON.stringify([retorno("j1", [item("kg", 5, 1)])]));
     expect(leerRetornos()).toEqual([]);
-    mockLS._store.set(CLAVE, JSON.stringify([retorno("j1", [item("pieza", 5, 2.5)])]));
+    mockLS._store.set(CLAVE, JSON.stringify([retorno("j1", [item("unidad", 5, 2.5)])]));
     expect(leerRetornos()).toEqual([]);
-    const valido = [retorno("j1", [item("pieza", 5, 3)])];
+    mockLS._store.set(CLAVE, JSON.stringify([retorno("j1", [item("pieza", 5, 3)])]));
+    expect(leerRetornos()).toEqual([]);
+    mockLS._store.set(CLAVE, JSON.stringify([retorno("j1", [item("peso", 1250, 1250.5)])]));
+    expect(leerRetornos()).toEqual([]);
+    const valido = [retorno("j1", [item("unidad", 5, 3), item("peso", 18000, 17500, 4)])];
     mockLS._store.set(CLAVE, JSON.stringify(valido));
     expect(leerRetornos()).toEqual(valido);
   });
@@ -1231,7 +1534,7 @@ describe("jornadas: conteos del cierre son enteros seguros", () => {
     estado,
     items: [
       { productoId: 1, nombreProducto: "Yogur", unidadMedida: "unidad", cantidad: 10, precioReferencia: 100 },
-      { productoId: 2, nombreProducto: "Jamón", unidadMedida: "pieza", cantidad: 5, precioReferencia: 1000 },
+      { productoId: 2, nombreProducto: "Leche", unidadMedida: "unidad", cantidad: 5, precioReferencia: 1000 },
     ],
     ...(cierre === undefined ? {} : { cierre }),
   });
@@ -1252,7 +1555,7 @@ describe("jornadas: conteos del cierre son enteros seguros", () => {
     return crudo;
   };
 
-  it("válidos (unidad y pieza en medias piezas): cierra y persiste", () => {
+  it("válidos (unidades enteras): cierra y persiste", () => {
     abierta();
     const r = cerrarJornadaPersistida("j1", cierre({ "1": 3, "2": 5 }) as never);
     expect(r).not.toBeNull();
@@ -1447,8 +1750,8 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
     sinEscribir("{roto");
   });
 
-  it("la clave de jornadas sigue siendo v4", () => {
-    expect(CLAVE).toBe("distribuidora_jornadas_demo_v4");
+  it("la clave de jornadas es v5", () => {
+    expect(CLAVE).toBe("distribuidora_jornadas_demo_v5");
   });
 });
 
@@ -1573,16 +1876,16 @@ describe("catálogos (productos, camiones, clientes): storage corrupto fail-clos
   it("las funciones públicas cargarX siguen devolviendo datos demo ante corrupción, sin escribir", () => {
     mockLS._store.set(CLAVES_STORAGE.productos, "{roto");
     mockLS._store.set(CLAVES_STORAGE.camiones, "");
-    mockLS._store.set("distribuidora_clientes_demo_v2", "null");
+    mockLS._store.set(CLAVE_CLIENTES, "null");
     expect(cargarProductos()).toEqual(productosIniciales);
     expect(cargarCamiones()).toEqual(camionesIniciales);
     expect(cargarClientes()).toEqual(clientesIniciales);
     expect(mockLS.setItem).not.toHaveBeenCalled();
   });
 
-  it("claves sin cambios", () => {
-    expect(CLAVES_STORAGE.productos).toBe("distribuidora_productos_demo_v4");
-    expect(CLAVES_STORAGE.camiones).toBe("distribuidora_camiones_demo_v4");
+  it("claves vigentes v5", () => {
+    expect(CLAVES_STORAGE.productos).toBe("distribuidora_productos_demo_v5");
+    expect(CLAVES_STORAGE.camiones).toBe("distribuidora_camiones_demo_v5");
   });
 });
 
@@ -1809,9 +2112,104 @@ describe("ventas y cobros: escritura fail-closed ante storage corrupto", () => {
       expect(guardar).not.toHaveBeenCalled();
     });
 
-    it("las claves de ventas y cobros siguen siendo v4", () => {
-      expect(CV).toBe("distribuidora_ventas_demo_v4");
-      expect(CC).toBe("distribuidora_cobros_demo_v4");
+    it("las claves de ventas y cobros son v5", () => {
+      expect(CV).toBe("distribuidora_ventas_demo_v5");
+      expect(CC).toBe("distribuidora_cobros_demo_v5");
     });
+  });
+});
+
+describe("B1: guards de peso en las fronteras REALES de escritura (no escriben)", () => {
+  const jamon = (gramos: number) => ({
+    productoId: 4,
+    nombreProducto: "Jamón cocido",
+    unidadMedida: "peso" as const,
+    cantidad: gramos,
+  });
+
+  it("movimientos: una merma peso se rechaza y el storage queda intacto", () => {
+    const crudo = JSON.stringify([]);
+    mockLS._store.set(CLAVES_STORAGE.movimientos, crudo);
+    mockLS.setItem.mockClear();
+    const validar = vi.fn(() => null);
+
+    const error = registrarMovimientoPersistido(
+      {
+        id: "m-peso",
+        jornadaId: "j1",
+        camionId: 1,
+        fecha: "2026-10-27T10:00:00.000Z",
+        motivo: "Otro",
+        tipo: "merma",
+        producto: jamon(1250),
+        clienteId: null,
+        nombreCliente: null,
+      },
+      validar
+    );
+
+    expect(error).toBe(MENSAJE_PESO_NO_OPERABLE);
+    expect(validar).not.toHaveBeenCalled();
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS._store.get(CLAVES_STORAGE.movimientos)).toBe(crudo);
+  });
+
+  it("retornos: un retorno con ítem peso se rechaza y no se escribe", () => {
+    mockLS.setItem.mockClear();
+
+    const error = registrarRetornoPersistido({
+      id: "r-peso",
+      jornadaId: "j1",
+      camionId: 1,
+      fecha: "2026-10-27T18:00:00.000Z",
+      responsable: "Ana",
+      observaciones: "",
+      items: [
+        {
+          productoId: 4,
+          nombreProducto: "Jamón cocido",
+          unidadMedida: "peso",
+          cantidadContada: 18000,
+          cantidadAprobada: 18000,
+        },
+      ],
+    });
+
+    expect(error).toBe(MENSAJE_PESO_NO_OPERABLE);
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS._store.has(CLAVES_STORAGE.retornos)).toBe(false);
+  });
+
+  it("jornadas: cerrar una jornada con ítem peso devuelve null y no escribe", () => {
+    const crudo = JSON.stringify([
+      {
+        id: "j-peso",
+        camionId: 1,
+        chofer: "Luis",
+        zona: "Norte",
+        fechaCreacion: "2026-10-27T08:00:00.000Z",
+        fechaSalida: "2026-10-27T09:00:00.000Z",
+        estado: "abierta",
+        items: [
+          { productoId: 4, nombreProducto: "Jamón cocido", unidadMedida: "peso", cantidad: 18000, precioReferencia: 12500 },
+        ],
+      },
+    ]);
+    mockLS._store.set(CLAVES_STORAGE.jornadas, crudo);
+    mockLS.setItem.mockClear();
+
+    const r = cerrarJornadaPersistida("j-peso", {
+      fecha: "2026-10-27T18:00:00.000Z",
+      conteos: { "4": 18000 },
+      efectivoEntregado: 0,
+      efectivoEsperado: 0,
+      transferenciasInformadas: 0,
+      ventasCuentaCorriente: 0,
+      observaciones: "",
+    });
+
+    expect(r).toBeNull();
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS._store.get(CLAVES_STORAGE.jornadas)).toBe(crudo);
   });
 });

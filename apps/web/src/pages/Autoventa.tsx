@@ -30,15 +30,11 @@ import type {
 
 
 
+import { cantidad_unidad_desde_texto } from "../domain/cantidades";
 import {
-  cantidad_unidad_desde_texto,
-  descomponer_medias,
-  es_cantidad_valida,
-  maximo_piezas_segun_disponible,
-  medias_a_texto,
-  puede_agregar_media,
-  recomponer_medias,
-} from "../domain/cantidades";
+  cantidad_a_texto,
+  MENSAJE_PESO_NO_OPERABLE,
+} from "../domain/productos";
 import {
   sumar_importes,
 } from "../domain/precios";
@@ -58,9 +54,9 @@ const moneda = (valor: number) =>
     maximumFractionDigits: 2,
   }).format(valor);
 
+// Sólo `unidad`: las cantidades `peso` se muestran con cantidad_a_texto.
 const unidades = {
   unidad: "un.",
-  pieza: "pzas.",
 };
 
 // --------------------------------------------------
@@ -88,9 +84,9 @@ export default function Autoventa() {
   const [jornadaId, setJornadaId] = useState("");
   const [clienteId, setClienteId] = useState("");
 
-  const [cantidades, setCantidades] = useState<
-    Record<number, string | { piezas: number; media: boolean }>
-  >({});
+  // Texto del input entero de cada producto "unidad". Los productos "peso"
+  // no tienen input en B1 (Autoventa por peso es B3).
+  const [cantidades, setCantidades] = useState<Record<number, string>>({});
 
   const [medioPago, setMedioPago] =
     useState<MedioPago>("efectivo");
@@ -184,7 +180,9 @@ export default function Autoventa() {
   // HELPERS PARA CANTIDADES CANÓNICAS
   // --------------------------------------------------
 
-  // Helper para obtener la cantidad canónica (medias piezas) desde el estado
+  // Cantidad canónica desde el estado. B1: un producto "peso" nunca aporta
+  // cantidad, así que nunca llega a construirDetalleVenta (que además lo
+  // rechaza).
   const obtenerCantidadCanonica = useCallback(
     (productoId: number): number => {
       const valor = cantidades[productoId];
@@ -192,17 +190,7 @@ export default function Autoventa() {
       const producto = productosCamion.find((p) => p.productoId === productoId);
       if (!producto) return 0;
       if (producto.unidadMedida === "unidad") {
-        return typeof valor === "string"
-          ? (cantidad_unidad_desde_texto(valor) ?? 0)
-          : 0;
-      }
-      // producto.unidadMedida === "pieza": el estado es { piezas, media }.
-      if (typeof valor === "object") {
-        try {
-          return recomponer_medias(valor);
-        } catch {
-          return 0;
-        }
+        return cantidad_unidad_desde_texto(valor) ?? 0;
       }
       return 0;
     },
@@ -592,48 +580,8 @@ export default function Autoventa() {
             <div className="space-y-3">
               {productosCamion.map((producto) => {
                 const disponible = producto.disponible;
-                const esPieza = producto.unidadMedida === "pieza";
-                const valorActual = cantidades[producto.productoId];
-                const disponibleTexto = esPieza
-                  ? medias_a_texto(disponible)
-                  : `${disponible} ${unidades[producto.unidadMedida]}`;
-
-                if (esPieza) {
-                  // UX para fiambres: piezas enteras + media pieza opcional
-                  const { piezas, media } = valorActual
-                    ? (typeof valorActual === "object"
-                        ? valorActual
-                        : descomponer_medias(Number(valorActual)))
-                    : { piezas: 0, media: false };
-
-                  // Calcula la cantidad canónica actual de la UX
-                  const cantidadCanonicaActual = recomponer_medias({ piezas, media });
-
-                  // Máximo de piezas enteras permitidas, considerando si media ya está marcada.
-                  // Si media=true, restamos 1 del disponible antes de dividir por 2.
-                  const maxPiezas = maximo_piezas_segun_disponible(
-                    disponible,
-                    media
-                  );
-
-                  // Media está deshabilitada si:
-                  // - no hay stock disponible (disponible < 1), o
-                  // - las piezas actuales * 2 ya consumen todo el stock disponible (no queda espacio para media)
-                  const mediaDisabled = !puede_agregar_media(disponible, piezas);
-
-                  // Helper para actualizar estado validando contra stock total
-                  const actualizarCantidades = (nuevasPiezas: number, nuevaMedia: boolean) => {
-                    const canonica = recomponer_medias({ piezas: nuevasPiezas, media: nuevaMedia });
-                    if (canonica > disponible) {
-                      // No permitir transición que exceda el stock
-                      return;
-                    }
-                    setCantidades((actuales: Record<number, string | { piezas: number; media: boolean }>) => ({
-                      ...actuales,
-                      [producto.productoId]: { piezas: nuevasPiezas, media: nuevaMedia },
-                    }));
-                  };
-
+                if (producto.unidadMedida === "peso") {
+                  // B1: sin input; la venta por peso se habilita en B3.
                   return (
                     <div
                       key={producto.productoId}
@@ -641,7 +589,7 @@ export default function Autoventa() {
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <Package
-                          className="shrink-0 text-blue-600"
+                          className="shrink-0 text-slate-400"
                           size={23}
                         />
                         <div>
@@ -649,55 +597,13 @@ export default function Autoventa() {
                             {producto.nombreProducto}
                           </p>
                           <p className="text-sm text-slate-500">
-                            Disponible: {disponibleTexto}
-                          </p>
-                          <p className="text-xs text-slate-400">
-                            {moneda(producto.precioReferencia)} por pieza
+                            Disponible: {cantidad_a_texto(producto.unidadMedida, disponible)}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <label className="flex items-center gap-2 text-sm">
-                          <span>Piezas:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max={maxPiezas}
-                            step="1"
-                            value={piezas}
-                            onChange={(e) => {
-                              const nuevasPiezas = Math.max(0, Number(e.target.value));
-                              if (!es_cantidad_valida(nuevasPiezas)) {
-                                setError(
-                                  `Piezas inválidas de ${producto.nombreProducto}: se esperaba un entero mayor o igual que cero.`
-                                );
-                                return;
-                              }
-                              setError("");
-                              actualizarCantidades(nuevasPiezas, media);
-                            }}
-                            className="min-h-12 w-20 rounded-lg border border-slate-300 p-3 text-right"
-                            aria-label={`Piezas enteras de ${producto.nombreProducto}`}
-                          />
-                        </label>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={media}
-                            disabled={mediaDisabled}
-                            onChange={(e) => {
-                              const nuevaMedia = e.target.checked;
-                              actualizarCantidades(piezas, nuevaMedia);
-                            }}
-                            className="w-4 h-4 rounded border-slate-300"
-                            aria-label={`Media pieza de ${producto.nombreProducto}`}
-                          />
-                          <span>Media pieza</span>
-                        </label>
-                        <span className="text-slate-500 text-sm">
-                          = {medias_a_texto(cantidadCanonicaActual)}
-                        </span>
-                      </div>
+                      <p className="text-sm text-amber-700">
+                        {MENSAJE_PESO_NO_OPERABLE}
+                      </p>
                     </div>
                   );
                 }
@@ -733,9 +639,9 @@ export default function Autoventa() {
                         min="0"
                         max={disponible}
                         step="1"
-                        value={(cantidades[producto.productoId] as string) ?? ""}
+                        value={cantidades[producto.productoId] ?? ""}
                         onChange={(e) =>
-                          setCantidades((actuales: Record<number, string | { piezas: number; media: boolean }>) => ({
+                          setCantidades((actuales) => ({
                             ...actuales,
                             [producto.productoId]: e.target.value,
                           }))
@@ -789,7 +695,7 @@ export default function Autoventa() {
                       </p>
 
                       <p className="text-slate-500">
-                        {item.unidadMedida === "pieza" ? medias_a_texto(item.cantidad) : item.cantidad} ×{" "}
+                        {item.cantidad} ×{" "}
                         {moneda(item.precioUnitario)}
                       </p>
                     </div>

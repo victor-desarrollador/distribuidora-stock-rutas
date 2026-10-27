@@ -1,3 +1,5 @@
+import type { UnidadMedida } from "./mockProductos";
+
 export type EstadoJornada =
   | "preparacion"
   | "abierta"
@@ -6,9 +8,10 @@ export type EstadoJornada =
 export interface ItemCarga {
   productoId: number;
   nombreProducto: string;
-  unidadMedida: "unidad" | "pieza";
+  unidadMedida: UnidadMedida;
+  // Entero canónico: unidades (unidad) o gramos (peso).
   cantidad: number;
-  // unidad: precio unitario snapshot. pieza: precio de pieza completa snapshot.
+  // unidad: precio unitario snapshot. peso: precio por kg snapshot.
   precioReferencia: number;
 }
 

@@ -5,6 +5,7 @@ import {
   clientesIniciales,
   type Cliente,
 } from "../data/mockClientes";
+import { CLAVE_CLIENTES } from "../data/clavesStorage";
 
 import {
   actualizarCatalogoPersistido,
@@ -12,7 +13,7 @@ import {
   type ResultadoLectura,
 } from "./catalogoStorage";
 
-const STORAGE_KEY = "distribuidora_clientes_demo_v2";
+const STORAGE_KEY = CLAVE_CLIENTES;
 
 function clienteValido(cliente: unknown): boolean {
   if (cliente === null || typeof cliente !== "object") return false;

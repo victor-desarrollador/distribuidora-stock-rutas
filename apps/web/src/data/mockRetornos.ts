@@ -1,10 +1,11 @@
+import type { UnidadMedida } from "./mockProductos";
 
 export interface ItemRetorno {
   productoId: number;
   nombreProducto: string;
-  unidadMedida: "unidad" | "pieza";
+  unidadMedida: UnidadMedida;
 
-  // Cantidad vendible contada en el cierre.
+  // Cantidad vendible contada en el cierre (entero canónico: unidades o gramos).
   cantidadContada: number;
 
   // Cantidad revisada y aprobada para el depósito.

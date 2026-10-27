@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 import type { RetornoDeposito } from "../data/mockRetornos";
 import { retorno_valido } from "../domain/retornos";
+import { MENSAJE_PESO_NO_OPERABLE } from "../domain/productos";
 
 const STORAGE_KEY = CLAVES_STORAGE.retornos;
 
@@ -82,6 +83,11 @@ export function registrarRetornoOperacion(
 ): string | null {
   if (!retorno_valido(retorno, { exigir_responsable: true })) {
     return "El retorno no es válido: las cantidades deben ser enteros seguros, con aprobado menor o igual que contado.";
+  }
+
+  // B1: los retornos de productos `peso` no están migrados (B4).
+  if (retorno.items.some((item) => item.unidadMedida !== "unidad")) {
+    return MENSAJE_PESO_NO_OPERABLE;
   }
 
   const lectura = cargarActuales();

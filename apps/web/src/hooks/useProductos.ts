@@ -27,9 +27,10 @@ function productoValido(producto: unknown): boolean {
     Number.isSafeInteger(p.id) &&
     typeof p.nombre === "string" &&
     ["Lácteos", "Fiambres"].includes(p.categoria ?? "") &&
-    ["unidad", "pieza"].includes(p.unidadMedida ?? "") &&
+    ["unidad", "peso"].includes(p.unidadMedida ?? "") &&
     // Frontera de persistencia: la combinación categoría ↔ unidad
-    // debe ser la canónica (Lácteos -> unidad; Fiambres -> pieza).
+    // debe ser la canónica (Lácteos -> unidad; Fiambres -> peso).
+    // Un dato `pieza` invalida el payload: nunca se convierte (D-R4).
     // Nada se corrige aquí (no se cambia categoría ni unidad ni se
     // reinterpreta stock): un dato inválido invalida el payload
     // igual que cualquier otro campo inválido.
@@ -37,10 +38,9 @@ function productoValido(producto: unknown): boolean {
       p.categoria as Producto["categoria"],
       p.unidadMedida as Producto["unidadMedida"]
     ).valido &&
-    // Precios (ADR-003): máximo 2 decimales; NO hay precioMediaPieza configurable.
-    // pieza: solo precio; unidad: solo precio.
+    // Precio (ADR-005): máximo 2 decimales; unitario (unidad) o por kg (peso).
     precio_valido(p.precio as number) &&
-    // Stock y stock mínimo: enteros seguros >= 0 (dominio compartido).
+    // Stock y stock mínimo: enteros seguros >= 0 en unidades o gramos.
     stock_producto_valido(p.stock as number, p.stockMinimo as number)
   );
 }
