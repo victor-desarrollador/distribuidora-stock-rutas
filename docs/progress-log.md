@@ -1,4 +1,50 @@
 ---
+## 27/10/2026 — pgTAP portable local/staging: listas SECURITY DEFINER sin falsos negativos por `public.rls_auto_enable()` (sin commit)
+
+**Rama:** `fix/pgtap-listas-definer-portables` desde `main` = `979375d0d67d043f753a8a8194ac190b0e1b85f1`. **Sólo tests:** sin migraciones, sin SQL productivo, sin seed y sin frontend. **Autorización humana:** ejecutar en staging (`rtsncntppghdynzhezzg`) sólo pgTAP en transacciones revertidas, lint, advisors y la consulta de cleanup. **Producción no tocada.** Sin commit hasta la revisión humana.
+
+### Problema
+- En staging había **3 `not ok` de 996**: `auth_base_rls` #5, `camiones_catalogo` #10 y `productos_catalogo` #15 (registrados en la entrada «Cierre de staging: Modelo por peso, Slice A»).
+- **Causa:** las listas cerradas de funciones SECURITY DEFINER de `public` no contemplaban `public.rls_auto_enable()` (SECURITY DEFINER, owner `postgres`, event trigger `ensure_rls`). Esa función es de infraestructura del proyecto alojado, está conservada por O-4 (ADR-001 §18.2) y no existe en local. No era un defecto del esquema.
+
+### Solución (sólo expectativas de test; la postura de seguridad no cambia)
+- Nuevo auxiliar de sesión `pg_temp.sd_publicas_no_autorizadas()`, idéntico en los tres archivos. Devuelve toda función SECURITY DEFINER de `public` **salvo** la firma exacta `public.rls_auto_enable()`. Una sobrecarga u otro nombre no quedan exentos.
+- `auth_base_rls` #5: `sd_publicas_no_autorizadas() = '{}'`. Equivale a «conjunto SD de `public` ⊆ {`rls_auto_enable()`}»: vale tanto en local (ninguna) como en staging (sólo esa).
+- `camiones_catalogo` y `productos_catalogo`: la aserción mixta se divide en dos:
+  1. Las SECURITY DEFINER de `privado` son **exactamente** las 13 implementaciones de negocio. La lista no cambia.
+  2. `sd_publicas_no_autorizadas() = '{}'`.
+- Los atributos de `rls_auto_enable()` cuando existe (SECURITY DEFINER, owner `postgres`, `search_path=pg_catalog`, sin EXECUTE para PUBLIC/`anon`/`authenticated`/`service_role`, `ensure_rls` habilitado) **siguen cubiertos por `hardening_adr001`** y no se duplican.
+- **Mutación versionada** en `auth_base_rls` (+2 aserciones, revertida por el `rollback`):
+  - con `rls_auto_enable()` presente (real en staging; en local se simula como `event_trigger` SECURITY DEFINER y se borra después), se crean `public.funcion_sd_no_autorizada()` y `public.rls_auto_enable(integer)`, ambas SECURITY DEFINER;
+  - resultado: las dos se reportan y `rls_auto_enable()` no;
+  - en staging la función real no se toca.
+- Planes: `auth_base_rls` 55 → **57**, `camiones_catalogo` 113 → **114** y `productos_catalogo` 146 → **147**. Total: 996 → **1000**.
+
+### Verificación
+- **Local:** `npx supabase db reset` OK. `npx supabase test db` → **Files=12, Tests=1000, Result: PASS** (0 `not ok`). `db lint --local --fail-on warning` → sin errores, exit 0. `db advisors --local` → «No issues found».
+- **Mutaciones ad hoc** (no versionadas, locales y en la transacción de cada test):
+  - **A.** `public.zz_sd_mut()` SECURITY DEFINER al inicio del archivo: `auth_base_rls` falla en #5 y #7; `camiones` en #11; `productos` en #16.
+  - **B.** `public.rls_auto_enable()` simulada (forma de staging): PASS en los tres.
+  - **C.** `privado.zz_sd_mut()` SECURITY DEFINER extra: `camiones` falla en #10 y #14; `productos` en #15 y #17.
+- **Staging** (`--linked`, ref verificado `rtsncntppghdynzhezzg`): `npx supabase test db --linked` → **Files=12, Tests=1000, All tests successful, Result: PASS** (0 `not ok`). `db lint --linked --fail-on warning` → sin errores, exit 0. `db advisors --linked` → «No issues found».
+- **Cleanup staging:**
+  - `productos` = 0, `movimientos_stock` = 0 y `operaciones` = 0;
+  - SECURITY DEFINER en `public`: sólo `rls_auto_enable()`, owner `postgres`, sin cambios;
+  - 0 funciones residuales de las mutaciones.
+
+### Archivos
+- `supabase/tests/auth_base_rls.test.sql`
+- `supabase/tests/camiones_catalogo.test.sql`
+- `supabase/tests/productos_catalogo.test.sql`
+- `docs/progress-log.md`
+
+### Riesgos / pendientes
+- La exención depende del nombre y la firma exactos. Si la plataforma renombrara o cambiara la función, las pruebas fallarían de forma cerrada (fail-closed) y habría que revisarla.
+- La mutación versionada vive en `auth_base_rls`. En `camiones` y `productos`, el auxiliar es una copia idéntica, validada por las mutaciones ad hoc A y C.
+- Toca la superficie «SECURITY DEFINER» (AGENTS.md §2.4), aunque sólo en tests: corresponde **security review** antes de la auditoría.
+- Producción: no tocada ni autorizada.
+
+---
 ## 27/10/2026 — Cierre de staging: Modelo por peso, Slice A — PASS
 
 **Entorno:** staging. **Código:** `main` = `bd82d6c4ac0ddab5f9a10f62b6920d9270dc0d82`, merge del **PR #25**. **Commit auditado del slice:** `c6b228f78d010acb05adffe07d4ef07518824a07`. **Rama de esta entrada:** `docs/cierre-staging-modelo-peso`, sólo documental, sin commit hasta la revisión humana.

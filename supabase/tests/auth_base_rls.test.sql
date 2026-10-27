@@ -8,7 +8,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(55);
+select plan(57);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -96,11 +96,65 @@ select is(
   0,
   'no existen políticas de escritura sobre empresas/perfiles');
 
+-- SECURITY DEFINER en public (esquema expuesto): la única admitida es la
+-- función de infraestructura public.rls_auto_enable() (O-4, ADR-001 §18.2),
+-- que existe sólo en el proyecto alojado y cuyos atributos (owner, ACL,
+-- search_path y event trigger) verifica hardening_adr001. Cualquier otra se
+-- reporta; la exención es por firma exacta (una sobrecarga no queda exenta).
+create function pg_temp.sd_publicas_no_autorizadas()
+returns text[] language sql stable as $$
+  select coalesce(array_agg(format('%I.%I(%s)', n.nspname, p.proname,
+                                   pg_get_function_identity_arguments(p.oid))
+                            order by p.proname, p.oid), '{}')
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public'
+     and p.prosecdef
+     and p.oid is distinct from to_regprocedure('public.rls_auto_enable()')::oid
+$$;
+
 select is(
-  (select count(*)::int from pg_proc
-    where pronamespace = 'public'::regnamespace and prosecdef),
-  0,
-  'no hay funciones SECURITY DEFINER en public');
+  pg_temp.sd_publicas_no_autorizadas(),
+  '{}'::text[],
+  'no hay funciones SECURITY DEFINER en public, salvo public.rls_auto_enable() donde exista (O-4)');
+
+-- Mutación fail-closed (revertida al final): con rls_auto_enable() presente
+-- (real en staging; simulada en local), una SECURITY DEFINER pública no
+-- autorizada y una sobrecarga de rls_auto_enable se reportan.
+create temp table mutacion_sd as
+  select to_regprocedure('public.rls_auto_enable()') is null as rls_simulada;
+
+do $$
+begin
+  if (select rls_simulada from mutacion_sd) then
+    create function public.rls_auto_enable() returns event_trigger
+      language plpgsql security definer set search_path = pg_catalog
+      as 'begin end';
+  end if;
+end $$;
+
+create function public.funcion_sd_no_autorizada() returns void
+  language plpgsql security definer set search_path = '' as 'begin end';
+create function public.rls_auto_enable(integer) returns void
+  language plpgsql security definer set search_path = '' as 'begin end';
+
+select ok(
+  'public.funcion_sd_no_autorizada()' = any (pg_temp.sd_publicas_no_autorizadas()),
+  'mutación: una función SECURITY DEFINER pública no autorizada se reporta');
+
+select is(
+  pg_temp.sd_publicas_no_autorizadas(),
+  array['public.funcion_sd_no_autorizada()', 'public.rls_auto_enable(integer)'],
+  'mutación: rls_auto_enable() se admite y una sobrecarga suya no queda exenta');
+
+drop function public.funcion_sd_no_autorizada();
+drop function public.rls_auto_enable(integer);
+do $$
+begin
+  if (select rls_simulada from mutacion_sd) then
+    drop function public.rls_auto_enable();
+  end if;
+end $$;
 
 select ok(
   not has_table_privilege('anon', 'public.empresas', 'select')
