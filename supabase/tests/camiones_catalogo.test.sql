@@ -10,7 +10,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(113);
+select plan(114);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -81,6 +81,23 @@ end $$;
 -- funciones nuevas: los helpers se invocan desde los roles simulados.
 grant execute on function pg_temp.como_usuario(uuid, jsonb) to public;
 grant execute on function pg_temp.como_anon() to public;
+
+-- SECURITY DEFINER en public (esquema expuesto): la única admitida es la
+-- función de infraestructura public.rls_auto_enable() (O-4, ADR-001 §18.2),
+-- que existe sólo en el proyecto alojado y cuyos atributos verifica
+-- hardening_adr001. Cualquier otra se reporta (exención por firma exacta; la
+-- mutación fail-closed está en auth_base_rls).
+create function pg_temp.sd_publicas_no_autorizadas()
+returns text[] language sql stable as $$
+  select coalesce(array_agg(format('%I.%I(%s)', n.nspname, p.proname,
+                                   pg_get_function_identity_arguments(p.oid))
+                            order by p.proname, p.oid), '{}')
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public'
+     and p.prosecdef
+     and p.oid is distinct from to_regprocedure('public.rls_auto_enable()')::oid
+$$;
 
 -- Firmas exactas (sin sobrecargas).
 create temp table firmas (firma text, expuesta boolean);
@@ -166,7 +183,7 @@ select is(
 select is(
   array(select p.oid::regprocedure::text from pg_proc p
          where p.prosecdef
-           and p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
+           and p.pronamespace = 'privado'::regnamespace
          order by 1),
   array['privado.actualizar_camion(uuid,text,text)',
         'privado.actualizar_cliente(uuid,text,text,text,text)',
@@ -181,7 +198,12 @@ select is(
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
-  'ninguna función de public es SECURITY DEFINER; sólo las implementaciones privadas (productos, camiones, clientes y stock) lo son');
+  'las implementaciones SECURITY DEFINER de negocio son exactamente las trece privadas (productos, camiones, clientes y stock)');
+
+select is(
+  pg_temp.sd_publicas_no_autorizadas(),
+  '{}'::text[],
+  'ninguna función de public es SECURITY DEFINER, salvo public.rls_auto_enable() donde exista (O-4)');
 
 select is(
   (select count(*)::int from firmas f
