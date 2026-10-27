@@ -1,4 +1,41 @@
 ---
+## 27/10/2026 — Cierre de staging: Modelo por peso, Slice A — PASS
+
+**Entorno:** staging. **Código:** `main` = `bd82d6c4ac0ddab5f9a10f62b6920d9270dc0d82`, merge del **PR #25**. **Commit auditado del slice:** `c6b228f78d010acb05adffe07d4ef07518824a07`. **Rama de esta entrada:** `docs/cierre-staging-modelo-peso`, sólo documental, sin commit hasta la revisión humana.
+
+La evidencia de staging corresponde a la validación informada por el humano. Esta tarea no ejecutó ningún comando contra staging ni producción y no cambia Blueprint, SQL, tests ni frontend. Esta entrada complementa la de Slice A (más abajo): sus menciones a «staging pendiente de autorización» quedan superadas **sólo en cuanto al estado de staging**.
+
+**Slice A — Modelo por peso: VALIDADO EN STAGING · Producción: NO AUTORIZADA · Slice B: pendiente.**
+
+### Migración
+- Estado previo: `productos` = 0, `movimientos_stock` = 0 y `operaciones` = 0. No había ninguna `forma_venta` del modelo anterior, así que la guarda D-R4 no tenía datos que bloquear y no hubo conversión.
+- El dry-run mostró **sólo** `20261027001542_modelo_peso_gramos.sql`, y esa migración quedó aplicada en staging.
+- Restricciones finales: `forma_venta` ∈ `unidad | peso`, con `lacteos ↔ unidad` y `fiambres ↔ peso`.
+
+### Seguridad
+- Topología D verificada: fachada `public` SECURITY INVOKER → implementación `privado` SECURITY DEFINER, con owner `propietario_rpc` y `search_path` vacío.
+- RLS, grants y `service_role` verificados: deny-by-default, con la única excepción vigente de `SELECT` sobre `productos`.
+
+### Pruebas
+- **pgTAP remoto: 996 assertions, 993 ok y 3 not ok.** Los 3 fallos son exactamente los falsos negativos de portabilidad ya conocidos de la validación de Etapa 2:
+  - `auth_base_rls` #5;
+  - `camiones_catalogo` #10;
+  - `productos_catalogo` #15.
+
+  La causa es que `public.rls_auto_enable()`, una función SECURITY DEFINER de la plataforma, existe en staging pero no figura en las listas cerradas de esas pruebas. No son defectos de Slice A.
+- `stock_peso_gramos.test.sql`: **PASS completo**.
+- `db lint` remoto: PASS. `db advisors` remoto: PASS.
+- **0 fallos nuevos atribuibles a Slice A.**
+
+### Cleanup
+- Estado final: `productos` = 0, `movimientos_stock` = 0 y `operaciones` = 0.
+
+### Pendientes
+- **Producción: NO autorizada.**
+- Pendiente técnico separado: `fix/pgtap-listas-definer-portables`, para que las tres pruebas toleren `public.rls_auto_enable()` sin debilitar las listas cerradas.
+- Pendiente funcional: **Slice B del modelo por peso** (resto del demo y del flujo operativo; claves `localStorage`), además de D-R1 en ventas y el redondeo de líneas `unidad`, que siguen sin decidir ni implementar.
+
+---
 ## 26/10/2026 — Modelo por peso, Slice A: base de datos, RPC de catálogo y compatibilidad de Productos (sólo local; sin commit)
 
 **Rama:** `feat/modelo-peso-gramos` desde `main` = `476f22741d650c98f03b5dc95269d91b430424cd`. Implementación autorizada por el humano (aprobación de esquema/seguridad otorgada). **Alcance inicial: sólo base de datos.** Sin demo, sin Jornada/Ventas/Rendición/Presupuestos, sin staging, sin producción. Sin commit hasta la revisión humana.
