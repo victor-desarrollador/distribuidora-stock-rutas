@@ -200,6 +200,12 @@ function escribirJornadas(
 export function crearJornadaPersistida(
   jornada: Jornada
 ): Jornada[] | null {
+  // B1: admite cualquier estado, así que una jornada `peso` no puede entrar
+  // por aquí antes de B2. Falla cerrado antes de leer o escribir.
+  if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
+    return null;
+  }
+
   return escribirJornadas((actuales) => {
     if (
       actuales.some((j) => j.id === jornada.id) ||
@@ -216,14 +222,30 @@ export function crearJornadaPersistida(
   });
 }
 
-/** Confirmación de salida sin React. null si se rechaza (sin escribir). */
+/**
+ * Confirmación de salida sin React: `preparacion` → `abierta`. Devuelve las
+ * jornadas guardadas o el error concreto; si se rechaza, no escribe.
+ */
+export type ResultadoConfirmacionSalida =
+  | { ok: true; jornadas: Jornada[] }
+  | { ok: false; error: string };
+
 export function confirmarSalidaPersistida(
   id: string
-): Jornada[] | null {
-  return escribirJornadas((actuales) => {
+): ResultadoConfirmacionSalida {
+  let error = "No se pudo confirmar la salida.";
+
+  const jornadas = escribirJornadas((actuales) => {
     const jornada = actuales.find((j) => j.id === id);
 
     if (!jornada || jornada.estado !== "preparacion") {
+      return null;
+    }
+
+    // B1: la salida de productos `peso` no está migrada (B2). La jornada se
+    // valida tal como está guardada, no con el snapshot del render.
+    if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
+      error = MENSAJE_PESO_NO_OPERABLE;
       return null;
     }
 
@@ -237,6 +259,8 @@ export function confirmarSalidaPersistida(
         : j
     );
   });
+
+  return jornadas ? { ok: true, jornadas } : { ok: false, error };
 }
 
 /**
@@ -397,8 +421,16 @@ export function useJornadas() {
     return aplicar(crearJornadaPersistida(jornada));
   }
 
-  function confirmarSalida(id: string): boolean {
-    return aplicar(confirmarSalidaPersistida(id));
+  // Como crearPreparacion: devuelve el error concreto o null si se guardó.
+  function confirmarSalida(id: string): string | null {
+    const resultado = confirmarSalidaPersistida(id);
+
+    if (resultado.ok) {
+      setJornadas(resultado.jornadas);
+      return null;
+    }
+
+    return resultado.error;
   }
 
   function cerrarJornada(

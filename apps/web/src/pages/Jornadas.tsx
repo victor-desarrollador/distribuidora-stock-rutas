@@ -329,8 +329,10 @@ export default function Jornadas() {
       setError("El camión ya no está disponible.");
       return;
     }
-    if (!confirmarSalida(jornada.id)) {
-      setError("No se pudo confirmar la salida.");
+    // B1: la frontera persistida rechaza `peso` aunque la UI lo bloquee.
+    const errorSalida = confirmarSalida(jornada.id);
+    if (errorSalida) {
+      setError(errorSalida);
       return;
     }
     setMensaje(
@@ -589,12 +591,14 @@ export default function Jornadas() {
           const camion = camiones.find(
             (c) => c.id === jornada.camionId
           );
-          // B1: sin valorización si la jornada tiene ítems `peso` (D-R1, B3).
-          const total = jornada.items.every(
-            (item) => item.unidadMedida === "unidad"
-          )
-            ? sumar_importes(jornada.items.map(valorItem))
-            : null;
+          // B1: una jornada con ítems `peso` no se valoriza (D-R1, B3) ni
+          // puede salir (B2).
+          const tienePeso = jornada.items.some(
+            (item) => item.unidadMedida !== "unidad"
+          );
+          const total = tienePeso
+            ? null
+            : sumar_importes(jornada.items.map(valorItem));
           return (
             <article
               key={jornada.id}
@@ -673,11 +677,16 @@ export default function Jornadas() {
                     {total === null ? "—" : moneda(total)}
                   </p>
                 </div>
+                {jornada.estado === "preparacion" && tienePeso && (
+                  <p className="text-sm text-amber-700">
+                    {MENSAJE_PESO_NO_OPERABLE}
+                  </p>
+                )}
                 {jornada.estado === "preparacion" && (
                   <button
                     type="button"
                     onClick={() => iniciarReparto(jornada)}
-                    disabled={estadoOperacion.bloqueado}
+                    disabled={estadoOperacion.bloqueado || tienePeso}
                     className="min-h-12 rounded-lg bg-green-600 px-5 font-semibold text-white hover:bg-green-700"
                   >
                     Confirmar salida

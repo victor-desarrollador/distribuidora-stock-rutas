@@ -1679,7 +1679,10 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
     });
 
     it("confirmarSalida: falla, sin setItem y con el string crudo intacto", () => {
-      expect(confirmarSalidaPersistida("a")).toBeNull();
+      expect(confirmarSalidaPersistida("a")).toEqual({
+        ok: false,
+        error: "No se pudo confirmar la salida.",
+      });
       sinEscribir(crudo);
     });
 
@@ -1702,14 +1705,17 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
 
   it("B. confirmarSalida con storage válido conserva el comportamiento", () => {
     mockLS._store.set(CLAVE, JSON.stringify([jornada("a", 1), jornada("b", 2)]));
-    const r = confirmarSalidaPersistida("a")!;
+    const resultado = confirmarSalidaPersistida("a");
+    if (!resultado.ok) throw new Error(resultado.error);
+    const r = resultado.jornadas;
     expect(r.find((j) => j.id === "a")?.estado).toBe("abierta");
     expect(r.find((j) => j.id === "a")?.fechaSalida).not.toBeNull();
     expect(r.find((j) => j.id === "b")?.estado).toBe("preparacion");
     expect(leerJornadas()).toEqual(r);
     // No se puede confirmar dos veces ni una inexistente.
-    expect(confirmarSalidaPersistida("a")).toBeNull();
-    expect(confirmarSalidaPersistida("zzz")).toBeNull();
+    const rechazo = { ok: false, error: "No se pudo confirmar la salida." };
+    expect(confirmarSalidaPersistida("a")).toEqual(rechazo);
+    expect(confirmarSalidaPersistida("zzz")).toEqual(rechazo);
   });
 
   it("C. cerrarJornada con storage válido conserva el comportamiento", () => {
@@ -1748,6 +1754,76 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
     mockLS.setItem.mockClear();
     expect(crearJornadaPersistida(jornada("a", 1) as never)).toBeNull();
     sinEscribir("{roto");
+  });
+
+  // H-1 (auditoría de 8ff5bef): ninguna jornada con ítems `peso` entra ni
+  // avanza a un estado operativo antes de B2.
+  const itemPeso = {
+    productoId: 4,
+    nombreProducto: "Jamón cocido",
+    unidadMedida: "peso",
+    cantidad: 18000,
+    precioReferencia: 12500,
+  };
+  const conPeso = (id: string, camionId: number, estado = "preparacion") => {
+    const j = jornada(id, camionId, estado);
+    return { ...j, items: [...j.items, itemPeso] };
+  };
+
+  it("H-1 crearJornada: una jornada con ítem peso devuelve null sin leer ni escribir storage", () => {
+    mockLS.getItem.mockClear();
+    mockLS.setItem.mockClear();
+    expect(crearJornadaPersistida(conPeso("p", 5) as never)).toBeNull();
+    expect(crearJornadaPersistida(conPeso("p", 5, "abierta") as never)).toBeNull();
+    expect(mockLS.getItem).not.toHaveBeenCalled();
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS._store.has(CLAVE)).toBe(false);
+  });
+
+  it("H-1 crearJornada: con historial válido, una jornada peso no altera el raw", () => {
+    const crudo = JSON.stringify([jornada("a", 1)]);
+    mockLS._store.set(CLAVE, crudo);
+    mockLS.setItem.mockClear();
+    expect(crearJornadaPersistida(conPeso("p", 5) as never)).toBeNull();
+    sinEscribir(crudo);
+  });
+
+  it("H-1 confirmarSalida: una jornada v5 válida en preparación con ítem peso se rechaza con el mensaje B1, sin escribir", () => {
+    const crudo = JSON.stringify([conPeso("p", 1), jornada("b", 2)]);
+    mockLS._store.set(CLAVE, crudo);
+    // Estructuralmente válida en v5: no es un caso de storage corrupto.
+    expect(leerJornadas().map((j) => j.id)).toEqual(["p", "b"]);
+    mockLS.setItem.mockClear();
+
+    expect(confirmarSalidaPersistida("p")).toEqual({
+      ok: false,
+      error: MENSAJE_PESO_NO_OPERABLE,
+    });
+
+    sinEscribir(crudo);
+    const guardada = leerJornadas().find((j) => j.id === "p");
+    expect(guardada?.estado).toBe("preparacion");
+    expect(guardada?.fechaSalida).toBeNull();
+  });
+
+  it("H-1 confirmarSalida: el rechazo peso no bloquea otra jornada unidad", () => {
+    mockLS._store.set(CLAVE, JSON.stringify([conPeso("p", 1), jornada("b", 2)]));
+    expect(confirmarSalidaPersistida("p").ok).toBe(false);
+    expect(confirmarSalidaPersistida("b").ok).toBe(true);
+    const guardadas = leerJornadas();
+    expect(guardadas.find((j) => j.id === "b")?.estado).toBe("abierta");
+    expect(guardadas.find((j) => j.id === "p")?.estado).toBe("preparacion");
+  });
+
+  it("H-1 confirmarSalida: una jornada peso ya abierta no avanza (rechazo genérico)", () => {
+    const crudo = JSON.stringify([conPeso("p", 1, "abierta")]);
+    mockLS._store.set(CLAVE, crudo);
+    mockLS.setItem.mockClear();
+    expect(confirmarSalidaPersistida("p")).toEqual({
+      ok: false,
+      error: "No se pudo confirmar la salida.",
+    });
+    sinEscribir(crudo);
   });
 
   it("la clave de jornadas es v5", () => {
