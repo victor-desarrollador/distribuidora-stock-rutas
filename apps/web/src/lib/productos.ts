@@ -8,29 +8,47 @@
 //
 // Sin stock: el stock sólo sale de movimientos_stock (Blueprint §3.1, §7.4).
 //
+// Forma de venta (ADR-005): `unidad` (lácteos; unidades enteras, precio
+// unitario) o `peso` (fiambres; gramos enteros, precio por kg). Este contrato
+// es propio del catálogo de Supabase: el prototipo demo sigue con su
+// `UnidadMedida` pieza/media pieza hasta su propia migración. Una fila `pieza`
+// es un dato incompatible: no se convierte a `peso` (D-R4).
+//
 // Errores (P16-productos): las RPC responden un `message` estable; aquí se
 // traduce a un texto en español. Nunca se muestra el detalle de SQL ni de
 // PostgREST: cualquier error desconocido da un mensaje genérico.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Producto, UnidadMedida } from "../data/mockProductos";
+import type { Producto } from "../data/mockProductos";
 import { es_cantidad_valida } from "../domain/cantidades";
 import { precio_valido } from "../domain/precios";
-import { validar_combinacion_categoria_unidad } from "../domain/productos";
 import { obtenerClienteSupabase } from "./supabase";
 
 export type CategoriaProducto = Producto["categoria"];
+export type FormaVenta = "unidad" | "peso";
+
+// Lácteos ↔ unidad, Fiambres ↔ peso; no hay otra combinación válida.
+const FORMA_VENTA_POR_CATEGORIA: Record<CategoriaProducto, FormaVenta> = {
+  Lácteos: "unidad",
+  Fiambres: "peso",
+};
+
+export function formaVentaParaCategoria(
+  categoria: CategoriaProducto
+): FormaVenta {
+  return FORMA_VENTA_POR_CATEGORIA[categoria];
+}
 
 export interface ProductoCatalogo {
   id: string;
   codigo: string | null;
   nombre: string;
   categoria: CategoriaProducto;
-  unidadMedida: UnidadMedida;
-  // unidad: precio unitario. pieza: precio de pieza completa (ADR-003).
+  formaVenta: FormaVenta;
+  // unidad: precio unitario. peso: precio por kg (ADR-005 §2.1).
   precio: number;
-  // En unidad mínima: unidades enteras o medias piezas (Blueprint §7.1).
+  // En unidad mínima: unidades enteras o gramos enteros (ADR-005 §2.2).
   stockMinimo: number;
   activo: boolean;
 }
@@ -39,12 +57,12 @@ export interface DatosAltaProducto {
   codigo: string;
   nombre: string;
   categoria: CategoriaProducto;
-  unidadMedida: UnidadMedida;
+  formaVenta: FormaVenta;
   precio: number;
   stockMinimo: number;
 }
 
-// Categoría y unidad no se editan (DE-6): cambiarlas reinterpretaría las
+// Categoría y forma de venta no se editan (DE-6): cambiarlas reinterpretaría las
 // cantidades en unidad mínima.
 export interface DatosEdicionProducto {
   codigo: string;
@@ -101,7 +119,7 @@ const MENSAJES_ERROR: Record<string, string> = {
   producto_categoria_invalida: "La categoría no es válida.",
   producto_forma_venta_invalida: "La forma de venta no es válida.",
   producto_combinacion_invalida:
-    "Los lácteos se venden por unidad y los fiambres por pieza.",
+    "Los lácteos se venden por unidad y los fiambres por peso.",
   producto_precio_invalido:
     "El precio debe ser mayor o igual a 0 y tener como máximo 2 decimales.",
   producto_stock_minimo_invalido:
@@ -142,8 +160,9 @@ export function filaAProducto(fila: unknown): ProductoCatalogo | null {
     typeof f.categoria === "string"
       ? CATEGORIA_DESDE_BASE[f.categoria]
       : undefined;
-  const unidadMedida =
-    f.forma_venta === "unidad" || f.forma_venta === "pieza"
+  // Sólo `unidad` y `peso`. `pieza` u otro valor invalida la fila.
+  const formaVenta =
+    f.forma_venta === "unidad" || f.forma_venta === "peso"
       ? f.forma_venta
       : undefined;
 
@@ -153,8 +172,8 @@ export function filaAProducto(fila: unknown): ProductoCatalogo | null {
     !(f.codigo === null || typeof f.codigo === "string") ||
     typeof f.nombre !== "string" ||
     categoria === undefined ||
-    unidadMedida === undefined ||
-    !validar_combinacion_categoria_unidad(categoria, unidadMedida).valido ||
+    formaVenta === undefined ||
+    formaVentaParaCategoria(categoria) !== formaVenta ||
     typeof f.precio !== "number" ||
     !precio_valido(f.precio) ||
     typeof f.stock_minimo !== "number" ||
@@ -169,7 +188,7 @@ export function filaAProducto(fila: unknown): ProductoCatalogo | null {
     codigo: f.codigo,
     nombre: f.nombre,
     categoria,
-    unidadMedida,
+    formaVenta,
     precio: f.precio,
     stockMinimo: f.stock_minimo,
     activo: f.activo,
@@ -224,7 +243,7 @@ export function crearPuertoProductos(
           p_codigo: datos.codigo,
           p_nombre: datos.nombre,
           p_categoria: CATEGORIA_A_BASE[datos.categoria],
-          p_forma_venta: datos.unidadMedida,
+          p_forma_venta: datos.formaVenta,
           p_precio: datos.precio,
           p_stock_minimo: datos.stockMinimo,
         });

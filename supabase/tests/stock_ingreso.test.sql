@@ -48,7 +48,7 @@ insert into public.ubicaciones (id, empresa_id, tipo) values
 insert into public.productos (id, empresa_id, codigo, nombre, categoria, forma_venta, precio, activo, creado_por) values
   ('aaaaaaaa-0000-4000-8000-0000000000f1', 'aaaaaaaa-0000-4000-8000-000000000000', 'A-1', 'Leche A', 'lacteos', 'unidad', 100, true,
    'aaaaaaaa-0000-4000-8000-000000000001'),
-  ('aaaaaaaa-0000-4000-8000-0000000000f2', 'aaaaaaaa-0000-4000-8000-000000000000', 'A-2', 'Jamón A', 'fiambres', 'pieza', 2000, true,
+  ('aaaaaaaa-0000-4000-8000-0000000000f2', 'aaaaaaaa-0000-4000-8000-000000000000', 'A-2', 'Jamón A', 'fiambres', 'peso', 2000, true,
    'aaaaaaaa-0000-4000-8000-000000000001'),
   ('aaaaaaaa-0000-4000-8000-0000000000f3', 'aaaaaaaa-0000-4000-8000-000000000000', 'A-3', 'Inactivo A', 'lacteos', 'unidad', 1, false,
    'aaaaaaaa-0000-4000-8000-000000000001'),

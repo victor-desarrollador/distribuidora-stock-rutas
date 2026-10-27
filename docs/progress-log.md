@@ -1,4 +1,58 @@
 ---
+## 26/10/2026 — Modelo por peso, Slice A: base de datos, RPC de catálogo y compatibilidad de Productos (sólo local; sin commit)
+
+**Rama:** `feat/modelo-peso-gramos` desde `main` = `476f22741d650c98f03b5dc95269d91b430424cd`. Implementación autorizada por el humano (aprobación de esquema/seguridad otorgada). **Alcance inicial: sólo base de datos.** Sin demo, sin Jornada/Ventas/Rendición/Presupuestos, sin staging, sin producción. Sin commit hasta la revisión humana.
+
+**Ampliación autorizada (decisión humana, «autorización de desbloqueo»):** no mergear Slice A con Playwright rojo. Se adapta **sólo el consumidor frontend inmediato del catálogo** (pantalla Productos) al contrato `unidad | peso`. Esto **no** es Slice B.
+
+- **Frontend Productos: adaptado.**
+- **Resto del demo y del flujo operativo: pendiente** (Slice B): Autoventa, Jornadas, Movimientos, Retornos, Rendición, claves `localStorage` y `UnidadMedida`/`domain/productos.ts` del prototipo siguen en pieza/media pieza.
+
+### Qué se hizo
+- **Migración nueva `supabase/migrations/20261027001542_modelo_peso_gramos.sql`** (creada con `npx supabase migration new`; no se editaron migraciones históricas):
+  - **Guarda fail-closed D-R4:** toma `ACCESS EXCLUSIVE` sobre `productos` y, si existe algún producto que no sea `unidad` (antes sólo podía ser `pieza`), aborta con `modelo_peso_gramos: N producto(s) del modelo pieza/media pieza y M movimiento(s) asociados` y un hint que cita D-R4. No hay `UPDATE`, conversión, borrado ni normalización.
+  - `productos_forma_venta_valida` pasa a `unidad | peso` y `productos_combinacion_valida` a `lacteos ↔ unidad`, `fiambres ↔ peso`. Se conservan los nombres de las restricciones, así que el mapeo de errores no cambia.
+  - `privado.crear_producto` se redefine con `CREATE OR REPLACE`, con la misma firma, owner y ACL (O-3: `SET ROLE propietario_rpc` con `CREATE` temporal sobre `privado`, revocado al final). La fachada `public.crear_producto` no cambia; sólo recibe un `COMMENT`.
+  - Comentarios: `productos.forma_venta`, `precio` (unitario o por kg), `stock_minimo` (unidades o gramos), `movimientos_stock.cantidad` (unidades o gramos según la `forma_venta`) y la vista `stock_actual`.
+  - **Verificación fail-closed final:** restricciones validadas y sin `pieza`; tipos `numeric(14,2)`/`integer`/`integer`; `crear_producto` `SECURITY DEFINER`, owner `propietario_rpc`, `search_path=''`, ACL exacta y sin sobrecargas; sin `CREATE` residual; `categoria`/`forma_venta` no actualizables; P11 (`service_role` sólo con `SELECT` sobre `productos`); RLS activa y sin `FORCE`.
+- **Sin cambios** en tipos (`precio numeric(14,2)`, `stock_minimo integer`, `movimientos_stock.cantidad integer`), en las RPC de stock (`registrar_ingreso`, `mover_a_cuarentena`, `registrar_merma`, con `p_cantidad integer`), en `actualizar_producto`/`cambiar_estado_producto`, ni en grants, RLS, concurrencia (READ COMMITTED + advisory lock + fallo cerrado PT500 con RR/SERIALIZABLE) o idempotencia. La base recibe siempre el entero canónico; la conversión kg → g es de la UI (Slice B).
+- `supabase/seed.sql` (sólo local): los dos fiambres del seed pasan a `peso`, con precio por kg y stock mínimo nuevo en gramos (5000 y 3000). Son fixtures nuevos, no una conversión.
+- **pgTAP:**
+  - `productos_catalogo` 125 → **146**: combinaciones válidas e inválidas (`lacteos+peso`, `fiambres+unidad`, `pieza`, `media_pieza`, `kg`, también por la implementación privada y por la tabla como owner); precio por kg (0, 2 decimales, más de 2 y negativo); stock mínimo en gramos (entero, negativo, fracción `1250.5` y `1,250` rechazados); inmutabilidad `unidad → peso` y `peso → unidad`; definición exacta de las restricciones; comentarios.
+  - `stock_ingreso`: el fixture fiambre pasa a `peso`, con los mismos 119 casos.
+  - **Nuevo `stock_peso_gramos` (33):** ledger entero sin columnas numeric, float, kg ni unidad; firmas de stock sin cambios; unidad `7` = 7 u; peso: ingreso 1250 → cuarentena 250 → depósito 1000 / cuarentena 250 → merma 300 → 700 → merma 701 y cuarentena 701 rechazadas (1 g de más) → merma 700 → 0; idempotencia (1 g distinto es conflicto); `1.25` y `1250.5` rechazados (22P02); 0 y negativos; vendedor, otra empresa y aislamiento de lectura.
+- **Arnés D-R4 versionado `supabase/scripts/verificar_legado_pieza.sh`** (sólo local: `db reset --version 20261025033454 --no-seed` + `docker exec psql` por socket, sin credenciales). Fase A: con un producto `pieza` (precio 12500.00, stock mínimo 9) y un ingreso de 9 medias piezas, la migración falla con el error de D-R4 y la huella de filas, restricciones, comentarios y `crear_producto` queda idéntica. Fase B: con sólo productos `unidad`, la migración se aplica y no toca sus datos. Al final restaura la base completa.
+- **Compatibilidad de Productos (frontend, ampliación autorizada):**
+  - `apps/web/src/domain/peso.ts` (nuevo, puro): `kg_a_gramos(texto)` parsea el texto con coma decimal y hasta 3 decimales, y arma los gramos con BigInt: `"1,250"` → 1250, `"28,680"` → 28680. Rechaza más de 3 decimales, el punto (ambiguo con miles en es-AR), los negativos, texto y vacío, y no redondea ni trunca. `gramos_a_kg(g)` arma el texto con 3 decimales fijos cortando la cadena: 1250 → `"1,250"`. Ninguna de las dos usa punto flotante.
+  - `apps/web/src/lib/productos.ts`: contrato propio del catálogo `FormaVenta = "unidad" | "peso"` y `formaVentaParaCategoria` (Lácteos ↔ unidad, Fiambres ↔ peso); el campo pasa de `unidadMedida` a `formaVenta`. `filaAProducto` acepta `unidad`/`peso` con su combinación, y una fila `pieza`, `media_pieza`, nula, desconocida o con combinación cruzada sigue invalidando la lectura completa (fail-closed). Una fila `pieza` nunca se convierte a `peso` (D-R4). El mensaje de `producto_combinacion_invalida` dice «por peso». **No** se tocaron `UnidadMedida` (`data/mockProductos.ts`) ni `domain/productos.ts`, que también usa el demo.
+  - `apps/web/src/pages/Productos.tsx`: la forma de venta se muestra derivada de la categoría, en un campo de sólo lectura, sin opción de cambiarla. El precio se rotula «por unidad» o «por kg» en el formulario y en la tabla. El stock mínimo es en unidades enteras para `unidad` y en kg para `peso` (texto con coma y hasta 3 decimales, enviado a la RPC en gramos exactos; en edición se precarga en kg). La tabla muestra `N,NNN kg`. Se quitaron el precio y el texto de media pieza. La edición no envía categoría ni forma de venta.
+  - Pruebas: nuevo `domain/peso.test.ts` (40); `lib/productos.test.ts` actualizado (fiambre `peso`; rechazo de `pieza`, `media_pieza`, nulo y combinaciones cruzadas; catálogo mixto aceptado). `tests/productos-catalogo.spec.ts` pasa de 15 a 19: el catálogo muestra fiambres por peso (`5,000 kg`, «por kg») y no muestra `pieza`; se crea un fiambre (la RPC recibe `p_forma_venta: "peso"` y `p_stock_minimo: 2500` por `2,5` kg); se rechazan `2,5001`, `0,0001`, `2.500` y `-1` sin llamar a la RPC; la edición de un fiambre no permite cambiar categoría ni forma de venta, precarga `28,680` y envía 1250 g por `1,25`; por HTTP, `pieza` → `producto_forma_venta_invalida`, las combinaciones cruzadas → `producto_combinacion_invalida` y el alta `peso` guarda 1250 g. Se conservan todos los casos de permisos y de la Data API.
+  - D-R1 no se implementa (no se calculan importes) y no se decide el redondeo de líneas `unidad`.
+- Documentación (notas de estado, sin cambio de reglas): `BLUEPRINT.md` 2.2 → 2.3 (§7.1 y §8, fila de historial), `AGENTS.md` §10 y `docs/architecture/analisis-base-datos.md` 0.3 → 0.4 (§0 y fila `productos`).
+
+### Decisiones respetadas
+- **D-R1:** no se implementa; el catálogo guarda el precio, no importes de línea. No existen ventas ni presupuestos en SQL. El redondeo de líneas `unidad` sigue pendiente.
+- **D-R2/D-R3:** sin impacto en este slice: las RPC de stock registran el entero recibido, sin tolerancia ni normalización.
+- **D-R4:** la migración falla cerrada ante datos `pieza` y nunca los reinterpreta, como prueban el arnés y su mutación.
+
+### Verificación (local)
+- `npx supabase db reset --local`: 11 migraciones y seed, sin errores.
+- `npx supabase test db --local`: **12 archivos, 996 planes / 996 assertions, 996 ok, 0 not ok** (antes 942; +21 en productos y +33 en el archivo nuevo).
+- Arnés D-R4: **8/8 PASS**. **Mutación:** con la guarda desactivada y un `UPDATE … set forma_venta = 'peso'`, el arnés da 5 FAIL (detecta `peso/12500.00/9`, la reinterpretación prohibida); se restauró el archivo byte a byte.
+- Concurrencia (arnés ad hoc no versionado, dos conexiones reales sobre el seed): C1, dos mermas de 600 g sobre 1000 g del mismo producto `peso`: S2 espera el lock, ve 400 g y recibe `stock_insuficiente`; C3, producto distinto: sin espera (7 ms); sin saldos negativos. Los dos archivos pgTAP de aislamiento RR/SERIALIZABLE pasan.
+- `npx supabase db lint --local --fail-on warning`: sin errores. `npx supabase db advisors --local`: seguridad 0; 7 avisos INFO de performance preexistentes (FKs sin índice e índice sin uso; la migración no agrega FKs ni índices).
+- Primera corrida, antes de la ampliación: Playwright 70/76, con 6 fallas en `productos-catalogo.spec.ts`, porque `filaAProducto` descartaba todo el catálogo ante filas `peso`. Línea base en `main`: 15/15. Eso motivó la ampliación autorizada.
+- **Gate final, después de adaptar Productos:** arnés D-R4 8/8; `db reset` y pgTAP **996/996** (12 archivos, 0 not ok); `db lint` sin errores; advisors de seguridad 0 y sólo los 7 INFO de performance preexistentes; concurrencia ad hoc repetida (C1: S2 espera el lock ~1,5 s y recibe `stock_insuficiente`; C3: 7 ms; sin negativos); `typecheck` y `lint` exit 0; Vitest **853/853** (26 archivos); `build` OK; **Playwright 80/80**.
+
+### Riesgos y pendientes
+- **Resuelto por la ampliación autorizada:** la pantalla Productos y su spec E2E ya son compatibles con el SQL nuevo. El resto del demo sigue pendiente (Slice B).
+- La entrada de kg acepta sólo coma decimal (convención es-AR con la que también se muestran los kg). El punto se rechaza con un mensaje explícito. El precio conserva su campo numérico actual.
+- Staging: no se aplicó (`db push` no autorizado). Si staging tuviera productos `pieza`, la migración fallará cerrada por diseño (D-R4): hace falta un reinicio limpio autorizado.
+- Producción: **NO autorizada**.
+- El arnés de concurrencia sigue sin versionar (riesgo MEDIUM ya registrado); el CI no ejecuta Supabase.
+- Corresponde **security review** (Supabase, RLS, RPC `SECURITY DEFINER`, grants, `movimientos_stock`) y auditoría independiente del hash, cuando exista.
+
+---
 ## 26/10/2026 — Documental: cierre humano de ADR-005 D-R1–D-R4 (sin implementación; sin commit)
 
 **Rama:** `docs/cerrar-decisiones-peso` desde `main` = `ce4e8700b166b524e2da5eb290066f96e2b4ef8b`. **Tarea sólo documental:** sin código, SQL, migraciones, pruebas, frontend, Supabase, staging ni producción. Sin commit hasta la revisión humana.

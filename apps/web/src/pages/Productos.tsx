@@ -9,19 +9,17 @@ import {
   Search,
 } from "lucide-react";
 
-import { type UnidadMedida } from "../data/mockProductos";
 import { useCatalogoProductos } from "../hooks/useCatalogoProductos";
 import {
   STOCK_MINIMO_MAXIMO,
+  formaVentaParaCategoria,
   type CategoriaProducto,
+  type FormaVenta,
   type ProductoCatalogo,
 } from "../lib/productos";
-import { es_cantidad_valida, medias_a_texto } from "../domain/cantidades";
-import {
-  unidad_para_categoria,
-  validar_combinacion_categoria_unidad,
-} from "../domain/productos";
-import { precio_media_pieza, validar_precio } from "../domain/precios";
+import { es_cantidad_valida } from "../domain/cantidades";
+import { gramos_a_kg, kg_a_gramos } from "../domain/peso";
+import { validar_precio } from "../domain/precios";
 
 // Formato de moneda argentina.
 const formatoMoneda = (valor: number) =>
@@ -31,21 +29,18 @@ const formatoMoneda = (valor: number) =>
     maximumFractionDigits: 2,
   }).format(valor);
 
-// Vista previa de la media derivada mientras se tipea: un precio todavía
-// inválido (p. ej. 10.001) no debe romper el render; se muestra vacío.
-function vistaPreviaMedia(precioTexto: string): string {
-  try {
-    return String(precio_media_pieza(Number(precioTexto) || 0));
-  } catch {
-    return "";
-  }
+// Precio unitario (unidad) o por kg (peso), ADR-005 §2.1.
+function textoPrecio(producto: ProductoCatalogo): string {
+  return `${formatoMoneda(producto.precio)} ${
+    producto.formaVenta === "peso" ? "por kg" : "por unidad"
+  }`;
 }
 
-// Stock mínimo en unidad mínima (Blueprint §7.1): unidades enteras o medias
-// piezas.
+// La base guarda el stock mínimo en unidad mínima: unidades enteras o gramos
+// enteros. Los gramos se presentan en kg con 3 decimales fijos (ADR-005 §2.1).
 function textoStockMinimo(producto: ProductoCatalogo): string {
-  return producto.unidadMedida === "pieza"
-    ? medias_a_texto(producto.stockMinimo)
+  return producto.formaVenta === "peso"
+    ? `${gramos_a_kg(producto.stockMinimo)} kg`
     : `${producto.stockMinimo} un.`;
 }
 
@@ -53,8 +48,9 @@ type FormularioProducto = {
   codigo: string;
   nombre: string;
   categoria: CategoriaProducto;
-  unidadMedida: UnidadMedida;
+  formaVenta: FormaVenta;
   precio: string;
+  // Unidades enteras (unidad) o kg con hasta 3 decimales (peso).
   stockMinimo: string;
 };
 
@@ -63,7 +59,7 @@ function formularioVacio(): FormularioProducto {
     codigo: "",
     nombre: "",
     categoria: "Lácteos",
-    unidadMedida: "unidad",
+    formaVenta: "unidad",
     precio: "",
     stockMinimo: "",
   };
@@ -79,15 +75,14 @@ function validarFormulario(formulario: FormularioProducto): ValidacionFormulario
     return { ok: false, error: "Ingresá el nombre del producto." };
   }
 
-  const combinacion = validar_combinacion_categoria_unidad(
-    formulario.categoria,
-    formulario.unidadMedida
-  );
-  if (!combinacion.valido) {
-    return { ok: false, error: combinacion.mensaje ?? "Combinación inválida." };
+  if (formaVentaParaCategoria(formulario.categoria) !== formulario.formaVenta) {
+    return {
+      ok: false,
+      error: "Los lácteos se venden por unidad y los fiambres por peso.",
+    };
   }
 
-  // ADR-003: como máximo 2 decimales; nunca se redondea ni se trunca.
+  // Como máximo 2 decimales; nunca se redondea ni se trunca (Blueprint §7.1).
   const precio = Number(formulario.precio.trim());
   if (formulario.precio.trim() === "") {
     return { ok: false, error: "Ingresá el precio." };
@@ -99,6 +94,19 @@ function validarFormulario(formulario: FormularioProducto): ValidacionFormulario
       ok: false,
       error: error instanceof Error ? error.message : "Precio inválido.",
     };
+  }
+
+  if (formulario.formaVenta === "peso") {
+    // kg → gramos exactos, sin punto flotante (ADR-005 §2.2.5–§2.2.6).
+    const gramos = kg_a_gramos(formulario.stockMinimo);
+    if (gramos === null || gramos > STOCK_MINIMO_MAXIMO) {
+      return {
+        ok: false,
+        error:
+          "El stock mínimo debe estar en kg, ser mayor o igual a 0 y tener como máximo 3 decimales, con coma decimal (ej: 2,500).",
+      };
+    }
+    return { ok: true, precio, stockMinimo: gramos };
   }
 
   const stockMinimo = Number(formulario.stockMinimo.trim());
@@ -173,9 +181,12 @@ export default function Productos() {
       codigo: producto.codigo ?? "",
       nombre: producto.nombre,
       categoria: producto.categoria,
-      unidadMedida: producto.unidadMedida,
+      formaVenta: producto.formaVenta,
       precio: String(producto.precio),
-      stockMinimo: String(producto.stockMinimo),
+      stockMinimo:
+        producto.formaVenta === "peso"
+          ? gramos_a_kg(producto.stockMinimo)
+          : String(producto.stockMinimo),
     });
 
     setMensaje("");
@@ -203,7 +214,7 @@ export default function Productos() {
 
     const resultado =
       productoEditando !== null
-        ? // Categoría y unidad no se envían: no se editan (DE-6).
+        ? // Categoría y forma de venta no se envían: no se editan (DE-6).
           await actualizar(productoEditando.id, {
             codigo: formulario.codigo,
             nombre: formulario.nombre,
@@ -214,7 +225,7 @@ export default function Productos() {
             codigo: formulario.codigo,
             nombre: formulario.nombre,
             categoria: formulario.categoria,
-            unidadMedida: formulario.unidadMedida,
+            formaVenta: formulario.formaVenta,
             precio: validacion.precio,
             stockMinimo: validacion.stockMinimo,
           });
@@ -384,10 +395,12 @@ export default function Productos() {
                   setFormulario({
                     ...formulario,
                     categoria,
-                    // La unidad se deriva de la categoría: Lácteos ->
-                    // unidad; Fiambres -> pieza. Nunca queda un estado
-                    // intermedio inválido.
-                    unidadMedida: unidad_para_categoria(categoria),
+                    // La forma de venta se deriva de la categoría: Lácteos
+                    // -> unidad; Fiambres -> peso. Nunca queda un estado
+                    // intermedio inválido. El stock mínimo cambia de unidad,
+                    // así que se vacía.
+                    formaVenta: formaVentaParaCategoria(categoria),
+                    stockMinimo: "",
                   });
                 }}
                 className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100 disabled:text-slate-500"
@@ -404,38 +417,33 @@ export default function Productos() {
               )}
             </label>
 
-            {/* Unidad de medida: derivada de la categoría */}
+            {/* Forma de venta: derivada de la categoría, nunca editable */}
             <label className="space-y-1 text-sm font-medium">
-              <span>Unidad de medida</span>
+              <span>Forma de venta</span>
 
-              <select
-                value={formulario.unidadMedida}
-                onChange={() => {
-                  // La unidad siempre es la derivada de la categoría;
-                  // no hay otra opción válida que elegir.
-                }}
+              <input
+                readOnly
+                value={
+                  formulario.formaVenta === "peso"
+                    ? "Por peso (kg)"
+                    : "Por unidad"
+                }
                 className="w-full rounded-lg border border-slate-300 p-3 bg-slate-100 text-slate-500"
-              >
-                <option value={formulario.unidadMedida}>
-                  {formulario.unidadMedida === "unidad"
-                    ? "Unidad"
-                    : "Pieza"}
-                </option>
-              </select>
+              />
 
               <p className="text-xs font-normal text-slate-500">
-                La unidad se determina por la categoría: Lácteos se
-                controlan por unidad entera y fiambres por pieza. No
-                se elige manualmente.
+                Se determina por la categoría: lácteos por unidad entera y
+                fiambres por peso. No se elige manualmente ni cambia
+                después del alta.
               </p>
             </label>
 
             {/* Precio */}
             <label className="space-y-1 text-sm font-medium">
               <span>
-                {formulario.unidadMedida === "pieza"
-                  ? "Precio de pieza completa ($)"
-                  : "Precio de venta ($)"}
+                {formulario.formaVenta === "peso"
+                  ? "Precio por kg ($)"
+                  : "Precio por unidad ($)"}
               </span>
 
               <input
@@ -454,50 +462,50 @@ export default function Productos() {
               />
             </label>
 
-            {/* Precio de media pieza: derivado, solo lectura para fiambres */}
-            {formulario.unidadMedida === "pieza" && (
+            {/* Stock mínimo: unidades enteras o kg (se envía en gramos) */}
+            {formulario.formaVenta === "peso" ? (
               <label className="space-y-1 text-sm font-medium">
-                <span>Precio de media pieza (derivado, $)</span>
+                <span>Stock mínimo (kg)</span>
 
                 <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={vistaPreviaMedia(formulario.precio)}
-                  readOnly
-                  className="w-full rounded-lg border border-slate-300 p-3 bg-slate-50 text-slate-700"
+                  required
+                  type="text"
+                  inputMode="decimal"
+                  value={formulario.stockMinimo}
+                  onChange={(e) =>
+                    setFormulario({
+                      ...formulario,
+                      stockMinimo: e.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 p-3"
+                  placeholder="Ej: 2,500"
                 />
 
                 <p className="text-xs font-normal text-slate-500">
-                  Se deriva automáticamente: mitad del precio de pieza,
-                  redondeado al peso entero (.50 hacia arriba).
+                  En kg, con coma decimal y hasta 3 decimales (gramos).
                 </p>
               </label>
+            ) : (
+              <label className="space-y-1 text-sm font-medium">
+                <span>Stock mínimo (unidades)</span>
+
+                <input
+                  required
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formulario.stockMinimo}
+                  onChange={(e) =>
+                    setFormulario({
+                      ...formulario,
+                      stockMinimo: e.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 p-3"
+                />
+              </label>
             )}
-
-            {/* Stock mínimo, en unidad mínima */}
-            <label className="space-y-1 text-sm font-medium">
-              <span>
-                {formulario.unidadMedida === "pieza"
-                  ? "Stock mínimo (en medias piezas)"
-                  : "Stock mínimo (unidades)"}
-              </span>
-
-              <input
-                required
-                type="number"
-                min="0"
-                step="1"
-                value={formulario.stockMinimo}
-                onChange={(e) =>
-                  setFormulario({
-                    ...formulario,
-                    stockMinimo: e.target.value,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 p-3"
-              />
-            </label>
           </div>
 
           {/* Acciones del formulario */}
@@ -583,15 +591,7 @@ export default function Productos() {
 
                 {/* Precio */}
                 <td className="px-5 py-4">
-                  {producto.unidadMedida === "pieza" ? (
-                    <>
-                      {formatoMoneda(producto.precio)} pieza
-                      <br />
-                      {formatoMoneda(precio_media_pieza(producto.precio))} media
-                    </>
-                  ) : (
-                    formatoMoneda(producto.precio)
-                  )}
+                  {textoPrecio(producto)}
                 </td>
 
                 {/* Stock mínimo */}
