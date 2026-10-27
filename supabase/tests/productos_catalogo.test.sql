@@ -1,5 +1,6 @@
 -- pgTAP: catálogo de productos (Blueprint §7.1, §8, §9, §10, §12 Seguridad;
--- ADR-001 Topología D y §16; ADR-003; decisiones del slice productos).
+-- ADR-001 Topología D y §16; ADR-005 modelo por peso; decisiones del slice
+-- productos).
 -- Ejecutar sólo en local: `supabase test db`.
 --
 -- Se usan dos empresas EXCLUSIVAMENTE para demostrar aislamiento.
@@ -8,7 +9,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(125);
+select plan(146);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -58,7 +59,7 @@ insert into public.productos (
    'C-1', 'Yogur A', 'lacteos', 'unidad', 100.00, 5,
    'aaaaaaaa-0000-4000-8000-000000000001'),
   ('aaaaaaaa-0000-4000-8000-00000000a002', 'aaaaaaaa-0000-4000-8000-000000000000',
-   null, 'Jamón A', 'fiambres', 'pieza', 21.00, 2,
+   null, 'Jamón A', 'fiambres', 'peso', 21.00, 2,
    'aaaaaaaa-0000-4000-8000-000000000001'),
   ('bbbbbbbb-0000-4000-8000-00000000b001', 'bbbbbbbb-0000-4000-8000-000000000000',
    'C-2', 'Leche B', 'lacteos', 'unidad', 50.00, 0,
@@ -497,7 +498,7 @@ select lives_ok(
 select pg_temp.como_usuario('aaaaaaaa-0000-4000-8000-000000000001');
 select lives_ok(
   $$insert into creados
-    select 'dueno', public.crear_producto(null, 'Salame', 'fiambres', 'pieza',
+    select 'dueno', public.crear_producto(null, 'Salame', 'fiambres', 'peso',
                                           9800, 16)$$,
   'el dueño crea un producto');
 
@@ -588,7 +589,7 @@ select pg_temp.como_usuario('aaaaaaaa-0000-4000-8000-000000000001');
 select lives_ok(
   $$insert into creados
     select 'p0', public.crear_producto(null, 'P0', 'lacteos', 'unidad', 0, 0)$$,
-  'precio 0 se acepta (>= 0, ADR-003)');
+  'precio 0 se acepta (>= 0, Blueprint §7.1)');
 select lives_ok(
   $$insert into creados
     select 'p2099', public.crear_producto(null, 'P1', 'lacteos', 'unidad', 20.99, 0)$$,
@@ -618,13 +619,87 @@ select is(
   'productos.precio se persiste como numeric(14,2)');
 
 -- ---------------------------------------------------------------------------
+-- Modelo por peso (ADR-005 §2.1–§2.3): unidad | peso, enteros en unidad mínima
+-- ---------------------------------------------------------------------------
+select is(
+  array(select conname::text || ':' || pg_get_constraintdef(oid) from pg_constraint
+         where conrelid = 'public.productos'::regclass
+           and conname in ('productos_forma_venta_valida', 'productos_combinacion_valida')
+         order by conname::text),
+  array['productos_combinacion_valida:CHECK ((((categoria = ''lacteos''::text) AND (forma_venta = ''unidad''::text)) OR ((categoria = ''fiambres''::text) AND (forma_venta = ''peso''::text))))',
+        'productos_forma_venta_valida:CHECK ((forma_venta = ANY (ARRAY[''unidad''::text, ''peso''::text])))'],
+  'las restricciones admiten sólo unidad | peso y Lácteos ↔ unidad, Fiambres ↔ peso');
+
+select is(
+  (select format_type(atttypid, atttypmod) from pg_attribute
+    where attrelid = 'public.productos'::regclass and attname = 'stock_minimo'),
+  'integer',
+  'productos.stock_minimo sigue siendo integer (unidades o gramos)');
+
+select pg_temp.como_usuario('aaaaaaaa-0000-4000-8000-000000000002');
+select lives_ok(
+  $$insert into creados
+    select 'peso', public.crear_producto('F-1', 'Jamón crudo', 'fiambres', 'peso',
+                                         12500.50, 2500)$$,
+  'el encargado crea un fiambre por peso (precio por kg, stock mínimo en gramos)');
+select lives_ok(
+  $$insert into creados
+    select 'peso0', public.crear_producto(null, 'Mortadela', 'fiambres', 'peso', 0, 0)$$,
+  'un fiambre por peso admite precio 0 y stock mínimo 0');
+select lives_ok(
+  $$insert into creados
+    select 'unidad7', public.crear_producto(null, 'Leche 1 L', 'lacteos', 'unidad', 1600.25, 7)$$,
+  'un lácteo por unidad admite stock mínimo entero en unidades');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'fiambres', 'peso', 12500.505, 0)$$,
+  'PT400', 'producto_precio_invalido', 'un precio por kg con 3 decimales se rechaza');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'fiambres', 'peso', -1, 0)$$,
+  'PT400', 'producto_precio_invalido', 'un precio por kg negativo se rechaza');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'fiambres', 'peso', 1, -1)$$,
+  'PT400', 'producto_stock_minimo_invalido', 'un stock mínimo negativo en gramos se rechaza');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'fiambres', 'peso', 1, '1250.5')$$,
+  '22P02', null, 'una fracción de gramo no es un stock mínimo válido (sólo enteros)');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'fiambres', 'peso', 1, '1,250')$$,
+  '22P02', null, 'un stock mínimo en kg con coma no se interpreta (la base recibe gramos)');
+select lives_ok(
+  $$select public.actualizar_producto(
+      (select id from creados where clave = 'peso'), 'F-1', 'Jamón crudo', 13000.99, 1250)$$,
+  'el encargado edita precio por kg y stock mínimo en gramos de un fiambre');
+reset role;
+
+select results_eq(
+  $$select c.clave, p.categoria, p.forma_venta, p.precio, p.stock_minimo
+      from creados c join public.productos p on p.id = c.id
+     where c.clave in ('peso', 'peso0', 'unidad7') order by c.clave$$,
+  $$values ('peso', 'fiambres', 'peso', 13000.99::numeric, 1250),
+           ('peso0', 'fiambres', 'peso', 0.00::numeric, 0),
+           ('unidad7', 'lacteos', 'unidad', 1600.25::numeric, 7)$$,
+  'precio por kg/unitario y stock mínimo en gramos/unidades se guardan exactos');
+
+select ok(
+  col_description('public.productos'::regclass,
+    (select attnum from pg_attribute where attrelid = 'public.productos'::regclass
+        and attname = 'stock_minimo')) like '%gramos enteros (peso)%'
+  and col_description('public.productos'::regclass,
+    (select attnum from pg_attribute where attrelid = 'public.productos'::regclass
+        and attname = 'precio')) like '%precio por kg (peso)%'
+  and position('pieza' in col_description('public.productos'::regclass,
+    (select attnum from pg_attribute where attrelid = 'public.productos'::regclass
+        and attname = 'precio'))) = 0,
+  'los comentarios de precio y stock_minimo describen el modelo por peso, sin pieza');
+
+-- ---------------------------------------------------------------------------
 -- Validación de campos e integridad (DE-3, DE-5, DE-6, DE-8, DE-10)
 -- ---------------------------------------------------------------------------
 select pg_temp.como_usuario('aaaaaaaa-0000-4000-8000-000000000001');
 
 select throws_ok(
-  $$select public.crear_producto(null, 'X', 'lacteos', 'pieza', 1, 0)$$,
-  'PT400', 'producto_combinacion_invalida', 'Lácteos + pieza se rechaza');
+  $$select public.crear_producto(null, 'X', 'lacteos', 'peso', 1, 0)$$,
+  'PT400', 'producto_combinacion_invalida', 'Lácteos + peso se rechaza');
 select throws_ok(
   $$select public.crear_producto(null, 'X', 'fiambres', 'unidad', 1, 0)$$,
   'PT400', 'producto_combinacion_invalida', 'Fiambres + unidad se rechaza');
@@ -633,7 +708,20 @@ select throws_ok(
   'PT400', 'producto_categoria_invalida', 'una categoría desconocida se rechaza');
 select throws_ok(
   $$select public.crear_producto(null, 'X', 'lacteos', 'kg', 1, 0)$$,
-  'PT400', 'producto_forma_venta_invalida', 'kg no existe en Fase 1');
+  'PT400', 'producto_forma_venta_invalida', 'kg no es una forma de venta (la forma es peso)');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'fiambres', 'pieza', 1, 0)$$,
+  'PT400', 'producto_forma_venta_invalida', 'pieza ya no es una forma de venta (ADR-005)');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'lacteos', 'pieza', 1, 0)$$,
+  'PT400', 'producto_forma_venta_invalida', 'Lácteos + pieza se rechaza por forma de venta');
+select throws_ok(
+  $$select public.crear_producto(null, 'X', 'fiambres', 'media_pieza', 1, 0)$$,
+  'PT400', 'producto_forma_venta_invalida', 'media pieza no es una forma de venta');
+select throws_ok(
+  $$select privado.crear_producto(null, 'X', 'fiambres', 'pieza', 1, 0)$$,
+  'PT400', 'producto_forma_venta_invalida',
+  'la implementación privada llamada por SQL también rechaza pieza');
 select throws_ok(
   $$select public.crear_producto(null, 'X', null, 'unidad', 1, 0)$$,
   'PT400', 'producto_categoria_invalida', 'una categoría nula se rechaza');
@@ -705,7 +793,7 @@ reset role;
 select results_eq(
   $$select codigo, nombre, categoria, forma_venta, precio, stock_minimo, activo
       from public.productos where id = 'aaaaaaaa-0000-4000-8000-00000000a002'$$,
-  $$values ('J-9', 'Jamón cocido', 'fiambres', 'pieza', 25.50::numeric, 4, false)$$,
+  $$values ('J-9', 'Jamón cocido', 'fiambres', 'peso', 25.50::numeric, 4, false)$$,
   'la edición cambia sólo los campos editables; categoría y forma de venta quedan igual');
 select ok(
   (select activo from public.productos
@@ -720,9 +808,17 @@ select set_config('request.jwt.claims',
   '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}', true);
 set local role propietario_rpc;
 select throws_ok(
-  $$update public.productos set categoria = 'fiambres', forma_venta = 'pieza'
+  $$update public.productos set categoria = 'fiambres', forma_venta = 'peso'
      where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
-  '42501', null, 'propietario_rpc no puede cambiar categoría ni forma de venta (DE-6)');
+  '42501', null, 'propietario_rpc no puede convertir un producto unidad en peso (DE-6)');
+select throws_ok(
+  $$update public.productos set categoria = 'lacteos', forma_venta = 'unidad'
+     where id = 'aaaaaaaa-0000-4000-8000-00000000a002'$$,
+  '42501', null, 'propietario_rpc no puede convertir un producto peso en unidad (DE-6)');
+select throws_ok(
+  $$update public.productos set forma_venta = 'peso'
+     where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
+  '42501', null, 'propietario_rpc no puede cambiar sólo la forma de venta');
 select throws_ok(
   $$update public.productos set empresa_id = 'bbbbbbbb-0000-4000-8000-000000000000'
      where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
@@ -777,9 +873,21 @@ select throws_ok(
 select throws_ok(
   $$insert into public.productos (empresa_id, nombre, categoria, forma_venta,
                                   precio, creado_por)
-    values ('aaaaaaaa-0000-4000-8000-000000000000', 'X', 'lacteos', 'pieza', 1,
+    values ('aaaaaaaa-0000-4000-8000-000000000000', 'X', 'lacteos', 'peso', 1,
             'aaaaaaaa-0000-4000-8000-000000000001')$$,
-  '23514', null, 'la tabla rechaza la combinación Lácteos + pieza');
+  '23514', null, 'la tabla rechaza la combinación Lácteos + peso');
+select throws_ok(
+  $$insert into public.productos (empresa_id, nombre, categoria, forma_venta,
+                                  precio, creado_por)
+    values ('aaaaaaaa-0000-4000-8000-000000000000', 'X', 'fiambres', 'unidad', 1,
+            'aaaaaaaa-0000-4000-8000-000000000001')$$,
+  '23514', null, 'la tabla rechaza la combinación Fiambres + unidad');
+select throws_ok(
+  $$insert into public.productos (empresa_id, nombre, categoria, forma_venta,
+                                  precio, creado_por)
+    values ('aaaaaaaa-0000-4000-8000-000000000000', 'X', 'fiambres', 'pieza', 1,
+            'aaaaaaaa-0000-4000-8000-000000000001')$$,
+  '23514', null, 'la tabla rechaza pieza aun escribiendo como owner (D-R4)');
 select throws_ok(
   $$insert into public.productos (empresa_id, nombre, categoria, forma_venta,
                                   precio, creado_por)
@@ -831,7 +939,7 @@ select throws_ok(
      where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
   '42501', null, 'service_role no puede actualizar el precio');
 select throws_ok(
-  $$update public.productos set categoria = 'fiambres', forma_venta = 'pieza'
+  $$update public.productos set categoria = 'fiambres', forma_venta = 'peso'
      where id = 'aaaaaaaa-0000-4000-8000-00000000a001'$$,
   '42501', null, 'service_role no puede cambiar categoría ni forma de venta');
 select throws_ok(

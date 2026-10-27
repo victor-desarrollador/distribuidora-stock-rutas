@@ -282,7 +282,7 @@ Antes de pedir revisión: `lint`, `typecheck`, `test`, Playwright y `build` debe
 - Roles: dueño, encargado y vendedor/piloto.
 - El vendedor puede crear clientes, pero no editar fichas existentes.
 - Un camión tiene como máximo una jornada por día operativo.
-- Unidades ([ADR-005 — Fiambres por peso y unidad mínima en gramos](docs/decisions/005-fiambres-por-peso-gramos.md), aprobada): los productos `unidad` se manejan en cantidad entera; los fiambres (`peso`) se ingresan en kg con hasta 3 decimales, se muestran en kg con 3 decimales fijos y se guardan como gramos enteros. Nunca `float` para cantidades ni para dinero; el dinero sigue siendo exacto (`numeric`). La pieza/media pieza es histórica (ADR-002/ADR-003); el SQL local y el prototipo todavía la usan hasta una tarea de migración autorizada.
+- Unidades ([ADR-005 — Fiambres por peso y unidad mínima en gramos](docs/decisions/005-fiambres-por-peso-gramos.md), aprobada): los productos `unidad` se manejan en cantidad entera; los fiambres (`peso`) se ingresan en kg con hasta 3 decimales, se muestran en kg con 3 decimales fijos y se guardan como gramos enteros. Nunca `float` para cantidades ni para dinero; el dinero sigue siendo exacto (`numeric`). La pieza/media pieza es histórica (ADR-002/ADR-003). El SQL ya usa `unidad`/`peso` desde `20261027001542_modelo_peso_gramos.sql` (Slice A; validado en local); la pantalla Productos ya usa `unidad`/`peso`; el resto del prototipo demo todavía usa pieza/media pieza hasta Slice B.
 - Las ventas admiten pagos combinados.
 - Los retiros de efectivo requieren doble confirmación.
 - Dueño y encargado pueden aprobar rendiciones.

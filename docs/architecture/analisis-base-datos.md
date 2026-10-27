@@ -1,8 +1,8 @@
 # Análisis de arquitectura de base de datos — Fase 1
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 22/10/2026 (actualización de unidades: 25/10/2026)
-**Versión:** 0.3
+**Fecha:** 22/10/2026 (actualización de unidades: 25/10/2026; estado SQL del modelo por peso, Slice A: 26/10/2026)
+**Versión:** 0.4
 **Estado:** documento de arquitectura. Deriva de `BLUEPRINT.md` y `docs/PRD.md`. **No autoriza por sí solo implementación**; ADR-001 v1.5 habilita validación controlada local/staging únicamente después de resolver las decisiones técnicas necesarias.
 
 ---
@@ -16,10 +16,8 @@ Este documento consolida el análisis de arquitectura de base de datos para la F
 > **Unidades de cantidad ([ADR-005](../decisions/005-fiambres-por-peso-gramos.md), aprobada el 25/10/2026).** En este documento se distinguen tres estados:
 >
 > - **Arquitectura anterior (histórica):** fiambres por pieza/media pieza, con unidad mínima en medias piezas (Blueprint v1.2–v2.0; ADR-002/ADR-003). Ya no es regla vigente.
-> - **Modelo objetivo vigente (ADR-005):** productos `unidad` en cantidad entera; productos `peso` (fiambres) en kg: se ingresan con hasta 3 decimales y se muestran con 3 decimales fijos; la representación canónica es en gramos enteros; precio por kg. Nunca `float` para cantidades ni para dinero. **Modelo objetivo aprobado por ADR-005; implementación pendiente.**
-> - **Implementación SQL actual (local/staging, todavía no migrada):** `productos` admite `forma_venta in ('unidad','pieza')`, precio de pieza completa y `stock_minimo` en medias piezas (`20261023140000_catalogo_productos.sql`). **Estado actual desactualizado respecto del modelo objetivo.** El ledger `movimientos_stock.cantidad integer` no cambia de tipo (ADR-005 §6). El cambio requiere una tarea de migración posterior autorizada, con security review.
->
-> Las columnas, tipos y restricciones SQL definitivos para `peso` no se fijan en este documento: los define esa tarea.
+> - **Modelo objetivo vigente (ADR-005):** productos `unidad` en cantidad entera; productos `peso` (fiambres) en kg: se ingresan con hasta 3 decimales y se muestran con 3 decimales fijos; la representación canónica es en gramos enteros; precio por kg. Nunca `float` para cantidades ni para dinero. **Modelo objetivo aprobado por ADR-005; implementado en SQL y en la pantalla Productos por Slice A; resto del prototipo pendiente (Slice B).**
+> - **Implementación SQL actual (Slice A, `20261027001542_modelo_peso_gramos.sql`; validada en local, staging pendiente de autorización):** `productos.forma_venta in ('unidad','peso')` con `lacteos ↔ unidad` y `fiambres ↔ peso`; `precio numeric(14,2)` unitario o por kg; `stock_minimo integer` en unidades o gramos. `movimientos_stock.cantidad integer` no cambia de tipo y está en la unidad mínima del producto según su `forma_venta`. La migración falla cerrada ante productos `pieza` (D-R4) y no convierte datos. La pantalla Productos ya usa `unidad`/`peso`; el resto del prototipo demo sigue en pieza/media pieza hasta Slice B.
 
 ---
 
@@ -48,7 +46,7 @@ Este documento consolida el análisis de arquitectura de base de datos para la F
 | `empresas` | **APROBADA CONCEPTUALMENTE** | Entidad dueña; FK `empresa_id` en tablas de negocio; RLS por empresa |
 | `perfiles` | **APROBADA CONCEPTUALMENTE** | Usuario auth + nombre + activo; empresa y rol leídos de tablas protegidas |
 | `roles` | **PROPUESTA TÉCNICA** | Sin tabla de membresías: un perfil 1:1 con `auth.users`, una empresa y un rol por usuario (decisión humana P5–P7, ADR-001 §18). **Roles funcionales (dueño, encargado, vendedor/piloto) APROBADOS**; tabla `roles` NO aprobada |
-| `productos` | **APROBADA CONCEPTUALMENTE** | Código, nombre, categoría, forma_venta (`unidad`/`peso`; ADR-005), precio (unitario en `unidad`, por kg en `peso`), stock_mínimo (en unidad mínima: unidades o gramos), activo. Modelo objetivo aprobado por ADR-005; implementación pendiente. *Estado actual SQL local, desactualizado: `unidad`/`pieza` y medias piezas (§0)* |
+| `productos` | **APROBADA CONCEPTUALMENTE** | Código, nombre, categoría, forma_venta (`unidad`/`peso`; ADR-005), precio (unitario en `unidad`, por kg en `peso`), stock_mínimo (en unidad mínima: unidades o gramos), activo. Modelo objetivo aprobado por ADR-005; implementado en SQL y en la pantalla Productos por Slice A (§0); resto del prototipo pendiente (Slice B). |
 | `camiones` | **APROBADA CONCEPTUALMENTE** | Patente, nombre, activo |
 | `clientes` | **APROBADA CONCEPTUALMENTE** | Contraparte comercial; creable por vendedor, editable solo por encargado/dueño |
 | `ubicaciones` | **APROBADA CONCEPTUALMENTE** | Internas: `deposito`, `cuarentena`, `camion` (camion_id). **`merma` no es ubicación interna** (salida terminal) |

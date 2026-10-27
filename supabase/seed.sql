@@ -105,8 +105,9 @@ values
    '00000000-0000-4000-8000-000000000006', now());
 
 -- Catálogo de productos de prueba (sólo local). Sin stock: el stock sólo
--- sale de movimientos_stock (Blueprint §3.1). Fiambres con precio de pieza
--- completa; la media se deriva (ADR-003).
+-- sale de movimientos_stock (Blueprint §3.1). Fiambres por peso (ADR-005):
+-- precio por kg y stock mínimo en gramos enteros. Son fixtures nuevos del
+-- modelo por peso, no una conversión de los anteriores en medias piezas (D-R4).
 insert into public.productos (
   id, empresa_id, codigo, nombre, categoria, forma_venta, precio,
   stock_minimo, activo, creado_por
@@ -119,8 +120,8 @@ values
    'LAC-002', 'Leche entera 1 L', 'lacteos', 'unidad', 1600.00, 30, true,
    '00000000-0000-4000-8000-000000000001'),
   ('00000000-0000-4000-8000-0000000000a3', '00000000-0000-4000-8000-0000000000e1',
-   'FIA-001', 'Jamón cocido', 'fiambres', 'pieza', 12500.00, 10, true,
+   'FIA-001', 'Jamón cocido', 'fiambres', 'peso', 12500.00, 5000, true,
    '00000000-0000-4000-8000-000000000001'),
   ('00000000-0000-4000-8000-0000000000a4', '00000000-0000-4000-8000-0000000000e1',
-   null, 'Salame milán', 'fiambres', 'pieza', 9800.00, 16, false,
+   null, 'Salame milán', 'fiambres', 'peso', 9800.00, 3000, false,
    '00000000-0000-4000-8000-000000000001');

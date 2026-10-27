@@ -6,6 +6,7 @@ import {
   MENSAJE_ERROR_LECTURA,
   crearPuertoProductos,
   filaAProducto,
+  formaVentaParaCategoria,
   mensajeErrorProductos,
 } from "./productos";
 
@@ -25,9 +26,10 @@ const filaFiambre = {
   codigo: null,
   nombre: "Jamón cocido",
   categoria: "fiambres",
-  forma_venta: "pieza",
-  precio: 21,
-  stock_minimo: 9,
+  forma_venta: "peso",
+  // Precio por kg y stock mínimo en gramos (ADR-005).
+  precio: 12500.5,
+  stock_minimo: 2500,
   activo: false,
 };
 
@@ -88,15 +90,19 @@ describe("filaAProducto", () => {
       codigo: "LAC-001",
       nombre: "Yogur bebible 1 L",
       categoria: "Lácteos",
-      unidadMedida: "unidad",
+      formaVenta: "unidad",
       precio: 2300.5,
       stockMinimo: 20,
       activo: true,
     });
-    expect(filaAProducto(filaFiambre)).toMatchObject({
+    expect(filaAProducto(filaFiambre)).toEqual({
+      id: filaFiambre.id,
       codigo: null,
+      nombre: "Jamón cocido",
       categoria: "Fiambres",
-      unidadMedida: "pieza",
+      formaVenta: "peso",
+      precio: 12500.5,
+      stockMinimo: 2500,
       activo: false,
     });
   });
@@ -105,7 +111,14 @@ describe("filaAProducto", () => {
     ["sin fila", null],
     ["categoría desconocida", { ...filaLacteo, categoria: "Lácteos" }],
     ["forma de venta kg", { ...filaLacteo, forma_venta: "kg" }],
-    ["combinación inválida", { ...filaLacteo, forma_venta: "pieza" }],
+    // D-R4: un fiambre del modelo anterior no se convierte a peso.
+    ["un fiambre pieza (modelo anterior)", { ...filaFiambre, forma_venta: "pieza" }],
+    ["un lácteo pieza", { ...filaLacteo, forma_venta: "pieza" }],
+    ["media pieza", { ...filaFiambre, forma_venta: "media_pieza" }],
+    ["forma de venta nula", { ...filaFiambre, forma_venta: null }],
+    ["lácteo por peso", { ...filaLacteo, forma_venta: "peso" }],
+    ["fiambre por unidad", { ...filaFiambre, forma_venta: "unidad" }],
+    ["stock mínimo de peso fraccionario", { ...filaFiambre, stock_minimo: 2500.5 }],
     ["precio con 3 decimales", { ...filaLacteo, precio: 20.999 }],
     ["precio como texto", { ...filaLacteo, precio: "20.99" }],
     ["precio negativo", { ...filaLacteo, precio: -1 }],
@@ -119,13 +132,20 @@ describe("filaAProducto", () => {
   });
 });
 
+describe("formaVentaParaCategoria", () => {
+  it("Lácteos se venden por unidad y Fiambres por peso", () => {
+    expect(formaVentaParaCategoria("Lácteos")).toBe("unidad");
+    expect(formaVentaParaCategoria("Fiambres")).toBe("peso");
+  });
+});
+
 describe("mensajeErrorProductos", () => {
   it.each([
     ["producto_precio_invalido", "como máximo 2 decimales"],
     ["producto_no_autorizado", "No tenés permiso"],
     ["producto_no_encontrado", "ya no existe"],
     ["producto_codigo_duplicado", "Ya existe otro producto con ese código"],
-    ["producto_combinacion_invalida", "por unidad"],
+    ["producto_combinacion_invalida", "los fiambres por peso"],
   ])("traduce el código estable %s", (codigo, texto) => {
     expect(
       mensajeErrorProductos({ code: "PT400", message: codigo })
@@ -168,7 +188,10 @@ describe("crearPuertoProductos.listar", () => {
     const resultado = await puerto.listar();
 
     expect(resultado.ok).toBe(true);
-    expect(resultado.ok && resultado.datos).toHaveLength(2);
+    expect(resultado.ok && resultado.datos.map((p) => p.formaVenta)).toEqual([
+      "unidad",
+      "peso",
+    ]);
     expect(llamadas.tabla).toBe("productos");
     expect(llamadas.columnas).toBe(
       "id, codigo, nombre, categoria, forma_venta, precio, stock_minimo, activo"
@@ -180,6 +203,7 @@ describe("crearPuertoProductos.listar", () => {
     ["error de Supabase", { data: null, error: { message: "boom" } }],
     ["datos nulos", { data: null, error: null }],
     ["una fila inválida", { data: [filaLacteo, { ...filaFiambre, precio: 1.001 }], error: null }],
+    ["una fila pieza", { data: [filaLacteo, { ...filaFiambre, forma_venta: "pieza" }], error: null }],
   ])("falla cerrado ante %s, sin devolver datos", async (_caso, respuesta) => {
     const { puerto } = clienteFalso({ lectura: respuesta });
 
@@ -209,9 +233,9 @@ describe("crearPuertoProductos: escrituras por RPC", () => {
       codigo: " FIA-9 ",
       nombre: "Salame",
       categoria: "Fiambres",
-      unidadMedida: "pieza",
+      formaVenta: "peso",
       precio: 9800.5,
-      stockMinimo: 3,
+      stockMinimo: 2500,
     });
 
     expect(resultado).toEqual({ ok: true, datos: filaLacteo.id });
@@ -221,9 +245,9 @@ describe("crearPuertoProductos: escrituras por RPC", () => {
         p_codigo: " FIA-9 ",
         p_nombre: "Salame",
         p_categoria: "fiambres",
-        p_forma_venta: "pieza",
+        p_forma_venta: "peso",
         p_precio: 9800.5,
-        p_stock_minimo: 3,
+        p_stock_minimo: 2500,
       },
     });
   });
@@ -240,7 +264,7 @@ describe("crearPuertoProductos: escrituras por RPC", () => {
       codigo: "",
       nombre: "X",
       categoria: "Lácteos",
-      unidadMedida: "unidad",
+      formaVenta: "unidad",
       precio: 1,
       stockMinimo: 0,
     });
@@ -257,7 +281,7 @@ describe("crearPuertoProductos: escrituras por RPC", () => {
         codigo: "",
         nombre: "X",
         categoria: "Lácteos",
-        unidadMedida: "unidad",
+        formaVenta: "unidad",
         precio: 1,
         stockMinimo: 0,
       })
