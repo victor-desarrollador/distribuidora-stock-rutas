@@ -10,6 +10,7 @@ import {
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
+import { datosRespaldo } from "./respaldoDemo";
 
 // Claves de las operaciones que vamos a reiniciar.
 // No incluir productos, clientes, camiones ni sesión.
@@ -30,24 +31,8 @@ const nombresModulos = [
 ];
 
 function exportarRespaldo(): void {
-  // Guardamos todas las claves de esta aplicación
-  // para no depender de conocer cada nombre.
-  const almacenamiento: Record<string, string> = {};
-
-  for (let i = 0; i < localStorage.length; i++) {
-    const clave = localStorage.key(i);
-
-    if (
-      clave &&
-      clave.startsWith("distribuidora_")
-    ) {
-      const valor = localStorage.getItem(clave);
-
-      if (valor !== null) {
-        almacenamiento[clave] = valor;
-      }
-    }
-  }
+  // Sólo la whitelist de claves vigentes (ADR-005 D-R4): ver respaldoDemo.ts.
+  const almacenamiento = datosRespaldo();
 
   const respaldo = {
     aplicacion: "Distribuidora Stock y Autoventa",

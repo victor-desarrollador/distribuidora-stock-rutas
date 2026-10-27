@@ -1,4 +1,158 @@
 ---
+## 27/10/2026 — Slice B1, ciclo 2: auditoría de `8ff5bef`, corrección H-1 y security review H-2 (sin commit)
+
+**Rama:** `feat/slice-b1-modelo-demo-peso`. **Base del ciclo:** `8ff5bef2257c81d442cba489aeeb9465a66db21b`, el commit de B1, auditado y **no aprobado** para cierre. Es el ciclo 2 de 3 (AGENTS.md §2.3.5). Sin migraciones, sin SQL, sin Supabase remoto, sin staging y sin producción. Sin commit hasta la revisión humana.
+
+### Auditoría independiente de `8ff5bef`
+Las dos auditorías revisaron exactamente `8ff5bef2257c81d442cba489aeeb9465a66db21b`, en modo sólo lectura y sin modificar archivos. HEAD y árbol limpio se verificaron antes y después.
+- **Codex** (`codex exec --sandbox read-only`): **CAMBIOS REQUERIDOS**.
+  - **H-1 (alta, bloqueante):** `confirmarSalidaPersistida` sólo exigía `estado === "preparacion"` y no tenía guard `peso`. Una jornada v5 estructuralmente válida con ítems `peso` podía pasar a `abierta` antes de B2. La UI no bloqueaba el botón y no había un test negativo.
+  - **H-2 (media, bloqueante):** faltaba la security review obligatoria de AGENTS.md §2.4. B1 toca ventas y cierres en la capa frontend/localStorage transitoria, aunque no haya SQL.
+- **OpenCode** (subagente `auditor`, con `edit: deny` y `bash: deny`, y el patch adjunto): **APROBADO**, sin hallazgos. **No detectó H-1.** Esa aprobación no se reutiliza: el hash nuevo se audita desde cero.
+- **Decisión humana:** H-1 y H-2 se aceptan como bloqueantes, y `8ff5bef` queda auditado pero no aprobado.
+
+### Corrección H-1
+- **Traza de transiciones** (`hooks/useJornadas.ts`):
+
+  | Función | Transición | Guard `peso` |
+  |---|---|---|
+  | `crearPreparacionPersistida` | alta en `preparacion` | ya existía |
+  | `crearJornadaPersistida` | alta en cualquier estado; sin caller en la UI, sólo el hook y los tests | **faltaba** |
+  | `confirmarSalidaPersistida` | `preparacion` → `abierta` | **faltaba (H-1)** |
+  | `cerrarJornadaPersistida` | `abierta` → `cerrada` | ya existía |
+
+- **Contrato elegido por el humano:** sólo `confirmarSalidaPersistida` pasa a devolver un resultado discriminado.
+- **`confirmarSalidaPersistida`:** devuelve `ResultadoConfirmacionSalida = { ok: true; jornadas } | { ok: false; error }`. Valida dentro de `escribirJornadas`, sobre la jornada recién leída del storage (protección TOCTOU), en este orden:
+  1. Si la jornada no existe o no está en `preparacion`: rechazo genérico («No se pudo confirmar la salida.»).
+  2. Si algún ítem tiene `unidadMedida !== "unidad"`: `MENSAJE_PESO_NO_OPERABLE`.
+  3. Recién después, la transición a `abierta`.
+
+  Si rechaza, no hay `setItem` y el raw queda intacto.
+- **`crearJornadaPersistida`:** guard `peso` antes de leer o escribir. Mantiene `Jornada[] | null`.
+- **Hook `confirmarSalida`:** devuelve `string | null`. Si la confirmación sale bien, actualiza el estado de React y devuelve `null`. Si se rechaza, no toca el estado y devuelve el error.
+- **`pages/Jornadas.tsx`:**
+  - `iniciarReparto` muestra el error que devuelve la frontera y no asume éxito.
+  - Con una jornada en `preparacion` que tiene `peso`, «Confirmar salida» queda deshabilitado y se muestra `MENSAJE_PESO_NO_OPERABLE` (la constante central).
+  - `total` reutiliza el mismo `tienePeso`, sin cambio de comportamiento.
+
+  El guard de persistencia sigue siendo la defensa real; la UI sólo suma una capa.
+- No se implementa B2, la entrada en kg, conversiones ni D-R1, y no cambia la semántica de `unidad`.
+
+### Tests H-1
+- **`hooks/persistencia.test.ts`:** se adaptan 2 tests existentes al resultado discriminado: la matriz de storage corrupto y «B. confirmarSalida con storage válido». Se agregan 5 tests `H-1`:
+  - `crearJornada` con `peso` devuelve `null`, sin `getItem` ni `setItem`;
+  - `crearJornada` con historial válido no altera el raw;
+  - `confirmarSalida` de una jornada v5 válida en `preparacion` con `peso` devuelve `{ ok: false, error: MENSAJE_PESO_NO_OPERABLE }`, sin `setItem`, con el raw byte a byte igual, todavía en `preparacion` y con `fechaSalida` en `null`;
+  - el rechazo de `peso` no bloquea otra jornada `unidad`;
+  - una jornada `peso` ya abierta recibe el rechazo genérico, sin escritura.
+- **Nuevo `tests/h1-confirmar-salida-peso.spec.ts`** (3 tests, sólo `_demo_v5`, separado de D-R4):
+  1. Jornada `peso` en preparación: mensaje visible, botón deshabilitado, raw intacto, 0 escrituras, sigue en `preparacion` y sin `fechaSalida`.
+  2. TOCTOU del hook: el botón arranca habilitado (el snapshot es `unidad`); el storage se reescribe con `peso` antes del clic; la frontera rechaza y `role=alert` muestra `MENSAJE_PESO_NO_OPERABLE`; la tarjeta sigue «En preparación», o sea que React no avanzó; el raw mutado queda intacto y hay 0 escrituras.
+  3. Regresión `unidad`: «Salida confirmada: Camión H1.», 1 escritura, `abierta` y `fechaSalida` con una fecha ISO válida.
+- **Corridas aisladas:** `npx vitest run src/hooks/persistencia.test.ts` → 1 archivo, **215/215**. `npx playwright test tests/h1-confirmar-salida-peso.spec.ts` → **4/4** (setup + 3 de H-1), sin retries.
+
+### Security review H-2
+- **Revisor independiente:** Codex (`codex exec --sandbox read-only --ephemeral`). Revisó la base `8ff5bef` más el working tree con H-1 sin commit, a partir del patch con sha256 `328e9e50c995a8b7638c119a45e6eb24245cf4c1a0a9f7c2f9f696b289b90a47`, que incluye el spec todavía sin trackear.
+- **Veredicto: APROBADO.** Sin hallazgos de severidad crítica, alta, media ni baja.
+- **Superficies confirmadas:**
+  - Jornadas: creación, preparación, confirmación, cierre, TOCTOU y corrupción.
+  - Ventas/Autoventa: ninguna venta `peso`, D-R1 sin implementar y `precioMediaPieza` sin vía válida.
+  - Movimientos y Retornos/Rendición: `peso` bloqueado, sin escrituras y sin cierre alternativo.
+  - Persistencia: siete claves `_demo_v5`, clientes en `_demo_v2`, claves v4 intactas, sin escrituras al montar, respaldo por whitelist y fail-closed.
+  - H-1: el E2E de TOCTOU no es vacuo.
+- **Backend:** sin cambios de DB, RLS, RPC, Auth, grants, `SECURITY DEFINER`, `service_role`, secretos ni dependencias (`package.json` y lockfile sin cambios). Los controles de `unidad` no se relajaron.
+- Las huellas sha256 de los 4 archivos coinciden antes y después de la revisión, y el árbol quedó igual.
+
+### Validación global, posterior a H-1 (local, desde `apps/web/`, con `set -o pipefail`)
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | `TYPECHECK_EXIT=0`, sin errores |
+| `npm run lint` | `LINT_EXIT=0`, sin errores ni avisos |
+| `npm test` | `VITEST_EXIT=0`; **27 archivos, 891/891** (ciclo 1: 886; +5 tests H-1) |
+| `npx playwright test` | `PLAYWRIGHT_EXIT=0`; **86/86** (1 setup + 85; ciclo 1: 83; +3 de H-1); sin fallos, flaky ni retries |
+| `npm run build` | `BUILD_EXIT=0`; único aviso, el preexistente de chunk > 500 kB (`index-y_KEH2zf.js`, 650,32 kB) |
+| `git diff --check` (raíz) | `DIFFCHECK_EXIT=0`, sin salida |
+
+### Archivos del ciclo 2
+- `apps/web/src/hooks/useJornadas.ts`
+- `apps/web/src/pages/Jornadas.tsx`
+- `apps/web/src/hooks/persistencia.test.ts`
+- `apps/web/tests/h1-confirmar-salida-peso.spec.ts` (nuevo)
+- `docs/progress-log.md`
+
+### Pendientes
+- Revisión humana del diff final y autorización del commit nuevo.
+- **Auditoría independiente desde cero** de Codex y OpenCode sobre el hash nuevo exacto. No se reutiliza ninguna auditoría de `8ff5bef`.
+- B2, B3, B4 y B5 siguen igual que en la entrada de B1.
+- **Sin migración DB y sin cambios en Supabase, staging ni producción.**
+
+---
+## 27/10/2026 — Modelo por peso, Slice B1: modelo `unidad | peso` en la capa frontend/localStorage transitoria y rotación de claves `_demo_v4` → `_demo_v5` (sin commit)
+
+**Rama:** `feat/slice-b1-modelo-demo-peso` desde `main` = `7558f01eb3ab0b7c69b3e5dbd2c107ea8bbef450`. **Alcance: capa frontend/localStorage transitoria y sus tests.** Sin migraciones, sin SQL, sin seed, sin Supabase remoto, sin staging y sin producción. Sin commit hasta la revisión humana.
+
+### Qué se hizo
+- **Modelo:** `UnidadMedida` pasa a `"unidad" | "peso"` (se conserva el nombre legacy). Stock, stock mínimo y cantidades son enteros canónicos: unidades o gramos. Los fixtures de fiambres son nuevos, en gramos (7680, 18000 y 2500 g), y no derivan de los fixtures en medias piezas.
+- **Fronteras de persistencia** (`useProductos`, `useJornadas`, `domain/movimientos`, `domain/retornos`, `domain/validacion`): aceptan `unidad`/`peso` con la combinación canónica. `pieza`, `media_pieza` y `kg` invalidan el payload, sin conversión (D-R4).
+- **Bloqueo fail-closed de `peso` en los flujos operativos** (`MENSAJE_PESO_NO_OPERABLE`), en la UI y en las fronteras de persistencia:
+  - preparación/carga y movimientos: B2;
+  - ventas: B3, D-R1;
+  - retornos y rendición: B4.
+
+  Los productos `peso` se muestran en kg con 3 decimales (`cantidad_a_texto` → `gramos_a_kg`), sin input.
+- **Ventas:** una línea `peso` es inválida hasta B3. `precioMediaPieza` sigue en el tipo sólo como deuda legacy: ninguna venta v5 lo genera, y una línea `unidad` con ese campo se rechaza.
+- **Claves `localStorage` (D-R4):** las siete claves operativas rotan juntas de `_demo_v4` a `_demo_v5` (`data/clavesStorage.ts`). `distribuidora_clientes_demo_v2` no cambia y se centraliza como `CLAVE_CLIENTES`. Las v4 no se leen, copian, migran, reinterpretan ni borran.
+- **Respaldo de ConfiguracionDemo** (`pages/respaldoDemo.ts`, nuevo): usa una whitelist explícita de las claves vigentes en lugar del filtro por prefijo `distribuidora_`. Las v4 no entran al respaldo.
+- **`lib/productos.ts`:** se corrigió un comentario desactualizado que decía que esta capa seguía en pieza/media pieza. Sólo documentación, sin cambio de lógica.
+- **E2E:** los 7 specs que sembraban claves v4 pasan a v5, sin otros cambios (sus fixtures ya eran `unidad`): `storage-operativo-corrupto`, `toctou-storage-operativo`, `toctou-preparacion-stock`, `toctou-rendicion-post-confirm`, `ledgers-criticos-corruptos`, `toctou-jornadas-revalidacion` y `rendicion-storage-corrupto`.
+- **Nuevo `tests/d-r4-claves-v4-legacy.spec.ts` (3 tests):** siembra sólo las 7 claves v4 legacy (fiambre `pieza` con stock 9, mínimo 9 y cantidades 9, y una venta con `precioMediaPieza`). No siembra v5.
+  1. Recorre `/jornadas`, `/autoventa`, `/movimientos`, `/retornos`, `/rendicion`, `/cuentas` y `/configuracion-demo`. Ninguna pantalla muestra los datos legacy, `pieza`, `9 g`, `0,009 kg`, `Disponible: 9`, `9 un.` ni avisos de datos dañados.
+  2. La preparación muestra los fixtures nuevos (`7,680 kg`, `18,000 kg`, `2,500 kg`, `120 un`) y los camiones de los fixtures, no el legado.
+  3. El respaldo descargado no contiene `_demo_v4` ni datos legacy.
+
+  En los tres casos, las 7 claves v4 quedan byte a byte iguales y las v5 siguen ausentes. Tampoco hay `setItem`/`removeItem` sobre v4 ni v5, y `clear()` queda prohibido.
+- **Vitest:** se actualizaron los tests de dominio, hooks, páginas y datos al modelo `unidad | peso`. Se agregaron los casos D-R4 en `persistencia.test.ts` y el nuevo `respaldoDemo.test.ts`.
+
+### Verificación (local, desde `apps/web/`)
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | **27 archivos, 886/886** (antes 26 / 853) |
+| `npx playwright test` (completo) | **83/83** (1 setup + 82; antes 80) |
+| Playwright: 7 specs rotados + D-R4 | **33/33** (1 setup + 29 de los specs rotados + 3 de D-R4) |
+| `npm run build` | exit 0 (aviso preexistente de chunk > 500 kB) |
+| `git diff --check` | exit 0, sin salida |
+| Tras corregir el comentario de `lib/productos.ts`: `typecheck`, `lint`, `vitest run src/lib/productos.test.ts` y `git diff --check` | exit 0 / exit 0 / 43/43 / exit 0 |
+
+- No se ejecutó mutation testing sobre `src/data/clavesStorage.ts`: por decisión humana no se modifica temporalmente código productivo. Si hace falta, se hará sobre una copia aislada.
+- `supabase status` imprimió en la terminal las credenciales de desarrollo local. No se persistieron en ningún archivo.
+
+### Grep final de legado
+`grep -RniE 'media[_ ]?pieza|pieza|_demo_v4|precioMediaPieza|recomponer_medias|medias_a_texto|maximo_piezas_segun_disponible|puede_agregar_media' src tests` → **298 líneas en 29 archivos**. No hay ninguna coincidencia de `recomponer_medias`, `medias_a_texto`, `maximo_piezas_segun_disponible` ni `puede_agregar_media`.
+- **D-R4/adversarial intencional:**
+  - specs y tests: `tests/d-r4-claves-v4-legacy.spec.ts`, `hooks/persistencia.test.ts` y `pages/respaldoDemo.test.ts`;
+  - comentarios D-R4: `pages/respaldoDemo.ts`, `data/clavesStorage.ts`, `data/mockProductos.ts`, `hooks/useProductos.ts` y `lib/productos.ts:15`;
+  - rechazos de `pieza`/`media_pieza` en tests: `domain/{productos,movimientos,retornos,venta}.test.ts`, `data/mockProductos.test.ts`, `pages/rendicion_calculos.test.ts`, `lib/productos.test.ts` y `tests/productos-catalogo.spec.ts`;
+  - comentarios de rechazo en código: `domain/{productos,movimientos,retornos,validacion}.ts` y `lib/productos.ts:163`.
+- **Deuda B3 (ventas/precios, D-R1):**
+  - `domain/precios.ts` y `precios.test.ts` (precio de media pieza y subtotal histórico);
+  - `MEDIAS_POR_PIEZA` y `descomponer_medias` en `domain/cantidades.ts`;
+  - `precioMediaPieza` en `data/mockVentas.ts` (tipo y comentarios), `domain/validacion.ts` y `domain/venta.ts`.
+- **Deuda B4 (rendición):** `domain/rendicion.test.ts:133-135`, el caso §12 descrito en medias piezas.
+- **Deuda B5 (limpieza final):** `piezas_a_medias` y `medias_a_piezas` en `domain/cantidades.ts`, sin consumidores productivos, y sus tests en `cantidades.test.ts`.
+- **Accidental:** `domain/usuario_auth.ts:14` y `usuario_auth.test.ts` (4 líneas). Es un falso positivo por la palabra «empieza», no deuda de código. El comentario desactualizado de `lib/productos.ts` ya se corrigió.
+
+### Riesgos y pendientes
+- **B2:** carga de jornadas y movimientos de productos `peso`, con entrada en kg y conversión exacta a gramos. Hoy fallan cerrado.
+- **B3:** ventas `peso` con D-R1 (redondeo por línea) y retiro de `precioMediaPieza` y de la lógica de media pieza en `precios.ts`. El redondeo de líneas `unidad` sigue sin decidir.
+- **B4:** retornos y rendición de productos `peso`, y reescritura de `rendicion.test.ts` en gramos.
+- **B5:** borrar `piezas_a_medias`/`medias_a_piezas` y reevaluar el nombre legacy `UnidadMedida`.
+- Las claves v4 siguen en los navegadores que ya las tenían. La aplicación arranca con los fixtures nuevos y los datos v4 dejan de verse. Es el comportamiento buscado por D-R4.
+- **Seguridad:** no hubo cambios de DB, RLS, RPC, Auth, grants ni SECURITY DEFINER, por lo que la revisión de seguridad de backend no aplica a B1. Se revisaron las fronteras de persistencia frontend y el comportamiento fail-closed de los flujos afectados.
+- **Sin migración DB y sin cambios en Supabase, staging ni producción.**
+
+---
 ## 27/10/2026 — pgTAP portable local/staging: listas SECURITY DEFINER sin falsos negativos por `public.rls_auto_enable()` (sin commit)
 
 **Rama:** `fix/pgtap-listas-definer-portables` desde `main` = `979375d0d67d043f753a8a8194ac190b0e1b85f1`. **Sólo tests:** sin migraciones, sin SQL productivo, sin seed y sin frontend. **Autorización humana:** ejecutar en staging (`rtsncntppghdynzhezzg`) sólo pgTAP en transacciones revertidas, lint, advisors y la consulta de cleanup. **Producción no tocada.** Sin commit hasta la revisión humana.

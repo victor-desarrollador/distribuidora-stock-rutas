@@ -1,27 +1,38 @@
 import type { DetalleVenta } from "../data/mockVentas";
-import { precio_media_pieza, subtotal_linea } from "./precios";
+import type { UnidadMedida } from "../data/mockProductos";
+import { subtotal_linea } from "./precios";
+import { MENSAJE_PESO_NO_OPERABLE } from "./productos";
 
 
 /**
  * Construye un DetalleVenta válido a partir de los datos del producto y la cantidad canónica.
- * Centraliza la lógica de snapshot histórico (ADR-003) y cálculo de subtotal.
+ * Centraliza el snapshot del precio aplicado y el cálculo de subtotal.
+ *
+ * B1: sólo se venden productos "unidad". Un producto "peso" lanza: su importe
+ * depende de D-R1 y Autoventa por peso es B3. Ninguna venta nueva genera
+ * `precioMediaPieza` (legacy ADR-003).
  *
  * @param params - Parámetros para construir el detalle
  * @param params.productoId - ID del producto
  * @param params.nombreProducto - Nombre del producto
- * @param params.unidadMedida - "unidad" | "pieza"
- * @param params.cantidadCanonica - Cantidad en unidad canónica (unidades enteras para "unidad", medias piezas para "pieza")
- * @param params.precioReferencia - Precio vigente del producto (precio unitario para "unidad", precio por pieza completa para "pieza")
- * @returns DetalleVenta con precioUnitario, precioMediaPieza (snapshot) y subtotal correctos
+ * @param params.unidadMedida - "unidad" ("peso" se rechaza hasta B3)
+ * @param params.cantidadCanonica - Cantidad en unidades enteras
+ * @param params.precioReferencia - Precio unitario vigente del producto
+ * @returns DetalleVenta con precioUnitario y subtotal correctos
  */
 export function construirDetalleVenta(params: {
   productoId: number;
   nombreProducto: string;
-  unidadMedida: "unidad" | "pieza";
+  unidadMedida: UnidadMedida;
   cantidadCanonica: number;
   precioReferencia: number;
 }): DetalleVenta {
   const { productoId, nombreProducto, unidadMedida, cantidadCanonica, precioReferencia } = params;
+
+  // B1: venta por peso pendiente de B3 (D-R1). Falla cerrado.
+  if (unidadMedida !== "unidad") {
+    throw new Error(MENSAJE_PESO_NO_OPERABLE);
+  }
 
   // Validaciones básicas
   if (!Number.isFinite(cantidadCanonica) || cantidadCanonica <= 0 || !Number.isInteger(cantidadCanonica)) {
@@ -33,11 +44,7 @@ export function construirDetalleVenta(params: {
 
   const precioUnitario = precioReferencia;
 
-  // Snapshot histórico del precio de media pieza (ADR-003)
-  const precioMediaPieza =
-    unidadMedida === "pieza" ? precio_media_pieza(precioUnitario) : undefined;
-
-  // Subtotal usando la función de dominio (maneja unidad/pieza correctamente)
+  // Subtotal de la línea `unidad` con la función de dominio vigente.
   const subtotal = subtotal_linea({
     unidad_medida: unidadMedida,
     cantidad: cantidadCanonica,
@@ -50,7 +57,6 @@ export function construirDetalleVenta(params: {
     unidadMedida,
     cantidad: cantidadCanonica,
     precioUnitario,
-    precioMediaPieza,
     subtotal,
   };
 }
@@ -63,7 +69,7 @@ export function construirItemsVenta(params: {
   productos: Array<{
     productoId: number;
     nombreProducto: string;
-    unidadMedida: "unidad" | "pieza";
+    unidadMedida: UnidadMedida;
     precioReferencia: number;
   }>;
   obtenerCantidadCanonica: (productoId: number) => number;

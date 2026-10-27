@@ -5,6 +5,7 @@ import { CLAVES_STORAGE } from "../data/clavesStorage";
 
 import { type MovimientoReparto } from "../data/mockMovimientos";
 import { movimiento_valido } from "../domain/movimientos";
+import { MENSAJE_PESO_NO_OPERABLE } from "../domain/productos";
 
 const STORAGE_KEY = CLAVES_STORAGE.movimientos;
 
@@ -94,6 +95,15 @@ export function registrarMovimientoOperacion(
   // 1. Validación estructural y de cantidades ANTES de cualquier efecto.
   if (!movimiento_valido(movimiento)) {
     return "El movimiento no es válido: las cantidades deben ser enteros positivos y seguros.";
+  }
+
+  // 1b. B1: los movimientos de productos `peso` no están migrados (B2).
+  const productos =
+    movimiento.tipo === "cambio"
+      ? [movimiento.productoDevuelto, movimiento.productoEntregado]
+      : [movimiento.producto];
+  if (productos.some((p) => p.unidadMedida !== "unidad")) {
+    return MENSAJE_PESO_NO_OPERABLE;
   }
 
   // 2. Cargar estado previo con discriminación de corrupción (usa función inyectada).

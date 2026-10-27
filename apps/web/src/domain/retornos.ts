@@ -1,8 +1,8 @@
 // Dominio puro de Retornos del prototipo (recepción de sobrante vendible de
 // una jornada cerrada). Sin React, sin persistencia, sin Supabase ni RPC.
 //
-// Fuente: BLUEPRINT.md §7.1 (cantidades enteras; pieza en medias piezas) y
-// docs/requirements/migracion-unidades-prototipo.md §5 y §8.
+// Fuente: BLUEPRINT.md §7.1 y §7.4 (cantidades enteras en la unidad mínima;
+// ADR-005).
 //
 // Semántica conservada del prototipo:
 //   - cantidadContada: vendible contado al cierre.
@@ -10,8 +10,9 @@
 //   - pendiente = contada - aprobada (sin clasificación sanitaria).
 //
 // Todas las cantidades son enteros seguros en la unidad mínima: unidades
-// enteras para "unidad", medias piezas para "pieza". Sin tolerancias, sin
-// redondeo, sin truncado. Reutiliza domain/cantidades.ts.
+// enteras para "unidad", gramos para "peso". Sin tolerancias, sin redondeo,
+// sin truncado. Reutiliza domain/cantidades.ts. En B1 la entrada de UI sólo
+// admite "unidad": los retornos `peso` se habilitan en B4.
 
 import type {
   ItemRetorno,
@@ -19,28 +20,24 @@ import type {
 } from "../data/mockRetornos";
 import {
   cantidad_unidad_desde_texto,
-  descomponer_medias,
   es_cantidad_valida,
-  medias_a_texto,
-  puede_agregar_media,
-  recomponer_medias,
 } from "./cantidades";
 
 type Unidad = ItemRetorno["unidadMedida"];
 
-/** Entrada de UI de una cantidad: texto del input entero + media opcional. */
+/** Entrada de UI de una cantidad: texto del input entero ("unidad"). */
 export interface EntradaRetorno {
-  /** "unidad": cantidad entera. "pieza": piezas completas. */
   texto: string;
-  /** Solo "pieza". En "unidad" debe ser false. */
-  media: boolean;
 }
 
 function unidad_soportada(u: unknown): u is Unidad {
-  return u === "unidad" || u === "pieza";
+  return u === "unidad" || u === "peso";
 }
 
-/** Item válido: unidad soportada (sin kg), enteros seguros y 0 <= aprobada <= contada. */
+/**
+ * Item válido en storage: `unidad` o `peso` (gramos), enteros seguros y
+ * 0 <= aprobada <= contada. `pieza` y cualquier otra unidad se rechazan.
+ */
 export function item_retorno_valido(item: unknown): item is ItemRetorno {
   if (typeof item !== "object" || item === null) return false;
   const i = item as Partial<ItemRetorno>;
@@ -112,9 +109,9 @@ export function pendiente_retorno(contado: number, aprobado: number): number {
   return contado - aprobado;
 }
 
-/** La entrada está vacía: no se completó ni piezas ni media. */
+/** La entrada está vacía. */
 export function entrada_vacia(entrada: EntradaRetorno): boolean {
-  return entrada.texto.trim() === "" && !entrada.media;
+  return entrada.texto.trim() === "";
 }
 
 /**
@@ -126,24 +123,12 @@ export function cantidad_aprobada_desde_entrada(
   entrada: EntradaRetorno,
   contado: number
 ): number | null {
+  // B1: `peso` no es operable todavía (B4); falla cerrado.
+  if (unidad !== "unidad") return null;
   if (!es_cantidad_valida(contado)) return null;
 
-  const base = cantidad_unidad_desde_texto(entrada.texto);
-  if (base === null) return null;
-
-  let canonica: number;
-  if (unidad === "pieza") {
-    try {
-      canonica = recomponer_medias({ piezas: base, media: entrada.media });
-    } catch {
-      return null;
-    }
-  } else if (unidad === "unidad") {
-    if (entrada.media) return null;
-    canonica = base;
-  } else {
-    return null;
-  }
+  const canonica = cantidad_unidad_desde_texto(entrada.texto);
+  if (canonica === null) return null;
 
   return canonica <= contado ? canonica : null;
 }
@@ -156,23 +141,10 @@ export function entrada_desde_cantidad(
   unidad: Unidad,
   cantidad: number
 ): EntradaRetorno | null {
+  // B1: `peso` no tiene entrada de UI todavía (B4).
+  if (unidad !== "unidad") return null;
   if (!es_cantidad_valida(cantidad)) return null;
-  if (unidad === "pieza") {
-    const { piezas, media } = descomponer_medias(cantidad);
-    return { texto: String(piezas), media };
-  }
-  return { texto: String(cantidad), media: false };
-}
-
-/** ¿Todavía entra una media pieza más sin superar lo contado? */
-export function media_aprobable(contado: number, texto_piezas: string): boolean {
-  const piezas = cantidad_unidad_desde_texto(texto_piezas);
-  return piezas !== null && puede_agregar_media(contado, piezas);
-}
-
-/** Presentación legible: unidad → "3 un."; pieza → medias_a_texto. */
-export function cantidad_a_texto(unidad: Unidad, cantidad: number): string {
-  return unidad === "pieza" ? medias_a_texto(cantidad) : `${cantidad} un.`;
+  return { texto: String(cantidad) };
 }
 
 /**

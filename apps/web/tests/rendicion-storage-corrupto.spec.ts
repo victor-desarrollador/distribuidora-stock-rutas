@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const CLAVE_JORNADAS = "distribuidora_jornadas_demo_v4";
-const CLAVE_MOVIMIENTOS = "distribuidora_movimientos_demo_v4";
+const CLAVE_JORNADAS = "distribuidora_jornadas_demo_v5";
+const CLAVE_MOVIMIENTOS = "distribuidora_movimientos_demo_v5";
 const RAW_CORRUPTO = "{movimientos dañados";
 
 test("Rendición avisa movimientos corruptos, no inventa ceros y bloquea el cierre", async ({

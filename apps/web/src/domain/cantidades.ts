@@ -1,14 +1,16 @@
 // Dominio puro de cantidades. Sin dependencias: no toca stock, dinero,
 // persistencia, Supabase ni RPC.
 //
-// Fuente: BLUEPRINT.md §7.1 (unidades pieza / media pieza) y §7.4 (cantidades
-// enteras, nunca decimales, nunca negativos).
+// Fuente: BLUEPRINT.md §7.1 y §7.4 (cantidades enteras en la unidad mínima:
+// unidades o gramos, ADR-005; nunca decimales, nunca negativos).
 //
 // Reglas:
 //   - Una cantidad almacenable es un ENTERO SEGURO (Number.isSafeInteger),
 //     >= 0 y finito; nunca NaN ni Infinity.
-//   - 1 pieza = 2 medias piezas; 1/2 pieza = 1 media pieza. La representación
-//     persistible siempre es un entero en medias piezas.
+//
+// Deuda legacy (ADR-003, histórica): MEDIAS_POR_PIEZA y descomponer_medias
+// sólo los usa domain/precios.ts (se revisa en B3); piezas_a_medias y
+// medias_a_piezas no tienen consumidores productivos (limpieza final, B5).
 //
 // Nota: los identificadores van en snake_case por instrucción explícita de la
 // tarea; el resto del frontend usa camelCase.
@@ -106,33 +108,6 @@ export function medias_a_piezas(medias: number): number {
 }
 
 /**
- * Convierte una cantidad canónica (entero en medias piezas) a su
- * representación legible para el usuario.
- *
- * Ejemplos:
- *   0 -> "0 piezas"
- *   1 -> "media pieza"
- *   2 -> "1 pieza"
- *   3 -> "1 pieza y media"
- *   4 -> "2 piezas"
- *   9 -> "4 piezas y media"
- *
- * Es solo para presentación: la cantidad canónica sigue siendo el entero.
- */
-export function medias_a_texto(medias: number): string {
-  validar_cantidad(medias);
-  if (medias === 0) return "0 piezas";
-  if (medias === 1) return "media pieza";
-  const piezas = Math.floor(medias / MEDIAS_POR_PIEZA);
-  const tieneMedia = medias % MEDIAS_POR_PIEZA === 1;
-  if (piezas === 0) {
-    return tieneMedia ? "media pieza" : "0 piezas";
-  }
-  const piezaTexto = piezas === 1 ? "1 pieza" : `${piezas} piezas`;
-  return tieneMedia ? `${piezaTexto} y media` : piezaTexto;
-}
-
-/**
  * Separa una cantidad canónica (entero en medias piezas) en sus dos
  * componentes para la UX: cantidad de piezas enteras y si tiene media pieza.
  *
@@ -154,67 +129,6 @@ export function descomponer_medias(medias: number): {
     piezas: Math.floor(medias / MEDIAS_POR_PIEZA),
     media: medias % MEDIAS_POR_PIEZA === 1,
   };
-}
-
-/**
- * Recompone la cantidad canónica a partir de los componentes de la UX:
- * piezas enteras + media opcional.
- *
- * Ejemplos:
- *   { piezas: 0, media: false } -> 0
- *   { piezas: 0, media: true }  -> 1
- *   { piezas: 1, media: false } -> 2
- *   { piezas: 4, media: true }  -> 9
- *
- * Lanza Error si las entradas son inválidas.
- */
-export function recomponer_medias({ piezas, media }: {
-  piezas: number;
-  media: boolean;
-}): number {
-  if (!Number.isFinite(piezas) || !Number.isInteger(piezas) || piezas < 0) {
-    throw new Error(
-      `Piezas inválidas: ${String(piezas)}. Se esperaba un entero finito mayor o igual que cero.`
-    );
-  }
-  if (typeof media !== "boolean") {
-    throw new Error("El campo 'media' debe ser booleano.");
-  }
-  const resultado = piezas * MEDIAS_POR_PIEZA + (media ? 1 : 0);
-  if (!es_cantidad_valida(resultado)) {
-    throw new Error(
-      `Desbordamiento al recomponer medias: ${resultado} excede rango seguro.`
-    );
-  }
-  return resultado;
-}
-
-/**
- * Máximo de piezas enteras que se pueden pedir sin superar el disponible
- * (en medias piezas), dado si ya hay una media pieza marcada.
- * Invariante: piezas * 2 + (tiene_media ? 1 : 0) <= disponible_medias.
- */
-export function maximo_piezas_segun_disponible(
-  disponible_medias: number,
-  tiene_media: boolean
-): number {
-  if (!es_cantidad_valida(disponible_medias)) return 0;
-  const libre = disponible_medias - (tiene_media ? 1 : 0);
-  return Math.max(0, Math.floor(libre / MEDIAS_POR_PIEZA));
-}
-
-/**
- * Indica si, con `piezas` enteras ya elegidas, todavía entra una media pieza
- * más sin superar el disponible (en medias piezas).
- */
-export function puede_agregar_media(
-  disponible_medias: number,
-  piezas: number
-): boolean {
-  if (!es_cantidad_valida(disponible_medias) || !es_cantidad_valida(piezas)) {
-    return false;
-  }
-  return piezas * MEDIAS_POR_PIEZA + 1 <= disponible_medias;
 }
 
 /**

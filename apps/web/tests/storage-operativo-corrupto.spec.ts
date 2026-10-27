@@ -5,7 +5,7 @@ const casos = [
     // /productos ya no usa el catálogo demo (lee Supabase); el catálogo demo
     // dañado se sigue detectando en las pantallas operativas que lo usan.
     nombre: "productos",
-    clave: "distribuidora_productos_demo_v4",
+    clave: "distribuidora_productos_demo_v5",
     ruta: "/jornadas",
     aviso: "Los datos de productos guardados están dañados.",
     accion: "Nueva jornada",
@@ -15,7 +15,7 @@ const casos = [
     // /camiones ya no usa el catálogo demo (lee Supabase); el catálogo demo
     // dañado se sigue detectando en las pantallas operativas que lo usan.
     nombre: "camiones",
-    clave: "distribuidora_camiones_demo_v4",
+    clave: "distribuidora_camiones_demo_v5",
     ruta: "/jornadas",
     aviso: "Los datos de camiones guardados están dañados.",
     accion: "Nueva jornada",
@@ -34,7 +34,7 @@ const casos = [
   },
   {
     nombre: "jornadas",
-    clave: "distribuidora_jornadas_demo_v4",
+    clave: "distribuidora_jornadas_demo_v5",
     ruta: "/jornadas",
     aviso: "Los datos de jornadas guardados están dañados.",
     accion: "Nueva jornada",

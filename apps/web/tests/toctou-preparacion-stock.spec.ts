@@ -7,11 +7,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const claves = {
-  productos: "distribuidora_productos_demo_v4",
-  camiones: "distribuidora_camiones_demo_v4",
+  productos: "distribuidora_productos_demo_v5",
+  camiones: "distribuidora_camiones_demo_v5",
   clientes: "distribuidora_clientes_demo_v2",
-  jornadas: "distribuidora_jornadas_demo_v4",
-  retornos: "distribuidora_retornos_demo_v4",
+  jornadas: "distribuidora_jornadas_demo_v5",
+  retornos: "distribuidora_retornos_demo_v5",
 } as const;
 
 const rawCorrupto = "{jornadas dañadas después del montaje";

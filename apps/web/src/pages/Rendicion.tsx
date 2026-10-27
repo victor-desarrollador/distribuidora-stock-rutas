@@ -27,7 +27,12 @@ import {
   leerCantidad,
   type EntradaConteo,
 } from "./rendicion_calculos";
-import { entrada_desde_cantidad, cantidad_a_texto } from "../domain/retornos";
+import { entrada_desde_cantidad } from "../domain/retornos";
+import {
+  cantidad_a_texto,
+  MENSAJE_PESO_NO_OPERABLE,
+} from "../domain/productos";
+import type { UnidadMedida } from "../data/mockProductos";
 import {
   NO_DISPONIBLE,
   disponibilidadRendicion,
@@ -35,11 +40,11 @@ import {
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
-const conteoInicial: EntradaConteo = { texto: "", media: false };
+const conteoInicial: EntradaConteo = { texto: "" };
 
 // Presentación de una cantidad canónica; "—" si no pudo calcularse.
 const textoCantidad = (
-  unidad: "unidad" | "pieza",
+  unidad: UnidadMedida,
   cantidad: number | null
 ) => (cantidad === null ? "—" : cantidad_a_texto(unidad, cantidad));
 
@@ -183,7 +188,7 @@ export default function Rendicion() {
     );
 
     if (elegida?.cierre) {
-      // Los conteos guardados ya son canónicos: se reconstruye piezas + media.
+      // Los conteos guardados ya son canónicos (B1: sólo "unidad").
       setConteos(
         Object.fromEntries(
           elegida.items.flatMap((item) => {
@@ -378,8 +383,12 @@ export default function Rendicion() {
     if (hayUnidadNoSoportadaActual) {
       return {
         ok: false,
-        error:
-          "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar.",
+        // B1: la rendición de productos `peso` no está migrada (B4).
+        error: filasMercaderiaActuales.some(
+          (fila) => fila.unidadMedida === "peso"
+        )
+          ? MENSAJE_PESO_NO_OPERABLE
+          : "Hay productos con una unidad no soportada. Revisá la unidad de esos productos antes de cerrar.",
       };
     }
 
@@ -633,12 +642,11 @@ export default function Rendicion() {
                 role="alert"
                 className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800"
               >
-                Hay productos con una unidad que el
-                sistema no soporta. El dominio
-                aprobado solo admite unidades y
-                piezas (media pieza): no existe venta
-                por kilogramo. Revisá esos productos
-                antes de rendir.
+                {filasMercaderia.some(
+                  (fila) => fila.unidadMedida === "peso"
+                )
+                  ? MENSAJE_PESO_NO_OPERABLE
+                  : "Hay productos con una unidad que el sistema no soporta. Revisá esos productos antes de rendir."}
               </p>
             )}
 
@@ -656,9 +664,9 @@ export default function Rendicion() {
                     {fila.estado ===
                     "no_soportada" ? (
                       <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-800">
-                        Unidad no soportada por el
-                        sistema. Esta fila no se
-                        puede conciliar ni cerrar.
+                        {fila.unidadMedida === "peso"
+                          ? `Cargado: ${textoCantidad(fila.unidadMedida, fila.cargado)}. ${MENSAJE_PESO_NO_OPERABLE}`
+                          : "Unidad no soportada por el sistema. Esta fila no se puede conciliar ni cerrar."}
                       </p>
                     ) : (
                       <>
@@ -748,81 +756,15 @@ export default function Rendicion() {
                                     )]: {
                                       texto:
                                         e.target.value,
-                                      media: (
-                                        actual[
-                                          String(
-                                            fila.productoId
-                                          )
-                                        ] ?? conteoInicial
-                                      ).media,
                                     },
                                   })
                                 )
                               }
                               className="block min-h-12 w-36 rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
-                              placeholder={
-                                fila.unidadMedida === "pieza"
-                                  ? "Piezas enteras"
-                                  : "Ej: 45"
-                              }
+                              placeholder="Ej: 45"
                               aria-label={`Stock físico contado de ${fila.nombreProducto}`}
                             />
 
-                            {fila.unidadMedida ===
-                              "pieza" && (
-                              <span className="mt-2 flex items-center gap-2 text-sm font-normal">
-                                <input
-                                  type="checkbox"
-                                  checked={
-                                    (
-                                      conteos[
-                                        String(
-                                          fila.productoId
-                                        )
-                                      ] ?? conteoInicial
-                                    ).media
-                                  }
-                                  disabled={
-                                    jornada.estado ===
-                                    "cerrada"
-                                  }
-                                  onChange={(e) =>
-                                    setConteos(
-                                      (actual) => ({
-                                        ...actual,
-                                        [String(
-                                          fila.productoId
-                                        )]: {
-                                          texto: (
-                                            actual[
-                                              String(
-                                                fila.productoId
-                                              )
-                                            ] ??
-                                            conteoInicial
-                                          ).texto,
-                                          media:
-                                            e.target
-                                              .checked,
-                                        },
-                                      })
-                                    )
-                                  }
-                                  className="h-4 w-4 rounded border-slate-300"
-                                  aria-label={`Media pieza contada de ${fila.nombreProducto}`}
-                                />
-                                <span>Media pieza</span>
-                                {fila.contado !== null && (
-                                  <span className="text-slate-600">
-                                    ={" "}
-                                    {textoCantidad(
-                                      "pieza",
-                                      fila.contado
-                                    )}
-                                  </span>
-                                )}
-                              </span>
-                            )}
                           </label>
 
                           <div
@@ -894,10 +836,10 @@ export default function Rendicion() {
                             )}{" "}
                             esperados ={" "}
                             <strong>
-                              {fila.diferencia}{" "}
-                              {fila.unidadMedida === "pieza"
-                                ? "medias piezas"
-                                : "un."}
+                              {textoCantidad(
+                                fila.unidadMedida,
+                                fila.diferencia
+                              )}
                             </strong>
                           </p>
                         )}

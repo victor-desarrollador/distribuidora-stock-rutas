@@ -7,16 +7,14 @@
 // Sin dependencias de infraestructura: no toca stock, dinero, persistencia,
 // localStorage, Supabase, RPC, RLS ni migraciones. No modifica datos.
 //
-// Fuente: BLUEPRINT.md §2 y §7.1 (unidad / pieza / media pieza; nunca
-// kilogramo) y §7.4 (salidas del camión).
+// Fuente: BLUEPRINT.md §2 y §7.1 (unidad / peso, ADR-005) y §7.4 (salidas
+// del camión).
 //
 // Reglas:
-//   - `unidad` y `pieza` se concilian con el mismo algoritmo y el mismo dominio
-//     canónico (`calcular_esperado`, `calcular_diferencia`): todas las
-//     cantidades son enteros seguros >= 0 en la unidad mínima (unidad entera o
-//     medias piezas). Solo cambia cómo se muestran.
-//   - cualquier otra unidad (kilogramo): no soportada por el negocio; no tiene
-//     camino funcional en la pantalla (estado defensivo `no_soportada`).
+//   - `unidad` se concilia con el dominio canónico (`calcular_esperado`,
+//     `calcular_diferencia`): enteros seguros >= 0 en la unidad mínima.
+//   - B1: `peso` todavía no se concilia (B4). Igual que cualquier otra unidad
+//     fuera del dominio, queda `no_soportada` y bloquea el cierre.
 //   - No se convierte ningún dato legacy ni se usan tolerancias.
 
 import type { Jornada, ItemCarga } from "../data/mockJornadas";
@@ -28,7 +26,6 @@ import type {
 import { salidasPorMovimiento } from "../data/mockMovimientos";
 import {
   es_cantidad_valida,
-  recomponer_medias,
   sumar_cantidades_seguras,
 } from "../domain/cantidades";
 import {
@@ -41,15 +38,12 @@ export type EstadoFilaMercaderia =
   | "ok"
   /** Componentes inválidos, acumulación insegura o salidas > cargado. */
   | "inconsistente"
-  /** Unidad fuera del dominio (por ejemplo kilogramo). */
+  /** Unidad fuera del dominio, o `peso` todavía no conciliable (B1). */
   | "no_soportada";
 
-/** Entrada de UI de un conteo: texto del input entero + media opcional. */
+/** Entrada de UI de un conteo: texto del input entero ("unidad"). */
 export interface EntradaConteo {
-  /** "unidad": cantidad entera. "pieza": piezas completas. */
   texto: string;
-  /** Solo "pieza". En "unidad" debe ser false. */
-  media: boolean;
 }
 
 export interface EntradaFilaMercaderia {
@@ -225,36 +219,16 @@ export function conteoValido(
 
 /**
  * Convierte la entrada de UI de un conteo en cantidad canónica, o null si está
- * vacía o es inválida. `pieza`: piezas enteras + media opcional →
- * medias piezas. No lanza.
+ * vacía o es inválida. B1: sólo `unidad`; `peso` devuelve null (B4). No lanza.
  */
 export function conteoDesdeEntrada(
   unidad: ItemCarga["unidadMedida"],
   entrada: EntradaConteo | undefined
 ): number | null {
   if (!entrada) return null;
+  if (unidad !== "unidad") return null;
 
-  const textoVacio = entrada.texto.trim() === "";
-
-  if (textoVacio && !entrada.media) return null;
-
-  const base = textoVacio ? 0 : conteoValido(entrada.texto);
-
-  if (base === null) return null;
-
-  if (unidad === "unidad") {
-    return entrada.media ? null : base;
-  }
-
-  if (unidad === "pieza") {
-    try {
-      return recomponer_medias({ piezas: base, media: entrada.media });
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
+  return conteoValido(entrada.texto);
 }
 
 /**
@@ -295,8 +269,8 @@ export function calcularFilaMercaderia(
     contado,
   };
 
-  if (item.unidadMedida !== "unidad" && item.unidadMedida !== "pieza") {
-    // Kilogramo u otra unidad fuera del Blueprint: sin camino funcional.
+  if (item.unidadMedida !== "unidad") {
+    // B1: `peso` (B4) u otra unidad fuera del dominio: sin camino funcional.
     return {
       ...base,
       esperado: null,
@@ -312,7 +286,7 @@ export function calcularFilaMercaderia(
     estado: "inconsistente",
   });
 
-  // Mismo algoritmo para unidad y pieza: enteros seguros en la unidad mínima.
+  // Enteros seguros en la unidad mínima.
   if (
     entrada.acumulacionInvalida ||
     !es_cantidad_valida(item.cantidad) ||

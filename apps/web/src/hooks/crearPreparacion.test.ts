@@ -13,6 +13,7 @@ import {
 import type { Jornada } from "../data/mockJornadas";
 import type { RetornoDeposito } from "../data/mockRetornos";
 import { CLAVES_STORAGE } from "../data/clavesStorage";
+import { MENSAJE_PESO_NO_OPERABLE } from "../domain/productos";
 
 // --- Simulación de localStorage para entorno node ---
 
@@ -323,5 +324,37 @@ describe("crearPreparacionPersistida — frontera M-3", () => {
         expect.objectContaining({ jornadaId: "jornada-previa" }),
       ])
     );
+  });
+});
+
+describe("crearPreparacionPersistida — guard de peso en B1 (B2)", () => {
+  const itemPeso = {
+    productoId: 4,
+    nombreProducto: "Jamón cocido",
+    unidadMedida: "peso" as const,
+    cantidad: 1250,
+    precioReferencia: 12500,
+  };
+
+  it.each([
+    ["sólo peso", [itemPeso]],
+    ["unidad + peso", [itemCargaDe(10), itemPeso]],
+  ])("%s: rechaza sin leer, validar ni escribir", (_n, items) => {
+    const rawPrevias = rawJornadasDe([jornadaPreparacion(10)]);
+    mockLS._store.set(CLAVES_STORAGE.jornadas, rawPrevias);
+    mockLS.getItem.mockClear();
+    mockLS.setItem.mockClear();
+    const validar = vi.fn(() => null);
+
+    const resultado = crearPreparacionPersistida(
+      { ...jornadaNueva, items },
+      validar
+    );
+
+    expect(resultado).toEqual({ ok: false, error: MENSAJE_PESO_NO_OPERABLE });
+    expect(mockLS.getItem).not.toHaveBeenCalled();
+    expect(validar).not.toHaveBeenCalled();
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS._store.get(CLAVES_STORAGE.jornadas)).toBe(rawPrevias);
   });
 });

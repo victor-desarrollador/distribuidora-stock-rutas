@@ -10,9 +10,9 @@
 //
 // Forma de venta (ADR-005): `unidad` (lácteos; unidades enteras, precio
 // unitario) o `peso` (fiambres; gramos enteros, precio por kg). Este contrato
-// es propio del catálogo de Supabase: el prototipo demo sigue con su
-// `UnidadMedida` pieza/media pieza hasta su propia migración. Una fila `pieza`
-// es un dato incompatible: no se convierte a `peso` (D-R4).
+// es propio del catálogo de Supabase; la capa localStorage transitoria usa el
+// mismo modelo `unidad | peso` en su `UnidadMedida`.
+// Una fila `pieza` es un dato incompatible: no se convierte a `peso` (D-R4).
 //
 // Errores (P16-productos): las RPC responden un `message` estable; aquí se
 // traduce a un texto en español. Nunca se muestra el detalle de SQL ni de
