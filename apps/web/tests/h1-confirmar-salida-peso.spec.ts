@@ -1,7 +1,8 @@
-// H-1 (auditoría de 8ff5bef): una jornada v5 estructuralmente válida con
-// ítems `peso` no puede pasar de `preparacion` a `abierta` antes de B2. La UI
-// bloquea «Confirmar salida» y la frontera persistida rechaza igual, con la
-// jornada leída al momento de persistir (no con el snapshot del render).
+// H-1 (auditoría de 8ff5bef) fue una protección de B1: una jornada v5 con
+// ítems `peso` no podía pasar de `preparacion` a `abierta`. B2 la INVIERTE
+// deliberadamente (decisión humana P-B2-2): la salida con peso está
+// permitida y el cierre sigue bloqueado hasta B4. Los casos de B1 se
+// conservan reescritos con la expectativa de B2, no se borran.
 // No es un caso D-R4: sólo se usan claves `_demo_v5`.
 import { expect, test, type Page } from "@playwright/test";
 
@@ -113,31 +114,40 @@ function tarjeta(page: Page) {
   return page.locator("article").filter({ hasText: "Chofer H1" });
 }
 
-test("H-1: una jornada v5 en preparación con ítem peso no puede confirmar la salida", async ({
+// Antes (B1): «una jornada v5 en preparación con ítem peso no puede confirmar
+// la salida» (mensaje visible y botón deshabilitado).
+test("H-1 invertido (B2): una jornada v5 en preparación con ítem peso confirma la salida", async ({
   page,
 }) => {
   await sembrar(page, [jornadaConPeso]);
-  const rawSembrado = JSON.stringify([jornadaConPeso]);
-
   await page.goto("/jornadas");
 
   const card = tarjeta(page);
+  const boton = card.getByRole("button", { name: "Confirmar salida" });
   await expect(card).toContainText("En preparación");
-  await expect(card.getByText(MENSAJE_PESO_NO_OPERABLE)).toBeVisible();
-  await expect(
-    card.getByRole("button", { name: "Confirmar salida" })
-  ).toBeDisabled();
-  // No es storage corrupto: no hay aviso de datos dañados.
-  await expect(page.getByText(/dañad/i)).toHaveCount(0);
+  await expect(card).toContainText("18,000 kg");
+  await expect(page.getByText(MENSAJE_PESO_NO_OPERABLE)).toHaveCount(0);
+  await expect(boton).toBeEnabled();
+
+  await boton.click();
+
+  await expect(page.getByRole("status")).toHaveText(
+    "Salida confirmada: Camión H1."
+  );
+  await expect(card).toContainText("Reparto iniciado");
 
   const final = await estado(page);
-  expect(final).toEqual({ raw: rawSembrado, setItemJornadas: 0 });
+  expect(final.setItemJornadas).toBe(1);
   const [guardada] = JSON.parse(final.raw as string);
-  expect(guardada.estado).toBe("preparacion");
-  expect(guardada.fechaSalida).toBeNull();
+  expect(guardada.estado).toBe("abierta");
+  expect(typeof guardada.fechaSalida).toBe("string");
+  // Los gramos de los ítems se conservan exactos.
+  expect(guardada.items).toEqual(jornadaConPeso.items);
 });
 
-test("H-1: si la jornada pasa a tener peso después del montaje, la frontera rechaza la salida", async ({
+// Antes (B1): «si la jornada pasa a tener peso después del montaje, la
+// frontera rechaza la salida».
+test("H-1 invertido (B2): si después del montaje la jornada vigente pasa a tener peso válido, la frontera acepta la salida", async ({
   page,
 }) => {
   await sembrar(page, [jornadaUnidad]);
@@ -145,11 +155,10 @@ test("H-1: si la jornada pasa a tener peso después del montaje, la frontera rec
 
   const card = tarjeta(page);
   const boton = card.getByRole("button", { name: "Confirmar salida" });
-  // El snapshot del render es sólo `unidad`: el botón está habilitado.
   await expect(boton).toBeEnabled();
 
-  // Mutación entre el montaje y el clic, con el setItem original.
-  const rawMutado = JSON.stringify([jornadaConPeso]);
+  // Mutación entre el montaje y el clic, con el setItem original: la jornada
+  // sigue en `preparacion` y ahora carga además 18000 g de jamón.
   await page.evaluate(
     ({ clave, raw }) => {
       const h1 = (
@@ -159,19 +168,25 @@ test("H-1: si la jornada pasa a tener peso después del montaje, la frontera rec
       ).__h1;
       h1.setItemOriginal.call(localStorage, clave, raw);
     },
-    { clave: claves.jornadas, raw: rawMutado }
+    { clave: claves.jornadas, raw: JSON.stringify([jornadaConPeso]) }
   );
 
   await boton.click();
 
-  await expect(page.getByRole("alert")).toHaveText(MENSAJE_PESO_NO_OPERABLE);
-  await expect(page.getByText(/Salida confirmada/)).toHaveCount(0);
-  // El estado de React no avanzó: la tarjeta sigue en preparación.
-  await expect(card).toContainText("En preparación");
-  await expect(card).not.toContainText("Reparto iniciado");
-  await expect(boton).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(
+    "Salida confirmada: Camión H1."
+  );
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText(MENSAJE_PESO_NO_OPERABLE)).toHaveCount(0);
+  // React refleja la jornada vigente persistida: abierta y con el peso.
+  await expect(card).toContainText("Reparto iniciado");
+  await expect(card).toContainText("18,000 kg");
 
-  expect(await estado(page)).toEqual({ raw: rawMutado, setItemJornadas: 0 });
+  const final = await estado(page);
+  expect(final.setItemJornadas).toBe(1);
+  const [guardada] = JSON.parse(final.raw as string);
+  expect(guardada.estado).toBe("abierta");
+  expect(guardada.items).toEqual(jornadaConPeso.items);
 });
 
 test("H-1 regresión: una jornada sólo unidad confirma la salida como antes", async ({

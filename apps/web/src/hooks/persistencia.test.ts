@@ -21,10 +21,12 @@ import {
 import {
   cerrarJornadaPersistida,
   confirmarSalidaPersistida,
-  crearJornadaPersistida,
+  crearPreparacionPersistida,
   leerJornadas,
   leerJornadasDiscriminado,
+  MENSAJE_PREPARACION_INVALIDA,
 } from "./useJornadas";
+import type { ItemCarga, Jornada } from "../data/mockJornadas";
 import {
   cargarVentas,
   registrarVentaOperacion,
@@ -1180,30 +1182,32 @@ describe("movimientos: persistencia falla cerrado ante cantidades inválidas", (
       mermaGuardada(p as unknown as Record<string, unknown>) as unknown as MovimientoReparto;
 
     it.each([0, 1.5, NaN, Infinity, -1])(
-      "rechaza cantidad %s sin persistir ni llamar a validar",
+      "rechaza cantidad %s sin leer ni llamar a validar",
       (c) => {
-        const guardar_fn = vi.fn();
+        const cargar = vi.fn(() => ({ ok: true as const, movimientos: [], estado: 'inicial' as const }));
         const validar = vi.fn(() => null);
-        const error = registrarMovimientoOperacion(
+        const resultado = registrarMovimientoOperacion(
           mov({ productoId: 1, nombreProducto: "P", unidadMedida: "unidad", cantidad: c }),
           validar,
-          () => ({ ok: true, movimientos: [], estado: 'inicial' }),
-          guardar_fn
+          cargar
         );
-        expect(error).toMatch(/no es válido/);
+        expect(resultado).toEqual({
+          ok: false,
+          error: "El movimiento no es válido: las cantidades deben ser enteros positivos y seguros.",
+        });
+        expect(cargar).not.toHaveBeenCalled();
         expect(validar).not.toHaveBeenCalled();
-        expect(guardar_fn).not.toHaveBeenCalled();
       }
     );
 
-    it("persiste un movimiento válido y rechaza duplicados", () => {
-      const guardar_fn = vi.fn();
+    it("devuelve el ledger con un movimiento válido y rechaza duplicados", () => {
       const m = mov({ productoId: 1, nombreProducto: "P", unidadMedida: "unidad", cantidad: 3 });
-      expect(registrarMovimientoOperacion(m, () => null, () => ({ ok: true, movimientos: [], estado: 'inicial' }), guardar_fn)).toBeNull();
-      expect(guardar_fn).toHaveBeenCalledWith([m]);
       expect(
-        registrarMovimientoOperacion(m, () => null, () => ({ ok: true, movimientos: [m], estado: 'valido' }), vi.fn())
-      ).toMatch(/ya está registrado/);
+        registrarMovimientoOperacion(m, () => null, () => ({ ok: true, movimientos: [], estado: 'inicial' }))
+      ).toEqual({ ok: true, movimientos: [m] });
+      expect(
+        registrarMovimientoOperacion(m, () => null, () => ({ ok: true, movimientos: [m], estado: 'valido' }))
+      ).toEqual({ ok: false, error: "Este movimiento ya está registrado." });
     });
   });
 });
@@ -1230,14 +1234,32 @@ describe("movimientos: frontera REAL de escritura ante storage corrupto", () => 
     nombreCliente: null,
   });
 
+  // Jornada abierta j1 (camión 1, 100 u de Leche) contra la que la frontera
+  // valida siempre: se siembra en storage y se pasa como snapshot del render.
+  const jornadaJ1: Jornada = {
+    id: "j1",
+    camionId: 1,
+    chofer: "Luis",
+    zona: "Norte",
+    fechaCreacion: "2026-10-21T08:00:00.000Z",
+    fechaSalida: "2026-10-21T09:00:00.000Z",
+    estado: "abierta",
+    items: [
+      { productoId: 1, nombreProducto: "Leche", unidadMedida: "unidad", cantidad: 100, precioReferencia: 100 },
+    ],
+  };
+
+  beforeEach(() => {
+    mockLS._store.set(CLAVES_STORAGE.jornadas, JSON.stringify([jornadaJ1]));
+  });
+
   // Registra contra el localStorage simulado y devuelve lo observado.
   const intentar = (movimiento: MovimientoReparto) => {
-    const validar = vi.fn(() => null);
-    const guardar = vi.fn();
     const antes = mockLS.getItem(CLAVE);
     mockLS.setItem.mockClear();
-    const error = registrarMovimientoPersistido(movimiento, validar, guardar);
-    return { error, validar, guardar, antes };
+    const resultado = registrarMovimientoPersistido(movimiento, jornadaJ1);
+    const error = resultado.ok ? null : resultado.error;
+    return { error, antes };
   };
 
   const quedaIntacto = (antes: string | null) => {
@@ -1248,10 +1270,9 @@ describe("movimientos: frontera REAL de escritura ante storage corrupto", () => 
   it("A. storage ausente: ledger vacío válido, se registra y se persiste", () => {
     expect(mockLS.getItem(CLAVE)).toBeNull();
     const m = nuevo("a1");
-    const { error, validar, guardar } = intentar(m);
+    const { error } = intentar(m);
     expect(error).toBeNull();
-    expect(validar).toHaveBeenCalledWith([]);
-    expect(guardar).toHaveBeenCalledWith([m]);
+    expect(mockLS.setItem).toHaveBeenCalledTimes(1);
     expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([m]);
   });
 
@@ -1267,12 +1288,10 @@ describe("movimientos: frontera REAL de escritura ante storage corrupto", () => 
       "D. array con cantidad decimal",
       JSON.stringify([{ ...nuevo("d1"), producto: { ...nuevo("d1").producto, cantidad: 1.5 } }]),
     ],
-  ])("%s: error, sin validar, sin guardar y contenido intacto", (_n, crudo) => {
+  ])("%s: error, sin guardar y contenido intacto", (_n, crudo) => {
     mockLS._store.set(CLAVE, crudo);
-    const { error, validar, guardar, antes } = intentar(nuevo("n1"));
+    const { error, antes } = intentar(nuevo("n1"));
     expect(error).toMatch(/No se puede registrar/);
-    expect(validar).not.toHaveBeenCalled();
-    expect(guardar).not.toHaveBeenCalled();
     expect(antes).toBe(crudo);
     quedaIntacto(crudo);
   });
@@ -1284,10 +1303,8 @@ describe("movimientos: frontera REAL de escritura ante storage corrupto", () => 
       { ...nuevo("h3"), producto: { ...nuevo("h3").producto, cantidad: -4 } },
     ]);
     mockLS._store.set(CLAVE, crudo);
-    const { error, validar, guardar } = intentar(nuevo("e1"));
+    const { error } = intentar(nuevo("e1"));
     expect(error).toMatch(/No se puede registrar/);
-    expect(validar).not.toHaveBeenCalled();
-    expect(guardar).not.toHaveBeenCalled();
     quedaIntacto(crudo);
     // La lectura de UI sigue siendo fail-closed (vacía) pero sin escribir.
     expect(leerMovimientos()).toEqual([]);
@@ -1304,10 +1321,8 @@ describe("movimientos: frontera REAL de escritura ante storage corrupto", () => 
 
   it("movimiento inválido con storage corrupto: rechaza sin tocar el storage", () => {
     mockLS._store.set(CLAVE, "{roto");
-    const { error, validar, guardar, antes } = intentar(nuevo("i1", 1.5));
+    const { error, antes } = intentar(nuevo("i1", 1.5));
     expect(error).toMatch(/no es válido/);
-    expect(validar).not.toHaveBeenCalled();
-    expect(guardar).not.toHaveBeenCalled();
     quedaIntacto(antes);
   });
 });
@@ -1614,7 +1629,11 @@ describe("jornadas: conteos del cierre son enteros seguros", () => {
 describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
   const CLAVE = CLAVES_STORAGE.jornadas;
 
-  const jornada = (id: string, camionId: number, estado = "preparacion") => ({
+  const jornada = (
+    id: string,
+    camionId: number,
+    estado: Jornada["estado"] = "preparacion"
+  ): Jornada => ({
     id,
     camionId,
     chofer: "Luis",
@@ -1637,7 +1656,7 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
     observaciones: "",
   };
 
-  const nueva = () => jornada("nueva", 9) as never;
+  const nueva = () => jornada("nueva", 9);
 
   const CORRUPTOS: Array<[string, string]> = [
     ["JSON inválido", "{no es json"],
@@ -1662,7 +1681,7 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
 
   it("getItem null (ausente) es un ledger inicial válido; \"\" (presente) se prueba en la matriz de corruptos", () => {
     expect(mockLS.getItem(CLAVE)).toBeNull();
-    expect(crearJornadaPersistida(nueva())).not.toBeNull();
+    expect(crearPreparacionPersistida(nueva()).ok).toBe(true);
   });
 
   describe.each(CORRUPTOS)("storage corrupto — %s", (_n, crudo) => {
@@ -1671,9 +1690,9 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
       mockLS.setItem.mockClear();
     });
 
-    it("crearJornada: falla, sin setItem y con el string crudo intacto", () => {
+    it("crearPreparacion: falla, sin setItem y con el string crudo intacto", () => {
       const antes = mockLS.getItem(CLAVE);
-      expect(crearJornadaPersistida(nueva())).toBeNull();
+      expect(crearPreparacionPersistida(nueva()).ok).toBe(false);
       expect(antes).toBe(crudo);
       sinEscribir(crudo);
     });
@@ -1697,9 +1716,9 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
     });
   });
 
-  it("A. storage ausente: crearJornada guarda una sola jornada", () => {
+  it("A. storage ausente: crearPreparacion guarda una sola jornada", () => {
     const j = nueva();
-    expect(crearJornadaPersistida(j)).toEqual([j]);
+    expect(crearPreparacionPersistida(j)).toEqual({ ok: true, jornadas: [j] });
     expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([j]);
   });
 
@@ -1726,13 +1745,11 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
     expect(cerrarJornadaPersistida("a", cierre as never)).toBeNull();
   });
 
-  it("historial válido: crearJornada conserva las anteriores y agrega al final", () => {
-    const previas = [jornada("a", 1, "cerrada"), jornada("b", 2)];
-    previas[0] = { ...previas[0], cierre } as never;
+  it("historial válido: crearPreparacion conserva las anteriores y agrega al final", () => {
+    const previas = [{ ...jornada("a", 1, "cerrada"), cierre }, jornada("b", 2)];
     mockLS._store.set(CLAVE, JSON.stringify(previas));
     const j = nueva();
-    const r = crearJornadaPersistida(j)!;
-    expect(r).toEqual([...previas, j]);
+    expect(crearPreparacionPersistida(j)).toEqual({ ok: true, jornadas: [...previas, j] });
     expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([...previas, j]);
   });
 
@@ -1742,80 +1759,138 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
     ));
     mockLS._store.set(CLAVE, crudo);
     mockLS.setItem.mockClear();
-    expect(crearJornadaPersistida(jornada("a", 7) as never)).toBeNull();
-    expect(crearJornadaPersistida(jornada("n", 1) as never)).toBeNull();
+    const duplicada = { ok: false, error: "Ya existe una jornada activa para ese camión." };
+    expect(crearPreparacionPersistida(jornada("a", 7))).toEqual(duplicada);
+    expect(crearPreparacionPersistida(jornada("n", 1))).toEqual(duplicada);
     sinEscribir(crudo);
     // Un camión con jornada cerrada sí puede crear otra.
-    expect(crearJornadaPersistida(jornada("n", 3) as never)).not.toBeNull();
+    expect(crearPreparacionPersistida(jornada("n", 3)).ok).toBe(true);
   });
 
   it("corrupción tiene prioridad sobre las reglas de duplicado", () => {
     mockLS._store.set(CLAVE, "{roto");
     mockLS.setItem.mockClear();
-    expect(crearJornadaPersistida(jornada("a", 1) as never)).toBeNull();
+    expect(crearPreparacionPersistida(jornada("a", 1))).toEqual({
+      ok: false,
+      error: expect.stringContaining("No se puede guardar la preparación"),
+    });
     sinEscribir("{roto");
   });
 
-  // H-1 (auditoría de 8ff5bef): ninguna jornada con ítems `peso` entra ni
-  // avanza a un estado operativo antes de B2.
-  const itemPeso = {
+  // H-1 (auditoría de 8ff5bef) invertido por B2 (decisión humana): una jornada
+  // v5 válida con ítems `peso` ahora se crea y sale (`preparacion` →
+  // `abierta`). Se conservan la validación de existencia y estado y el
+  // bloqueo del cierre hasta B4.
+  const itemPeso: ItemCarga = {
     productoId: 4,
     nombreProducto: "Jamón cocido",
     unidadMedida: "peso",
     cantidad: 18000,
     precioReferencia: 12500,
   };
-  const conPeso = (id: string, camionId: number, estado = "preparacion") => {
+  const conPeso = (
+    id: string,
+    camionId: number,
+    estado: Jornada["estado"] = "preparacion"
+  ): Jornada => {
     const j = jornada(id, camionId, estado);
     return { ...j, items: [...j.items, itemPeso] };
   };
 
-  it("H-1 crearJornada: una jornada con ítem peso devuelve null sin leer ni escribir storage", () => {
-    mockLS.getItem.mockClear();
-    mockLS.setItem.mockClear();
-    expect(crearJornadaPersistida(conPeso("p", 5) as never)).toBeNull();
-    expect(crearJornadaPersistida(conPeso("p", 5, "abierta") as never)).toBeNull();
-    expect(mockLS.getItem).not.toHaveBeenCalled();
-    expect(mockLS.setItem).not.toHaveBeenCalled();
-    expect(mockLS._store.has(CLAVE)).toBe(false);
+  // Antes (H-1): «una jornada con ítem peso devuelve null sin leer ni escribir».
+  // Catálogo inicial (clave de productos ausente): jamón 18000 g, así que
+  // 18000 g es el stock exacto.
+  it("B2 crearPreparacion: una jornada peso con stock exacto se agrega con sus gramos intactos", () => {
+    const j = conPeso("p", 5);
+    expect(crearPreparacionPersistida(j)).toEqual({ ok: true, jornadas: [j] });
+    expect(JSON.parse(mockLS.getItem(CLAVE) as string)).toEqual([j]);
   });
 
-  it("H-1 crearJornada: con historial válido, una jornada peso no altera el raw", () => {
+  it("B2 crearPreparacion: una jornada peso con stock + 1 g se rechaza sin escribir", () => {
+    const j = { ...conPeso("p", 5), items: [{ ...itemPeso, cantidad: 18001 }] };
+    expect(crearPreparacionPersistida(j)).toEqual({
+      ok: false,
+      error: expect.stringContaining("No hay stock suficiente"),
+    });
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS.getItem(CLAVE)).toBeNull();
+  });
+
+  // Antes (H-1): «con historial válido, una jornada peso no altera el raw».
+  it("B2 crearPreparacion: con historial válido, la jornada peso se agrega al final", () => {
+    const previa = jornada("a", 1);
+    mockLS._store.set(CLAVE, JSON.stringify([previa]));
+    const j = conPeso("p", 5);
+    expect(crearPreparacionPersistida(j)).toEqual({ ok: true, jornadas: [previa, j] });
+  });
+
+  it("B2 crearPreparacion: las reglas de duplicado siguen aplicando a una jornada peso", () => {
     const crudo = JSON.stringify([jornada("a", 1)]);
     mockLS._store.set(CLAVE, crudo);
     mockLS.setItem.mockClear();
-    expect(crearJornadaPersistida(conPeso("p", 5) as never)).toBeNull();
+    const duplicada = { ok: false, error: "Ya existe una jornada activa para ese camión." };
+    expect(crearPreparacionPersistida(conPeso("a", 7))).toEqual(duplicada);
+    expect(crearPreparacionPersistida(conPeso("n", 1))).toEqual(duplicada);
     sinEscribir(crudo);
   });
 
-  it("H-1 confirmarSalida: una jornada v5 válida en preparación con ítem peso se rechaza con el mensaje B1, sin escribir", () => {
-    const crudo = JSON.stringify([conPeso("p", 1), jornada("b", 2)]);
+  // Security review B2 (ALTO-1): el alta sólo admite una preparación nueva;
+  // una jornada `peso` no puede nacer abierta ni cerrada (el cierre con peso
+  // sigue bloqueado hasta B4).
+  it.each([
+    ["abierta", () => conPeso("p", 5, "abierta")],
+    ["cerrada", () => ({ ...conPeso("p", 5, "cerrada"), cierre: { ...cierre, conteos: { "1": 10, "4": 18000 } } })],
+    ["en preparación con fechaSalida", () => ({ ...conPeso("p", 5), fechaSalida: "2026-10-21T09:00:00.000Z" })],
+    ["en preparación con cierre", () => ({ ...conPeso("p", 5), cierre: { ...cierre, conteos: { "1": 10, "4": 18000 } } })],
+  ])("security review B2 crearPreparacion: una jornada peso %s se rechaza sin escribir", (_n, crear) => {
+    const crudo = JSON.stringify([jornada("a", 1)]);
     mockLS._store.set(CLAVE, crudo);
-    // Estructuralmente válida en v5: no es un caso de storage corrupto.
-    expect(leerJornadas().map((j) => j.id)).toEqual(["p", "b"]);
     mockLS.setItem.mockClear();
 
-    expect(confirmarSalidaPersistida("p")).toEqual({
+    expect(crearPreparacionPersistida(crear())).toEqual({
       ok: false,
-      error: MENSAJE_PESO_NO_OPERABLE,
+      error: MENSAJE_PREPARACION_INVALIDA,
     });
-
     sinEscribir(crudo);
-    const guardada = leerJornadas().find((j) => j.id === "p");
-    expect(guardada?.estado).toBe("preparacion");
-    expect(guardada?.fechaSalida).toBeNull();
+
+    // Con storage ausente tampoco crea la clave.
+    mockLS._store.delete(CLAVE);
+    expect(crearPreparacionPersistida(crear())).toEqual({
+      ok: false,
+      error: MENSAJE_PREPARACION_INVALIDA,
+    });
+    expect(mockLS.setItem).not.toHaveBeenCalled();
+    expect(mockLS.getItem(CLAVE)).toBeNull();
   });
 
-  it("H-1 confirmarSalida: el rechazo peso no bloquea otra jornada unidad", () => {
+  // Antes (H-1): «una jornada v5 válida en preparación con ítem peso se
+  // rechaza con el mensaje B1, sin escribir».
+  it("B2 confirmarSalida: una jornada v5 válida en preparación con ítem peso pasa a abierta", () => {
     mockLS._store.set(CLAVE, JSON.stringify([conPeso("p", 1), jornada("b", 2)]));
-    expect(confirmarSalidaPersistida("p").ok).toBe(false);
+
+    const resultado = confirmarSalidaPersistida("p");
+    if (!resultado.ok) throw new Error(resultado.error);
+
+    const guardada = leerJornadas().find((j) => j.id === "p");
+    expect(guardada?.estado).toBe("abierta");
+    expect(typeof guardada?.fechaSalida).toBe("string");
+    expect(guardada?.items).toEqual(conPeso("p", 1).items);
+    expect(leerJornadas().find((j) => j.id === "b")?.estado).toBe("preparacion");
+    expect(resultado.jornadas).toEqual(leerJornadas());
+  });
+
+  // Antes (H-1): «el rechazo peso no bloquea otra jornada unidad».
+  it("B2 confirmarSalida: jornadas peso y unidad del mismo storage salen por separado", () => {
+    mockLS._store.set(CLAVE, JSON.stringify([conPeso("p", 1), jornada("b", 2)]));
+    expect(confirmarSalidaPersistida("p").ok).toBe(true);
     expect(confirmarSalidaPersistida("b").ok).toBe(true);
     const guardadas = leerJornadas();
     expect(guardadas.find((j) => j.id === "b")?.estado).toBe("abierta");
-    expect(guardadas.find((j) => j.id === "p")?.estado).toBe("preparacion");
+    expect(guardadas.find((j) => j.id === "p")?.estado).toBe("abierta");
   });
 
-  it("H-1 confirmarSalida: una jornada peso ya abierta no avanza (rechazo genérico)", () => {
+  // Se conserva sin cambios de expectativa: la validación de estado sigue.
+  it("B2 confirmarSalida: una jornada peso ya abierta no se confirma dos veces (rechazo genérico)", () => {
     const crudo = JSON.stringify([conPeso("p", 1, "abierta")]);
     mockLS._store.set(CLAVE, crudo);
     mockLS.setItem.mockClear();
@@ -1824,6 +1899,20 @@ describe("jornadas: escrituras fail-closed ante storage corrupto", () => {
       error: "No se pudo confirmar la salida.",
     });
     sinEscribir(crudo);
+  });
+
+  it("B2 cerrarJornada: una jornada peso abierta se rechaza (B4), sin escritura y sigue abierta", () => {
+    const crudo = JSON.stringify([conPeso("p", 1, "abierta")]);
+    mockLS._store.set(CLAVE, crudo);
+    mockLS.setItem.mockClear();
+    const cierrePeso = { ...cierre, conteos: { "1": 3, "4": 18000 } };
+
+    expect(cerrarJornadaPersistida("p", cierrePeso as never)).toBeNull();
+
+    sinEscribir(crudo);
+    const guardada = leerJornadas().find((j) => j.id === "p");
+    expect(guardada?.estado).toBe("abierta");
+    expect(guardada?.cierre).toBeUndefined();
   });
 
   it("la clave de jornadas es v5", () => {
@@ -2195,7 +2284,7 @@ describe("ventas y cobros: escritura fail-closed ante storage corrupto", () => {
   });
 });
 
-describe("B1: guards de peso en las fronteras REALES de escritura (no escriben)", () => {
+describe("Guards de peso en las fronteras REALES de escritura (B2 levanta movimientos; retornos sigue en B4)", () => {
   const jamon = (gramos: number) => ({
     productoId: 4,
     nombreProducto: "Jamón cocido",
@@ -2203,31 +2292,36 @@ describe("B1: guards de peso en las fronteras REALES de escritura (no escriben)"
     cantidad: gramos,
   });
 
-  it("movimientos: una merma peso se rechaza y el storage queda intacto", () => {
-    const crudo = JSON.stringify([]);
-    mockLS._store.set(CLAVES_STORAGE.movimientos, crudo);
-    mockLS.setItem.mockClear();
-    const validar = vi.fn(() => null);
+  // Antes (B1): «movimientos: una merma peso se rechaza y el storage queda
+  // intacto». B2 habilita los movimientos `peso`.
+  it("movimientos (B2): una merma peso se persiste con los gramos exactos", () => {
+    mockLS._store.set(CLAVES_STORAGE.movimientos, JSON.stringify([]));
+    const jornada: Jornada = {
+      id: "j1",
+      camionId: 1,
+      chofer: "Luis",
+      zona: "Norte",
+      fechaCreacion: "2026-10-27T08:00:00.000Z",
+      fechaSalida: "2026-10-27T09:00:00.000Z",
+      estado: "abierta",
+      items: [{ ...jamon(1250), precioReferencia: 12500 }],
+    };
+    mockLS._store.set(CLAVES_STORAGE.jornadas, JSON.stringify([jornada]));
+    const merma = {
+      id: "m-peso",
+      jornadaId: "j1",
+      camionId: 1,
+      fecha: "2026-10-27T10:00:00.000Z",
+      motivo: "Otro",
+      tipo: "merma" as const,
+      producto: jamon(1250),
+      clienteId: null,
+      nombreCliente: null,
+    };
 
-    const error = registrarMovimientoPersistido(
-      {
-        id: "m-peso",
-        jornadaId: "j1",
-        camionId: 1,
-        fecha: "2026-10-27T10:00:00.000Z",
-        motivo: "Otro",
-        tipo: "merma",
-        producto: jamon(1250),
-        clienteId: null,
-        nombreCliente: null,
-      },
-      validar
-    );
+    expect(registrarMovimientoPersistido(merma, jornada)).toEqual({ ok: true, movimientos: [merma] });
 
-    expect(error).toBe(MENSAJE_PESO_NO_OPERABLE);
-    expect(validar).not.toHaveBeenCalled();
-    expect(mockLS.setItem).not.toHaveBeenCalled();
-    expect(mockLS._store.get(CLAVES_STORAGE.movimientos)).toBe(crudo);
+    expect(JSON.parse(mockLS._store.get(CLAVES_STORAGE.movimientos) as string)).toEqual([merma]);
   });
 
   it("retornos: un retorno con ítem peso se rechaza y no se escribe", () => {

@@ -2,14 +2,19 @@ import { useState } from "react";
 
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 import { precio_valido } from "../domain/precios";
-import { es_cantidad_valida } from "../domain/cantidades";
-import { MENSAJE_PESO_NO_OPERABLE } from "../domain/productos";
+import {
+  es_cantidad_valida,
+  sumar_cantidades_seguras,
+} from "../domain/cantidades";
 
 import {
   type Jornada,
   type CierreJornada,
+  type ItemCarga,
 } from "../data/mockJornadas";
+import type { Producto } from "../data/mockProductos";
 import type { RetornoDeposito } from "../data/mockRetornos";
+import { leerProductos } from "./useProductos";
 import { leerRetornosDiscriminado } from "./useRetornos";
 
 const STORAGE_KEY = CLAVES_STORAGE.jornadas;
@@ -72,8 +77,8 @@ function jornadaValida(j: unknown): j is Jornada {
       item !== null &&
       Number.isSafeInteger(item.productoId) &&
       typeof item.nombreProducto === "string" &&
-      // Estructuralmente, `peso` (gramos enteros) es válido en v5; los flujos
-      // de B1 no lo generan (ver guards de preparación y cierre).
+      // `unidad` (unidades enteras) o `peso` (gramos enteros). B2 prepara y
+      // confirma jornadas `peso`; el cierre sigue bloqueado hasta B4.
       ["unidad", "peso"].includes(item.unidadMedida) &&
       // Validación canónica: entero seguro > 0 (dominio compartido)
       typeof item.cantidad === "number" &&
@@ -196,30 +201,20 @@ function escribirJornadas(
   return guardarJornadas(actualizadas) ? actualizadas : null;
 }
 
-/** Alta de jornada sin React. null si se rechaza (sin escribir). */
-export function crearJornadaPersistida(
-  jornada: Jornada
-): Jornada[] | null {
-  // B1: admite cualquier estado, así que una jornada `peso` no puede entrar
-  // por aquí antes de B2. Falla cerrado antes de leer o escribir.
-  if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
-    return null;
-  }
-
-  return escribirJornadas((actuales) => {
-    if (
-      actuales.some((j) => j.id === jornada.id) ||
-      actuales.some(
-        (j) =>
-          j.camionId === jornada.camionId &&
-          j.estado !== "cerrada"
-      )
-    ) {
-      return null;
-    }
-
-    return [...actuales, jornada];
-  });
+/**
+ * Una jornada nueva sólo nace en `preparacion`: válida (jornadaValida), sin
+ * fecha de salida y sin cierre. `abierta` y `cerrada` se alcanzan únicamente
+ * por confirmarSalidaPersistida y cerrarJornadaPersistida (el cierre con
+ * `peso` sigue bloqueado hasta B4). La única alta persistente es
+ * crearPreparacionPersistida.
+ */
+function esPreparacionNueva(jornada: Jornada): boolean {
+  return (
+    jornadaValida(jornada) &&
+    jornada.estado === "preparacion" &&
+    jornada.fechaSalida === null &&
+    jornada.cierre === undefined
+  );
 }
 
 /**
@@ -233,19 +228,12 @@ export type ResultadoConfirmacionSalida =
 export function confirmarSalidaPersistida(
   id: string
 ): ResultadoConfirmacionSalida {
-  let error = "No se pudo confirmar la salida.";
-
   const jornadas = escribirJornadas((actuales) => {
     const jornada = actuales.find((j) => j.id === id);
 
+    // La jornada se valida tal como está guardada, no con el snapshot del
+    // render. B2: una jornada con ítems `peso` puede salir.
     if (!jornada || jornada.estado !== "preparacion") {
-      return null;
-    }
-
-    // B1: la salida de productos `peso` no está migrada (B2). La jornada se
-    // valida tal como está guardada, no con el snapshot del render.
-    if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
-      error = MENSAJE_PESO_NO_OPERABLE;
       return null;
     }
 
@@ -260,7 +248,9 @@ export function confirmarSalidaPersistida(
     );
   });
 
-  return jornadas ? { ok: true, jornadas } : { ok: false, error };
+  return jornadas
+    ? { ok: true, jornadas }
+    : { ok: false, error: "No se pudo confirmar la salida." };
 }
 
 /**
@@ -279,7 +269,8 @@ export function cerrarJornadaPersistida(
       return null;
     }
 
-    // B1: la rendición de productos `peso` no está migrada (B4).
+    // La rendición de productos `peso` no está migrada (B4): falla cerrado,
+    // sin escribir. Una jornada `peso` queda abierta hasta B4.
     if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
       return null;
     }
@@ -319,32 +310,182 @@ export type ResultadoCreacionPreparacion =
   | { ok: true; jornadas: Jornada[] }
   | { ok: false; error: string };
 
+export const MENSAJE_PREPARACION_INVALIDA =
+  "La preparación no es válida: revisá las cantidades, los precios y el estado de la carga.";
+
+export const MENSAJE_STOCK_NO_CALCULABLE =
+  "No se puede calcular el stock disponible: hay cantidades inválidas o fuera del rango seguro.";
+
+/**
+ * Stock comprometido del depósito por producto, en la unidad mínima
+ * (unidades o gramos): lo cargado en todas las jornadas menos lo aprobado en
+ * los retornos del mismo camión sobre jornadas cerradas. Misma semántica que
+ * el cálculo previo de la pantalla Jornadas, sin aproximar nada:
+ *   - las sumas son exactas (sumar_cantidades_seguras) y lanzan si exceden
+ *     el rango seguro;
+ *   - un retorno que no corresponde a una jornada cerrada del mismo camión no
+ *     libera stock (no aplica; nunca aumenta el disponible);
+ *   - un ítem de retorno inconsistente con su jornada (producto no cargado,
+ *     otra unidad, cantidades no canónicas, aprobado > contado) lanza;
+ *   - lo aprobado por jornada y producto nunca puede superar lo cargado en
+ *     esa jornada: si lo supera, lanza. Así el depósito no recibe más de lo
+ *     que salió y ningún reservado queda negativo.
+ * Lanzar es fallar cerrado: quien llama no persiste nada.
+ */
+export function calcularStockReservado(
+  jornadas: ReadonlyArray<Jornada>,
+  retornos: ReadonlyArray<RetornoDeposito>
+): Record<number, number> {
+  const reservado: Record<number, number> = {};
+
+  for (const jornada of jornadas) {
+    for (const item of jornada.items) {
+      reservado[item.productoId] = sumar_cantidades_seguras(
+        reservado[item.productoId] ?? 0,
+        item.cantidad
+      );
+    }
+  }
+
+  // Aprobado acumulado por jornada y producto (varios retornos de la misma
+  // jornada se suman).
+  const aprobadoPorJornada = new Map<string, number>();
+
+  for (const retorno of retornos) {
+    const jornadaOrigen = jornadas.find(
+      (j) => j.id === retorno.jornadaId
+    );
+    if (
+      !jornadaOrigen ||
+      jornadaOrigen.estado !== "cerrada" ||
+      jornadaOrigen.camionId !== retorno.camionId
+    ) {
+      continue;
+    }
+    for (const item of retorno.items) {
+      const cargados = jornadaOrigen.items.filter(
+        (p) => p.productoId === item.productoId
+      );
+      if (
+        cargados.length === 0 ||
+        cargados.some((p) => p.unidadMedida !== item.unidadMedida) ||
+        !es_cantidad_valida(item.cantidadContada) ||
+        !es_cantidad_valida(item.cantidadAprobada) ||
+        item.cantidadAprobada > item.cantidadContada
+      ) {
+        throw new Error(
+          `Retorno ${retorno.id} inconsistente con su jornada (producto ${item.productoId}).`
+        );
+      }
+
+      const cargado = cargados.reduce(
+        (total, p) => sumar_cantidades_seguras(total, p.cantidad),
+        0
+      );
+      const clave = `${jornadaOrigen.id}:${item.productoId}`;
+      const aprobado = sumar_cantidades_seguras(
+        aprobadoPorJornada.get(clave) ?? 0,
+        item.cantidadAprobada
+      );
+      if (aprobado > cargado) {
+        throw new Error(
+          `Retorno ${retorno.id}: lo aprobado (${aprobado}) supera lo cargado (${cargado}) del producto ${item.productoId}.`
+        );
+      }
+      aprobadoPorJornada.set(clave, aprobado);
+
+      // Entero seguro >= 0: el reservado del producto incluye lo cargado en
+      // esta jornada y lo aprobado de ella nunca lo supera.
+      reservado[item.productoId] =
+        reservado[item.productoId] - item.cantidadAprobada;
+    }
+  }
+
+  // Defensa: con las invariantes anteriores es inalcanzable.
+  for (const cantidad of Object.values(reservado)) {
+    if (!es_cantidad_valida(cantidad)) {
+      throw new Error("Stock reservado inconsistente.");
+    }
+  }
+
+  return reservado;
+}
+
+/**
+ * Validación pura del stock de una preparación contra lecturas frescas de
+ * Productos, Jornadas y Retornos. Compara en la unidad mínima (unidades o
+ * gramos), sin conversión ni tolerancia: exceder el disponible por 1 g se
+ * rechaza. Devuelve el error concreto o null si alcanza.
+ */
+export function validarStockPreparacion(
+  items: ReadonlyArray<ItemCarga>,
+  productos: ReadonlyArray<Producto>,
+  jornadas: ReadonlyArray<Jornada>,
+  retornos: ReadonlyArray<RetornoDeposito>
+): string | null {
+  let reservado: Record<number, number>;
+  const pedido: Record<number, number> = {};
+
+  try {
+    reservado = calcularStockReservado(jornadas, retornos);
+    for (const item of items) {
+      pedido[item.productoId] = sumar_cantidades_seguras(
+        pedido[item.productoId] ?? 0,
+        item.cantidad
+      );
+    }
+  } catch {
+    return MENSAJE_STOCK_NO_CALCULABLE;
+  }
+
+  for (const item of items) {
+    const producto = productos.find((p) => p.id === item.productoId);
+
+    if (!producto) {
+      return `El producto ${item.nombreProducto} ya no está en el catálogo.`;
+    }
+
+    // Sin conversión entre unidades: si el catálogo cambió la forma de
+    // venta, la cantidad de la carga no es comparable con su stock.
+    if (producto.unidadMedida !== item.unidadMedida) {
+      return `La forma de venta de ${producto.nombre} cambió; revisá la carga.`;
+    }
+
+    // Sin Math.max: si el catálogo tiene menos stock que lo ya reservado, el
+    // disponible es negativo y cualquier pedido (> 0) se rechaza.
+    const disponible = producto.stock - (reservado[producto.id] ?? 0);
+
+    if (pedido[producto.id] > disponible) {
+      return `No hay stock suficiente de ${producto.nombre}.`;
+    }
+  }
+
+  return null;
+}
+
 /**
  * M-3 (bloque E): creación de una preparación con relectura de las
- * dependencias mutables justo antes de persistir. Jornadas y Retornos pueden
- * cambiar o corromperse entre el montaje y el guardar: el snapshot del render
- * NO es autoridad para calcular el stock reservado ni para las comprobaciones
- * de unicidad. Esta frontera:
- *   1) releer Jornadas y Retornos discriminadamente (sin reinterpretar
- *      corrupto como vacío) y abortar si alguna falla;
- *   2) comprobar unicidad contra lo leído AHORA (id duplicado / camión con
- *      otra jornada activa);
- *   3) calcular el stock con las lecturas frescas vía el callback
- *      `validarStock` (pura, testeable) y abortar si no alcanza;
- *   4) persistir. Si algo falla, no se escribe nada y el raw queda intacto.
+ * dependencias mutables justo antes de persistir. Productos, Jornadas y
+ * Retornos pueden cambiar o corromperse entre el montaje y el guardar: el
+ * snapshot del render NO es autoridad para el stock ni para la unicidad.
+ * Esta frontera:
+ *   0) exige una preparación nueva válida (esPreparacionNueva): cantidades
+ *      canónicas > 0, precios válidos, estado `preparacion`, sin salida ni
+ *      cierre;
+ *   1) relee Jornadas, Retornos y Productos discriminadamente (sin
+ *      reinterpretar corrupto como vacío) y aborta si alguna falla;
+ *   2) comprueba la unicidad contra lo leído AHORA (id duplicado / camión
+ *      con otra jornada activa);
+ *   3) valida el stock con esas lecturas (validarStockPreparacion: unidades
+ *      o gramos exactos, sumas seguras) y aborta si no alcanza;
+ *   4) persiste. Si algo falla, no se escribe nada y el raw queda intacto.
  * Devuelve las jornadas guardadas o el error concreto.
  */
 export function crearPreparacionPersistida(
-  jornada: Jornada,
-  validarStock: (
-    jornadasActuales: Jornada[],
-    retornosActuales: RetornoDeposito[]
-  ) => string | null
+  jornada: Jornada
 ): ResultadoCreacionPreparacion {
-  // B1: la carga de productos `peso` no está migrada (B2). Falla cerrado
-  // antes de leer o escribir.
-  if (jornada.items.some((item) => item.unidadMedida !== "unidad")) {
-    return { ok: false, error: MENSAJE_PESO_NO_OPERABLE };
+  if (!esPreparacionNueva(jornada)) {
+    return { ok: false, error: MENSAJE_PREPARACION_INVALIDA };
   }
 
   const lecturaJornadas = leerJornadasDiscriminado();
@@ -362,6 +503,15 @@ export function crearPreparacionPersistida(
     return {
       ok: false,
       error: `No se puede guardar la preparación: ${lecturaRetornos.error}`,
+    };
+  }
+
+  const lecturaProductos = leerProductos();
+
+  if (!lecturaProductos.ok) {
+    return {
+      ok: false,
+      error: `No se puede guardar la preparación: ${lecturaProductos.error}`,
     };
   }
 
@@ -383,7 +533,9 @@ export function crearPreparacionPersistida(
     };
   }
 
-  const errorStock = validarStock(
+  const errorStock = validarStockPreparacion(
+    jornada.items,
+    lecturaProductos.datos,
     jornadasActuales,
     lecturaRetornos.retornos
   );
@@ -417,10 +569,6 @@ export function useJornadas() {
     return true;
   }
 
-  function crearJornada(jornada: Jornada): boolean {
-    return aplicar(crearJornadaPersistida(jornada));
-  }
-
   // Como crearPreparacion: devuelve el error concreto o null si se guardó.
   function confirmarSalida(id: string): string | null {
     const resultado = confirmarSalidaPersistida(id);
@@ -442,17 +590,8 @@ export function useJornadas() {
 
   // M-3 (bloque E): el error concreto que devuelve la frontera persistida es
   // el que muestra la pantalla, sin duplicar lógica en el render.
-  function crearPreparacion(
-    jornada: Jornada,
-    validarStock: (
-      jornadasActuales: Jornada[],
-      retornosActuales: RetornoDeposito[]
-    ) => string | null
-  ): string | null {
-    const resultado = crearPreparacionPersistida(
-      jornada,
-      validarStock
-    );
+  function crearPreparacion(jornada: Jornada): string | null {
+    const resultado = crearPreparacionPersistida(jornada);
 
     if (resultado.ok) {
       setJornadas(resultado.jornadas);
@@ -464,7 +603,6 @@ export function useJornadas() {
 
   return {
     jornadas,
-    crearJornada,
     crearPreparacion,
     confirmarSalida,
     cerrarJornada,

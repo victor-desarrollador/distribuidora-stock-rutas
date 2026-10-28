@@ -4,10 +4,11 @@
 // Fuente: BLUEPRINT.md §7.1 y §7.4 (cantidades enteras en la unidad mínima;
 // ADR-005).
 //
-// No reimplementa conversiones: usa domain/cantidades.ts. La cantidad
-// persistida de un movimiento es siempre un entero canónico: unidades enteras
-// para "unidad", gramos para "peso". En B1 la entrada de UI sólo admite
-// "unidad": los movimientos `peso` se habilitan en B2.
+// No reimplementa conversiones: usa domain/cantidades.ts (unidad) y
+// domain/peso.ts (kg → gramos). La cantidad persistida de un movimiento es
+// siempre un entero canónico: unidades enteras para "unidad", gramos para
+// "peso" (B2). Un cambio entre unidades canónicas distintas (unidad ↔ peso)
+// no tiene semántica aprobada y es inválido.
 
 import type {
   MovimientoReparto,
@@ -21,8 +22,12 @@ import {
   sumar_cantidades_seguras,
   validar_cantidad,
 } from "./cantidades";
+import { kg_a_gramos } from "./peso";
 
-/** Entrada de UI de una cantidad: texto del input entero ("unidad"). */
+/**
+ * Entrada de UI de una cantidad: texto del input. "unidad": entero.
+ * "peso": kg con coma decimal y hasta 3 decimales.
+ */
 export interface EntradaCantidad {
   texto: string;
 }
@@ -30,20 +35,43 @@ export interface EntradaCantidad {
 /**
  * Convierte la entrada de UI en la cantidad canónica de un movimiento, o null
  * si es inválida. Un movimiento exige una cantidad estrictamente positiva:
- * vacío, 0, decimales, negativos, NaN e Infinity devuelven null (no se
- * redondea ni trunca).
+ * vacío, 0, negativos, NaN e Infinity devuelven null (no se redondea ni
+ * trunca).
+ *   - "unidad": entero (decimales → null).
+ *   - "peso": kg con coma y hasta 3 decimales, a gramos con kg_a_gramos (sin
+ *     punto flotante). Más de 3 decimales, punto decimal o fuera del rango
+ *     seguro → null.
  */
 export function cantidad_movimiento_desde_entrada(
   unidad: UnidadMedida,
   entrada: EntradaCantidad
 ): number | null {
-  // B1: `peso` no es operable todavía (B2); falla cerrado.
-  if (unidad !== "unidad") return null;
+  let canonica: number | null;
+  if (unidad === "unidad") {
+    canonica = cantidad_unidad_desde_texto(entrada.texto);
+  } else if (unidad === "peso") {
+    canonica = kg_a_gramos(entrada.texto);
+  } else {
+    return null;
+  }
 
-  const canonica = cantidad_unidad_desde_texto(entrada.texto);
   if (canonica === null) return null;
 
   return canonica > 0 ? canonica : null;
+}
+
+export const MENSAJE_CAMBIO_MIXTO_NO_HABILITADO =
+  "Un cambio entre un producto por unidad y uno por peso no está habilitado.";
+
+/**
+ * Cambio entre productos de distinta unidad canónica (unidad ↔ peso). No tiene
+ * semántica aprobada (B2): falla cerrado. No se convierte entre unidades.
+ */
+export function es_cambio_mixto(
+  devuelto: Pick<ProductoMovimiento, "unidadMedida">,
+  entregado: Pick<ProductoMovimiento, "unidadMedida">
+): boolean {
+  return devuelto.unidadMedida !== entregado.unidadMedida;
 }
 
 /**
@@ -103,9 +131,11 @@ export function movimiento_valido(m: unknown): m is MovimientoReparto {
   }
 
   if (mov.tipo === "cambio") {
+    // Cada lado con su propia cantidad canónica; ambos de la misma unidad.
     return (
       producto_movimiento_valido(mov.productoDevuelto) &&
-      producto_movimiento_valido(mov.productoEntregado)
+      producto_movimiento_valido(mov.productoEntregado) &&
+      !es_cambio_mixto(mov.productoDevuelto, mov.productoEntregado)
     );
   }
 
@@ -121,6 +151,27 @@ interface ItemCargado {
   productoId: number;
   cantidad: number;
 }
+
+/** Ítem cargado con su unidad: lo exige la validación de una operación nueva. */
+interface ItemCargadoConUnidad extends ItemCargado {
+  unidadMedida: UnidadMedida;
+}
+
+/** Venta con la unidad de cada ítem: la exige la validación de una operación nueva. */
+interface VentaConItemsConUnidad {
+  jornadaId: string;
+  items: ReadonlyArray<{
+    productoId: number;
+    unidadMedida: UnidadMedida;
+    cantidad: number;
+  }>;
+}
+
+export const MENSAJE_STOCK_JORNADA_NO_CALCULABLE =
+  "No se puede calcular el stock disponible: hay cantidades inválidas o fuera del rango seguro.";
+
+export const MENSAJE_SALIDAS_SUPERAN_CARGA =
+  "Las salidas registradas en la jornada superan lo cargado: hay datos inconsistentes. No se puede registrar el movimiento.";
 
 function acumular(
   resultado: Record<number, number>,
@@ -168,8 +219,10 @@ export function salidas_de_jornada(
 }
 
 /**
- * Disponible por producto = cargado - salidas, nunca negativo. Lanza Error si
- * lo cargado no es una cantidad canónica válida.
+ * Disponible por producto = cargado - salidas, nunca negativo. Sólo para
+ * PRESENTACIÓN: el Math.max no se usa para autorizar operaciones (ver
+ * validar_stock_movimiento, que falla cerrado si las salidas superan lo
+ * cargado). Lanza Error si lo cargado no es una cantidad canónica válida.
  */
 export function disponibles_de_jornada(
   cargados: ReadonlyArray<ItemCargado>,
@@ -190,9 +243,9 @@ export type DisponibilidadJornada =
   | { ok: false; error: string };
 
 /**
- * Única cadena de cálculo de disponibilidad (UI y validación previa al
- * registro). Falla cerrado: ante cantidades inválidas o desbordamiento
- * devuelve ok:false y NO un saldo aproximado.
+ * Disponibilidad para la UI. Falla cerrado ante cantidades inválidas o
+ * desbordamiento (ok:false, NO un saldo aproximado). La autorización de una
+ * operación nueva la hace validar_stock_movimiento.
  */
 export function disponibilidad_de_jornada(
   jornada_id: string,
@@ -206,37 +259,104 @@ export function disponibilidad_de_jornada(
   } catch {
     return {
       ok: false,
-      error:
-        "No se puede calcular el stock disponible: hay cantidades inválidas o fuera del rango seguro.",
+      error: MENSAJE_STOCK_JORNADA_NO_CALCULABLE,
     };
   }
 }
 
 /**
- * Verifica que las salidas del movimiento nuevo no superen lo disponible en
- * la jornada. Devuelve el mensaje de error o null. Comparación exacta entre
- * enteros canónicos (sin tolerancia).
+ * Validación AUTORITATIVA de una operación nueva (la usa la frontera, con
+ * lecturas frescas). Devuelve el mensaje de error o null. No usa la
+ * disponibilidad visual (disponibilidad_de_jornada, con Math.max): falla
+ * cerrado ante cualquier inconsistencia, sin convertir ni aproximar.
+ *   1. Unidad: todo producto del movimiento (merma, devolución, ambos lados
+ *      de un cambio) que figure en la carga debe tener su misma unidad.
+ *   2. Unidad de las salidas ya registradas en la jornada (ventas, mermas y
+ *      entregados de cambios): si un producto cargado salió con otra unidad,
+ *      sus cantidades no son sumables (no se convierte) y el ledger es
+ *      inconsistente: no se acepta ninguna operación nueva.
+ *   3. Cargado y salidas exactos por producto (sumas seguras; overflow o
+ *      cantidad no canónica → no calculable).
+ *   4. Si las salidas ya registradas de algún producto superan lo cargado
+ *      (o salió un producto no cargado), el ledger es inconsistente y no se
+ *      acepta ninguna operación nueva en la jornada.
+ *   5. Cada salida del movimiento nuevo contra cargado − salidas, exacto y
+ *      sin tolerancia (1 g de más se rechaza).
  */
 export function validar_stock_movimiento(
   movimiento: MovimientoReparto,
-  cargados: ReadonlyArray<ItemCargado>,
-  ventas: ReadonlyArray<VentaConItems>,
+  cargados: ReadonlyArray<ItemCargadoConUnidad>,
+  ventas: ReadonlyArray<VentaConItemsConUnidad>,
   movimientos_actuales: ReadonlyArray<MovimientoReparto>
 ): string | null {
-  const disponibilidad = disponibilidad_de_jornada(
-    movimiento.jornadaId,
-    cargados,
-    ventas,
-    movimientos_actuales
-  );
-  if (!disponibilidad.ok) return disponibilidad.error;
-  const { disponibles } = disponibilidad;
+  const productos =
+    movimiento.tipo === "cambio"
+      ? [movimiento.productoDevuelto, movimiento.productoEntregado]
+      : [movimiento.producto];
+
+  for (const producto of productos) {
+    if (
+      cargados.some(
+        (c) =>
+          c.productoId === producto.productoId &&
+          c.unidadMedida !== producto.unidadMedida
+      )
+    ) {
+      return `La forma de venta de ${producto.nombreProducto} no coincide con la cargada en la jornada.`;
+    }
+  }
+
+  const salidas_registradas = [
+    ...ventas
+      .filter((venta) => venta.jornadaId === movimiento.jornadaId)
+      .flatMap((venta) => venta.items),
+    ...movimientos_actuales
+      .filter((m) => m.jornadaId === movimiento.jornadaId)
+      .flatMap(salidasPorMovimiento),
+  ];
+
+  if (
+    salidas_registradas.some((salida) =>
+      cargados.some(
+        (c) =>
+          c.productoId === salida.productoId &&
+          c.unidadMedida !== salida.unidadMedida
+      )
+    )
+  ) {
+    return MENSAJE_SALIDAS_SUPERAN_CARGA;
+  }
+
+  const cargado: Record<number, number> = {};
+  let salidas: Record<number, number>;
+  try {
+    for (const item of cargados) {
+      validar_cantidad(item.cantidad);
+      acumular(cargado, item.productoId, item.cantidad);
+    }
+    salidas = salidas_de_jornada(
+      movimiento.jornadaId,
+      ventas,
+      movimientos_actuales
+    );
+  } catch {
+    return MENSAJE_STOCK_JORNADA_NO_CALCULABLE;
+  }
+
+  for (const [productoId, salida] of Object.entries(salidas)) {
+    if (salida > (cargado[Number(productoId)] ?? 0)) {
+      return MENSAJE_SALIDAS_SUPERAN_CARGA;
+    }
+  }
 
   for (const item of salidasPorMovimiento(movimiento)) {
-    if (!(item.productoId in disponibles)) {
+    if (!(item.productoId in cargado)) {
       return `${item.nombreProducto} no está cargado en el camión.`;
     }
-    if (item.cantidad > disponibles[item.productoId]) {
+    // Entero seguro >= 0: el paso anterior garantiza salidas <= cargado.
+    const disponible =
+      cargado[item.productoId] - (salidas[item.productoId] ?? 0);
+    if (item.cantidad > disponible) {
       return `Stock insuficiente de ${item.nombreProducto}.`;
     }
   }

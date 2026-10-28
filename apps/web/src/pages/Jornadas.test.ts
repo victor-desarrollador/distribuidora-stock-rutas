@@ -5,8 +5,9 @@
 // del componente.
 //
 // Fuente: BLUEPRINT.md §7.1 y §7.4 (cantidades enteras en la unidad mínima,
-// ADR-005). B1: la carga de productos `peso` no está migrada (B2); su bloqueo
-// se prueba sobre la frontera de escritura (crearPreparacionPersistida).
+// ADR-005). La carga de productos `peso` (B2) se prueba en
+// jornadas_preparacion.test.ts y en la frontera de escritura
+// (crearPreparacion.test.ts).
 
 import { describe, expect, it } from "vitest";
 import { subtotal_linea, sumar_importes } from "../domain/precios";
