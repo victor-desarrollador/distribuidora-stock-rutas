@@ -8,28 +8,26 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
+import { useJornadas } from "../hooks/useJornadas";
 import { useCamiones } from "../hooks/useCamiones";
 import { useClientes } from "../hooks/useClientes";
 import { useProductos } from "../hooks/useProductos";
-import { leerVentas, useVentas } from "../hooks/useVentas";
-import { useMovimientos} from "../hooks/useMovimientos";
+import { useVentas } from "../hooks/useVentas";
+import { useMovimientos } from "../hooks/useMovimientos";
 import {
   type TipoMovimiento,
   type MovimientoReparto,
   type ProductoMovimiento,
 } from "../data/mockMovimientos";
 import type { UnidadMedida } from "../data/mockProductos";
-import {
-  cantidad_a_texto,
-  MENSAJE_PESO_NO_OPERABLE,
-} from "../domain/productos";
+import { cantidad_a_texto } from "../domain/productos";
 import {
   cantidad_movimiento_desde_entrada,
   disponibilidad_de_jornada,
-  validar_stock_movimiento,
+  es_cambio_mixto,
+  MENSAJE_CAMBIO_MIXTO_NO_HABILITADO,
 } from "../domain/movimientos";
-import { revalidar_jornada_para_operacion } from "../domain/jornadas";
+import { atributos_input_movimiento } from "./movimientos_formulario";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import AvisoCatalogoDemo from "../components/AvisoCatalogoDemo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
@@ -39,7 +37,7 @@ type DatosFormulario = {
   jornadaId: string;
   clienteId: string;
   productoId: string;
-  // Cantidad entera de un producto "unidad" ("peso" no es operable en B1).
+  // Texto de la cantidad: entero ("unidad") o kg con coma ("peso").
   cantidad: string;
   entregadoId: string;
   cantidadEntregada: string;
@@ -73,8 +71,9 @@ interface CampoCantidadProps {
   onChange: (texto: string) => void;
 }
 
-// Unidad: input entero. Peso: B1 sin input (B2); se muestra el disponible
-// con cantidad_a_texto (gramos → kg).
+// Unidad: input entero (como antes). Peso: texto en kg con coma y hasta 3
+// decimales. La interpretación es siempre cantidad_movimiento_desde_entrada;
+// el disponible se muestra con cantidad_a_texto (gramos → kg).
 function CampoCantidad({
   etiqueta,
   unidad,
@@ -88,22 +87,25 @@ function CampoCantidad({
   return (
     <div className="block space-y-2">
       {unidad === "peso" ? (
-        <div className="space-y-2">
-          <span className="text-sm font-medium">{etiqueta}</span>
-          <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-            {MENSAJE_PESO_NO_OPERABLE}
-          </p>
-        </div>
+        <label className="block space-y-2">
+          <span className="text-sm font-medium">{etiqueta} (kg)</span>
+          <span className="flex items-center gap-2">
+            <input
+              {...atributos_input_movimiento("peso")}
+              value={texto}
+              onChange={(e) => onChange(e.target.value)}
+              className={`min-h-14 w-full rounded-xl border border-slate-300 p-3${fondo}`}
+            />
+            <span className="text-sm text-slate-500">kg</span>
+          </span>
+        </label>
       ) : (
         <label className="block space-y-2">
           <span className="text-sm font-medium">{etiqueta}</span>
           <input
-            type="number"
-            min="0"
-            step="1"
+            {...atributos_input_movimiento("unidad")}
             value={texto}
             onChange={(e) => onChange(e.target.value)}
-            placeholder="0"
             className={`min-h-14 w-full rounded-xl border border-slate-300 p-3${fondo}`}
           />
         </label>
@@ -172,6 +174,13 @@ export default function Movimientos() {
   // Devoluciones y cambios solo usan clientes activos.
   const requiereCliente = formulario.tipo !== "merma";
 
+  // Un cambio unidad ↔ peso no está habilitado (sin semántica aprobada).
+  const cambioMixto =
+    formulario.tipo === "cambio" &&
+    productoDevuelto !== undefined &&
+    productoEntregado !== undefined &&
+    es_cambio_mixto(productoDevuelto, productoEntregado);
+
   const movimientosJornada = useMemo(
     () =>
       movimientos.filter(
@@ -233,15 +242,9 @@ export default function Movimientos() {
       return;
     }
 
-    // B1: los movimientos de productos `peso` no están migrados (B2). El
-    // hook también lo rechaza antes de escribir.
-    if (
-      productoDevuelto.unidadMedida !== "unidad" ||
-      (formulario.tipo === "cambio" &&
-        productoEntregado !== undefined &&
-        productoEntregado.unidadMedida !== "unidad")
-    ) {
-      setError(MENSAJE_PESO_NO_OPERABLE);
+    // La frontera también rechaza el cambio mixto antes de escribir.
+    if (cambioMixto) {
+      setError(MENSAJE_CAMBIO_MIXTO_NO_HABILITADO);
       return;
     }
 
@@ -251,7 +254,11 @@ export default function Movimientos() {
     );
 
     if (cantidad === null) {
-      setError("La cantidad del producto no es válida.");
+      setError(
+        productoDevuelto.unidadMedida === "peso"
+          ? "La cantidad del producto no es válida: ingresá kg con coma y hasta 3 decimales (ej. 1,250)."
+          : "La cantidad del producto no es válida."
+      );
       return;
     }
 
@@ -326,34 +333,9 @@ export default function Movimientos() {
       };
     }
 
-    // Volvemos a calcular el stock al registrar.
-    const resultado = registrarMovimiento(movimiento, (actuales) => {
-      // M-2 (bloque E): revalidar la Jornada vigente justo antes de
-      // persistir. La jornada del render es un snapshot: puede haberse
-      // cerrado, desaparecido o cambiado de camión, y el storage de
-      // Jornadas puede haberse corrompido, desde el montaje. Ningún
-      // movimiento se persiste después del cierre.
-      const revalidacionJornada = revalidar_jornada_para_operacion(
-        leerJornadasDiscriminado(),
-        jornada,
-        "abierta"
-      );
-
-      if (!revalidacionJornada.ok) {
-        return `No se puede registrar: ${revalidacionJornada.error}`;
-      }
-
-      const lecturaVentas = leerVentas();
-      if (!lecturaVentas.ok) {
-        return `No se puede registrar: ${lecturaVentas.error}`;
-      }
-      return validar_stock_movimiento(
-        movimiento,
-        revalidacionJornada.jornada.items,
-        lecturaVentas.ventas,
-        actuales
-      );
-    });
+    // La frontera recalcula el stock al registrar, con lecturas frescas (M-2):
+    // la jornada del render es sólo un snapshot que se revalida contra storage.
+    const resultado = registrarMovimiento(movimiento, jornada);
 
     if (resultado) {
       setError(resultado);
@@ -587,6 +569,15 @@ export default function Movimientos() {
                     </select>
                   </label>
 
+                  {cambioMixto && (
+                    <p
+                      role="alert"
+                      className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800 md:col-span-2"
+                    >
+                      {MENSAJE_CAMBIO_MIXTO_NO_HABILITADO}
+                    </p>
+                  )}
+
                   <CampoCantidad
                     etiqueta="Cantidad entregada *"
                     unidad={productoEntregado?.unidadMedida}
@@ -636,7 +627,7 @@ export default function Movimientos() {
             <button
               type="button"
               onClick={guardarMovimiento}
-              disabled={estadoOperacion.bloqueado}
+              disabled={estadoOperacion.bloqueado || cambioMixto}
               className="min-h-14 w-full rounded-xl bg-blue-600 px-5 text-base font-bold text-white hover:bg-blue-700"
             >
               Registrar {etiquetas[formulario.tipo].toLowerCase()}

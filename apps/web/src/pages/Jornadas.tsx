@@ -11,20 +11,18 @@ import { useCamiones } from "../hooks/useCamiones";
 import { useProductos } from "../hooks/useProductos";
 import { useJornadas } from "../hooks/useJornadas";
 import { useRetornos } from "../hooks/useRetornos";
-import {
-  cantidad_unidad_desde_texto,
-  es_cantidad_valida,
-} from "../domain/cantidades";
-import { subtotal_linea, sumar_importes } from "../domain/precios";
-import {
-  cantidad_a_texto,
-  MENSAJE_PESO_NO_OPERABLE,
-} from "../domain/productos";
+import { cantidad_a_texto } from "../domain/productos";
 import {
   type Jornada,
   type ItemCarga,
 } from "../data/mockJornadas";
-import type { RetornoDeposito } from "../data/mockRetornos";
+import {
+  atributos_input_carga,
+  disponibilidad_carga,
+  entrada_carga,
+  precio_item_valido,
+  valor_estimado_carga,
+} from "./jornadas_preparacion";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import AvisoCatalogoDemo from "../components/AvisoCatalogoDemo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
@@ -34,68 +32,8 @@ const moneda = (valor: number) =>
     currency: "ARS",
     maximumFractionDigits: 2,
   }).format(valor);
-// Sólo `unidad`: las cantidades `peso` se muestran con cantidad_a_texto.
-const unidades = {
-  unidad: "un.",
-};
-// Valor de referencia de un ítem de carga `unidad`. B1: la valorización de
-// `peso` (D-R1) no está migrada; lanza y nunca se aproxima.
-function valorItem(item: ItemCarga): number {
-  if (item.unidadMedida !== "unidad") {
-    throw new Error(MENSAJE_PESO_NO_OPERABLE);
-  }
-  return subtotal_linea({
-    unidad_medida: item.unidadMedida,
-    cantidad: item.cantidad,
-    precio: item.precioReferencia,
-  });
-}
-
-function calcularStockReservado(
-  jornadas: Jornada[],
-  retornos: RetornoDeposito[]
-): Record<number, number> {
-  const reservado: Record<number, number> = {};
-
-  for (const jornada of jornadas) {
-    for (const item of jornada.items) {
-      reservado[item.productoId] =
-        (reservado[item.productoId] ?? 0) + item.cantidad;
-    }
-  }
-
-  for (const retorno of retornos) {
-    const jornadaOrigen = jornadas.find(
-      (j) => j.id === retorno.jornadaId
-    );
-    if (
-      !jornadaOrigen ||
-      jornadaOrigen.estado !== "cerrada" ||
-      jornadaOrigen.camionId !== retorno.camionId
-    ) {
-      continue;
-    }
-    for (const item of retorno.items) {
-      const cargado = jornadaOrigen.items.find(
-        (p) => p.productoId === item.productoId
-      );
-      if (
-        !cargado ||
-        cargado.unidadMedida !== item.unidadMedida ||
-        !Number.isFinite(item.cantidadAprobada) ||
-        item.cantidadAprobada < 0 ||
-        item.cantidadAprobada > item.cantidadContada
-      ) {
-        continue;
-      }
-      reservado[item.productoId] =
-        (reservado[item.productoId] ?? 0) - item.cantidadAprobada;
-    }
-  }
-
-  return reservado;
-}
-
+// Stock, entrada y valor estimado: jornadas_preparacion.ts (misma semántica
+// que la frontera de useJornadas; sin copia local).
 export default function Jornadas() {
   const { camiones, estadoLectura: estadoCamiones } = useCamiones();
   const { productos, estadoLectura: estadoProductos } = useProductos();
@@ -116,16 +54,17 @@ export default function Jornadas() {
   const [camionId, setCamionId] = useState("");
   const [chofer, setChofer] = useState("");
   const [zona, setZona] = useState("");
-  // Texto del input entero de cada producto "unidad". Los productos "peso"
-  // no tienen input en B1 (B2).
+  // Texto del input de cada producto: entero ("unidad") o kg con coma y
+  // hasta 3 decimales ("peso").
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
-  // Stock comprometido en las cargas, menos los retornos aprobados.
-  // Las jornadas cerradas siguen reservando lo que no regresó.
-  const stockReservado = useMemo(
-    () => calcularStockReservado(jornadas, retornos),
-    [jornadas, retornos]
+  // Disponible = stock − (cargas − retornos aprobados), con la misma función
+  // que la frontera. ok: false si el reservado es incalculable: la carga no
+  // se habilita.
+  const disponibilidad = useMemo(
+    () => disponibilidad_carga(productos, jornadas, retornos),
+    [productos, jornadas, retornos]
   );
   // Camiones sin otra jornada activa y fuera de mantenimiento.
   const camionesDisponibles = camiones.filter((camion) => {
@@ -136,65 +75,30 @@ export default function Jornadas() {
         jornada.estado !== "cerrada"
     );
   });
-  function disponibilidad(productoId: number) {
-    const producto = productos.find((p) => p.id === productoId);
-    if (!producto) return 0;
-    return Math.max(
-      0,
-      producto.stock - (stockReservado[productoId] ?? 0)
-    );
-  }
-  // Convierte el texto de la UX a la cantidad canónica (entero) para persistir.
-  // B1: un producto "peso" nunca aporta cantidad (no operable hasta B2).
-  const obtenerCantidadCanonica = useCallback(
-    (productoId: number): number => {
-      const valor = cantidades[productoId];
-      if (!valor) return 0;
-      const producto = productos.find((p) => p.id === productoId);
-      if (!producto) return 0;
-      if (producto.unidadMedida === "unidad") {
-        // Una cantidad de unidad inválida no cuenta como cantidad: devuelve 0
-        // y guardarPreparacion la reporta como error.
-        return cantidad_unidad_desde_texto(valor) ?? 0;
-      }
-      return 0;
-    },
-    [cantidades, productos]
+  const entradaDe = useCallback(
+    (producto: { id: number; unidadMedida: ItemCarga["unidadMedida"] }) =>
+      entrada_carga(producto.unidadMedida, cantidades[producto.id] ?? ""),
+    [cantidades]
   );
 
-  // Texto de unidad no vacío que no es un entero finito >= 0.
-  const hayCantidadUnidadInvalida = useCallback(
-    (productoId: number): boolean => {
-      const valor = cantidades[productoId];
-      const producto = productos.find((p) => p.id === productoId);
-      return (
-        producto?.unidadMedida === "unidad" &&
-        valor !== undefined &&
-        cantidad_unidad_desde_texto(valor) === null
-      );
-    },
-    [cantidades, productos]
-  );
-
-  const hayCantidadPositiva = useCallback(
-    (productoId: number): boolean => {
-      return obtenerCantidadCanonica(productoId) > 0;
-    },
-    [obtenerCantidadCanonica]
-  );
-
+  // Cantidad canónica: unidades enteras o gramos enteros.
   const itemsSeleccionados = useMemo(() => {
-    return productos
-      .filter((producto) => hayCantidadPositiva(producto.id))
-      .map((producto): ItemCarga => ({
+    const items: ItemCarga[] = [];
+    for (const producto of productos) {
+      const entrada = entradaDe(producto);
+      if (entrada.estado !== "valida") continue;
+      items.push({
         productoId: producto.id,
         nombreProducto: producto.nombre,
         unidadMedida: producto.unidadMedida,
-        cantidad: obtenerCantidadCanonica(producto.id),
+        cantidad: entrada.cantidad,
         precioReferencia: producto.precio,
-      }));
-  }, [productos, hayCantidadPositiva, obtenerCantidadCanonica]);
-  const valorCarga = sumar_importes(itemsSeleccionados.map(valorItem));
+      });
+    }
+    return items;
+  }, [productos, entradaDe]);
+  // P-B2-1: null con cualquier línea `peso` (sin subtotal parcial).
+  const valorCarga = valor_estimado_carga(itemsSeleccionados);
   const jornadasOrdenadas = [...jornadas].sort((a, b) =>
     b.fechaCreacion.localeCompare(a.fechaCreacion)
   );
@@ -220,7 +124,7 @@ export default function Jornadas() {
   function guardarPreparacion() {
     setError("");
     setMensaje("");
-    if (estadoOperacion.bloqueado) return;
+    if (estadoOperacion.bloqueado || !disponibilidad.ok) return;
     const idCamion = Number(camionId);
     if (
       !camionId ||
@@ -233,65 +137,32 @@ export default function Jornadas() {
       setError("Completá el chofer y la zona de reparto.");
       return;
     }
+    // M-3 (bloque E): el stock NO se comprueba aquí con el snapshot del
+    // render. Las cantidades de la UX sí; el stock se valida dentro de la
+    // frontera, con Productos, Jornadas y Retornos releídos al persistir.
+    for (const producto of productos) {
+      if (entradaDe(producto).estado === "invalida") {
+        setError(
+          producto.unidadMedida === "peso"
+            ? `Cantidad inválida: ${producto.nombre}. Ingresá kg con coma y hasta 3 decimales (ej. 1,250).`
+            : `Cantidad inválida: ${producto.nombre}`
+        );
+        return;
+      }
+    }
     if (itemsSeleccionados.length === 0) {
       setError("Agregá al menos un producto a la carga.");
       return;
     }
 
-    // M-3 (bloque E): el stock NO se comprueba aquí con el snapshot del
-    // render. Las cantidades de la UX sí; el stock se valida dentro de la
-    // frontera, con Jornadas y Retornos reídos en el momento de persistir.
-    for (const producto of productos) {
-      if (hayCantidadUnidadInvalida(producto.id)) {
-        setError(`Cantidad inválida: ${producto.nombre}`);
-        return;
-      }
-      const canonica = obtenerCantidadCanonica(producto.id);
-      if (canonica === 0) continue;
-      const cantidadValida = es_cantidad_valida(canonica);
-      if (!cantidadValida) {
-        setError(`Cantidad inválida: ${producto.nombre}`);
-        return;
-      }
-    }
-
-    // Validación defensiva de precios: no se persiste un ítem cuyo valor no
-    // se pueda calcular con el dominio de precios.
+    // Validación defensiva de precios: una línea `unidad` debe poder
+    // valorizarse; una `peso` sólo exige precio por kg válido (sin D-R1).
     for (const item of itemsSeleccionados) {
-      try {
-        valorItem(item);
-      } catch {
+      if (!precio_item_valido(item)) {
         setError(`Precio inválido: ${item.nombreProducto}`);
         return;
       }
     }
-
-    // Validación de stock sobre lecturas frescas: la frontera relee Jornadas
-    // y Retornos justo antes de persistir y pasa esos conjuntos a esta
-    // función pura. El snapshot del render no participa en la persistencia.
-    const validarStockConLecturas = (
-      jornadasActuales: Jornada[],
-      retornosActuales: RetornoDeposito[]
-    ): string | null => {
-      const reservadoActual = calcularStockReservado(
-        jornadasActuales,
-        retornosActuales
-      );
-
-      for (const producto of productos) {
-        const canonica = obtenerCantidadCanonica(producto.id);
-        if (canonica === 0) continue;
-        const disponible = Math.max(
-          0,
-          producto.stock - (reservadoActual[producto.id] ?? 0)
-        );
-        if (canonica > disponible) {
-          return `No hay stock suficiente de ${producto.nombre}.`;
-        }
-      }
-
-      return null;
-    };
 
     const jornada: Jornada = {
       id: crypto.randomUUID(),
@@ -304,10 +175,9 @@ export default function Jornadas() {
       items: itemsSeleccionados,
     };
 
-    const errorPreparacion = crearPreparacion(
-      jornada,
-      validarStockConLecturas
-    );
+    // El stock se valida en la frontera, con Productos, Jornadas y Retornos
+    // releídos justo antes de persistir.
+    const errorPreparacion = crearPreparacion(jornada);
 
     if (errorPreparacion) {
       setError(errorPreparacion);
@@ -329,7 +199,7 @@ export default function Jornadas() {
       setError("El camión ya no está disponible.");
       return;
     }
-    // B1: la frontera persistida rechaza `peso` aunque la UI lo bloquee.
+    // El error concreto de la frontera persistida se muestra tal cual.
     const errorSalida = confirmarSalida(jornada.id);
     if (errorSalida) {
       setError(errorSalida);
@@ -462,38 +332,25 @@ export default function Jornadas() {
             Las cantidades disponibles contemplan las cargas
             y los retornos aprobados al depósito en esta demo.
           </p>
+          {!disponibilidad.ok && (
+            <p
+              role="alert"
+              className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800"
+            >
+              No se puede calcular el stock disponible: hay cargas o retornos
+              inconsistentes. No se puede preparar una carga.
+            </p>
+          )}
           <div className="space-y-3">
             {productos.map((producto) => {
-              const disponible = disponibilidad(producto.id);
-              if (producto.unidadMedida === "peso") {
-                // B1: sin input; la carga por peso se habilita en B2.
-                return (
-                  <div
-                    key={producto.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-4"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <Package
-                        className="shrink-0 text-slate-400"
-                        size={23}
-                      />
-                      <div>
-                        <p className="font-medium text-slate-800">
-                          {producto.nombre}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          Disponible: {cantidad_a_texto(producto.unidadMedida, disponible)}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="text-sm text-amber-700">
-                      {MENSAJE_PESO_NO_OPERABLE}
-                    </p>
-                  </div>
-                );
-              }
-
-              // UX para lácteos: solo entero
+              const disponible = disponibilidad.ok
+                ? disponibilidad.disponibles[producto.id]
+                : null;
+              const esPeso = producto.unidadMedida === "peso";
+              const { sufijo, ...atributos } = atributos_input_carga(
+                producto.unidadMedida,
+                disponible
+              );
               return (
                 <div
                   key={producto.id}
@@ -509,21 +366,24 @@ export default function Jornadas() {
                         {producto.nombre}
                       </p>
                       <p className="text-sm text-slate-500">
-                        Disponible: {disponible} {unidades[producto.unidadMedida]}
+                        {disponible === null
+                          ? "Disponible: no calculable"
+                          : disponible < 0
+                          ? `Disponible: sin stock (lo cargado supera el stock en ${cantidad_a_texto(producto.unidadMedida, -disponible)})`
+                          : `Disponible: ${cantidad_a_texto(producto.unidadMedida, disponible)}`}
                       </p>
                       <p className="text-xs text-slate-400">
                         {moneda(producto.precio)} por{" "}
-                        {producto.unidadMedida}
+                        {esPeso ? "kg" : "unidad"}
                       </p>
                     </div>
                   </div>
                   <label className="flex items-center gap-2 text-sm">
                     <span>Cargar:</span>
+                    {/* unidad: type number (como antes); peso: texto en kg
+                        con coma. La interpretación es siempre entrada_carga. */}
                     <input
-                      type="number"
-                      min="0"
-                      max={disponible}
-                      step="1"
+                      {...atributos}
                       value={cantidades[producto.id] ?? ""}
                       onChange={(e) =>
                         setCantidades((actuales) => ({
@@ -531,11 +391,11 @@ export default function Jornadas() {
                           [producto.id]: e.target.value,
                         }))
                       }
-                      className="min-h-12 w-24 rounded-lg border border-slate-300 p-3 text-right"
-                      aria-label={`Cantidad de ${producto.nombre}`}
+                      className={`min-h-12 ${esPeso ? "w-28" : "w-24"} rounded-lg border border-slate-300 p-3 text-right`}
+                      aria-label={`Cantidad de ${producto.nombre}${esPeso ? " en kg" : ""}`}
                     />
                     <span className="w-10 text-slate-500">
-                      {unidades[producto.unidadMedida]}
+                      {sufijo}
                     </span>
                   </label>
                 </div>
@@ -548,17 +408,19 @@ export default function Jornadas() {
               Valor estimado de la carga
             </p>
             <p className="mt-1 text-3xl font-bold text-blue-900">
-              {moneda(valorCarga)}
+              {valorCarga === null ? "Sin valorizar" : moneda(valorCarga)}
             </p>
             <p className="mt-1 text-xs text-blue-700">
-              Calculado con precios de venta de referencia.
+              {valorCarga === null
+                ? "Las cargas con productos por peso no se valorizan todavía."
+                : "Calculado con precios de venta de referencia."}
             </p>
           </div>
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={guardarPreparacion}
-              disabled={estadoOperacion.bloqueado}
+              disabled={estadoOperacion.bloqueado || !disponibilidad.ok}
               className="min-h-12 rounded-lg bg-blue-600 px-5 font-semibold text-white"
             >
               Guardar preparación
@@ -591,14 +453,8 @@ export default function Jornadas() {
           const camion = camiones.find(
             (c) => c.id === jornada.camionId
           );
-          // B1: una jornada con ítems `peso` no se valoriza (D-R1, B3) ni
-          // puede salir (B2).
-          const tienePeso = jornada.items.some(
-            (item) => item.unidadMedida !== "unidad"
-          );
-          const total = tienePeso
-            ? null
-            : sumar_importes(jornada.items.map(valorItem));
+          // P-B2-1: una jornada con ítems `peso` no se valoriza (D-R1, B3).
+          const total = valor_estimado_carga(jornada.items);
           return (
             <article
               key={jornada.id}
@@ -674,19 +530,14 @@ export default function Jornadas() {
                     Valor de referencia
                   </p>
                   <p className="text-xl font-bold text-slate-800">
-                    {total === null ? "—" : moneda(total)}
+                    {total === null ? "Sin valorizar" : moneda(total)}
                   </p>
                 </div>
-                {jornada.estado === "preparacion" && tienePeso && (
-                  <p className="text-sm text-amber-700">
-                    {MENSAJE_PESO_NO_OPERABLE}
-                  </p>
-                )}
                 {jornada.estado === "preparacion" && (
                   <button
                     type="button"
                     onClick={() => iniciarReparto(jornada)}
-                    disabled={estadoOperacion.bloqueado || tienePeso}
+                    disabled={estadoOperacion.bloqueado}
                     className="min-h-12 rounded-lg bg-green-600 px-5 font-semibold text-white hover:bg-green-700"
                   >
                     Confirmar salida

@@ -1,4 +1,188 @@
 ---
+## 28/10/2026 — Slice B2: auditoría Codex del freeze, fixes M-1/M-2 y security re-review (sin commit)
+
+**Rama:** `feat/slice-b2-jornadas-movimientos-peso` desde `main` = `e698d4e66dcf3c53fcd2d71bf11e4312143fdecc`. **Alcance:** fronteras de persistencia frontend/localStorage de Jornadas y Movimientos y sus tests. Sin SQL, sin migraciones, sin Supabase, sin RPC, sin RLS y sin producción. No se tocaron Blueprint, PRD, ADR ni `AGENTS.md`. Sin commit hasta la autorización humana.
+
+### Freeze anterior rechazado
+El freeze `3150a58a54820a286975727b9d8ec192a75caecc52f11804f1c10893546407ea` quedó **rechazado** por la auditoría de Codex. Se conserva sólo como referencia histórica y no identifica el artefacto final de B2.
+
+### Hallazgos de Codex
+- **M-1:** `crearJornadaPersistida`, expuesta por el hook como `crearJornada`, era una segunda ruta de alta de jornadas que no validaba stock. Persistía una preparación que `crearPreparacionPersistida` rechazaba, por ejemplo con stock + 1 g.
+- **M-2:** `registrarMovimientoPersistido(movimiento, validar, alGuardar?)` recibía la validación como callback. Con `registrarMovimientoPersistido(m, () => null)` se persistía un movimiento con jornada inexistente, camión ajeno y una cantidad muy superior a la carga.
+
+Ambos bypasses se reprodujeron sobre el código previo al fix con un PoC temporal en una copia aislada: **2/2** tests pasados, es decir, los dos bypasses confirmados. El PoC no forma parte del cambio.
+
+### Fixes
+- **M-1, `useJornadas.ts`:** se eliminaron `crearJornadaPersistida` y `crearJornada`, del hook y de su objeto retornado. `crearPreparacionPersistida` queda como única frontera de alta, con la validación de stock en gramos exactos. `esPreparacionNueva` conserva su cuerpo y `confirmarSalidaPersistida` y `cerrarJornadaPersistida` no cambiaron.
+- **M-2, `useMovimientos.ts`:**
+  - `registrarMovimientoPersistido(movimiento, jornada)` ejecuta internamente `validarMovimientoConLecturas`: no acepta validador ni callback de escritura, y escribe una sola vez y sólo si todo pasa;
+  - `registrarMovimientoOperacion` quedó pura: valida y devuelve `{ ok, movimientos } | { ok: false, error }`, sin escrituras;
+  - el hook expone `registrarMovimiento(movimiento, jornada)`.
+- **`Movimientos.tsx`:** ya no importa `validarMovimientoConLecturas` ni construye un callback; llama `registrarMovimiento(movimiento, jornada)`.
+
+### Tests
+- `domain/movimientos.test.ts` y `persistencia.test.ts`: los tests de `registrarMovimientoOperacion` verifican el resultado explícito, sin mock de guardado.
+- `persistencia.test.ts`: los tests de alta pasaron a `crearPreparacionPersistida`. Cubren:
+  - stock exacto, que persiste;
+  - **+1 g**, que se rechaza con 0 escrituras;
+  - `abierta`, `cerrada`, preparación con `fechaSalida` y preparación con `cierre`, que se rechazan;
+  - duplicados;
+  - 7 variantes de storage corrupto;
+  - historial que agrega al final.
+
+  La frontera de movimientos se prueba contra una jornada sembrada en storage.
+- `registrarMovimiento.test.ts`: el helper llama directo a la frontera. Regresivos nuevos:
+  - **jornada del render inexistente** en storage;
+  - escenario del PoC (**`jornadaId="no-existe"`, `camionId=999`, `9_000_000` g**);
+  - control positivo con exactamente 1 `setItem`.
+
+  Los negativos verifican 0 `setItem` y raw intacto.
+- Afectados: 391 → 397. Global: 1060 → 1066.
+
+### Verificación (repo real, desde `apps/web/`)
+| Verificación | Resultado |
+|---|---|
+| Vitest de los 4 archivos afectados | 4 archivos, **397/397** |
+| `npx vitest run` | **30 archivos, 1066/1066** |
+| `npx tsc -b` | 0 |
+| `npx eslint .` | 0 |
+| `npx playwright test` | **95/95** |
+| `npm run build` | 0; sólo el aviso que ya existía de chunk > 500 kB |
+| `git diff --check` (raíz) | 0 |
+
+- Greps en `src`: 0 resultados para `crearJornadaPersistida` o `crearJornada`; 0 llamadas a `registrarMovimientoPersistido` con un callback.
+- Los fixes se validaron primero en una copia aislada de `apps/web` en el scratchpad y se copiaron al repo byte a byte. Los 6 archivos se verificaron con `cmp` y SHA256 contra las previews aprobadas.
+
+### Checkpoint pre-security y revisiones
+- **Checkpoint pre-security** (manifest SHA256 de los 18 paths B2): `f7a0fc850514e23b5566264b53209744bbd10a9759f1f2e74be9320fddc8c835`. No es el freeze final.
+- **Security re-review independiente** sobre ese checkpoint: **APPROVED**, sin hallazgos.
+- **Segunda revisión independiente (OpenCode)** sobre ese checkpoint: **APPROVED**, sin hallazgos.
+- Ninguna de las dos revisiones modificó archivos.
+
+### Pendientes
+- Generar el freeze y el hash final después de esta actualización documental. Esta entrada cambia `docs/progress-log.md`, así que el checkpoint pre-security ya no identifica el artefacto final.
+- Auditoría final de Codex y OpenCode sobre ese hash.
+- Commit sólo con autorización humana.
+- Sin push, PR, merge ni deploy todavía.
+- Se mantienen las deudas de las entradas anteriores de B2 (BAJO-2, BAJO-3, B3, B4 y B5). La deuda «`crearJornadaPersistida` no valida stock» queda **resuelta** por M-1.
+
+---
+## 27/10/2026 — Slice B2: security review de las fronteras de Jornadas y Movimientos y fixes (sin commit)
+
+**Rama:** `feat/slice-b2-jornadas-movimientos-peso` desde `main` = `e698d4e66dcf3c53fcd2d71bf11e4312143fdecc`. **Alcance:** fronteras de persistencia frontend/localStorage de Jornadas y Movimientos y sus tests. Sin SQL, sin migraciones, sin Supabase, sin RPC, sin RLS y sin producción. No se tocaron Blueprint, PRD, ADR ni `AGENTS.md`. Sin commit hasta la revisión humana.
+
+### Security review B2: resultado inicial `BLOQUEADO`
+La review cubrió todo el diff B2, con foco en `crearPreparacionPersistida`, `crearJornadaPersistida`, `confirmarSalidaPersistida`, `cerrarJornadaPersistida`, `calcularStockReservado`, `validarStockPreparacion`, `registrarMovimientoOperacion`, `validarMovimientoConLecturas`, `validar_stock_movimiento` y `movimiento_valido`. Cada hallazgo se reprodujo con un test de sondeo en una copia aislada.
+
+### Hallazgos corregidos
+- **ALTO-1:** `crearJornadaPersistida` y `crearPreparacionPersistida` permitían altas fuera de `preparacion`, incluida una jornada `cerrada` con peso. Eso salteaba el bloqueo del cierre con peso hasta B4. Es una regresión del guard de H-1 de B1.
+- **MEDIO-1:** `crearPreparacionPersistida` podía escribir una jornada que su propio lector rechazaba, por ejemplo con cantidad `0` o un precio inválido. El storage de Jornadas quedaba corrupto y bloqueaba toda la operación.
+- **MEDIO-2:** las salidas históricas con una unidad distinta de la carga se sumaban como si fueran compatibles. Por ejemplo, una merma histórica `unidad` de 5 sobre una carga `peso` contaba como 5 g.
+- **BAJO-1:** el movimiento no estaba atado explícitamente al `jornadaId` y al `camionId` de la jornada revalidada. Podía persistirse un movimiento huérfano validado contra otra carga.
+
+### Fixes
+- `useJornadas.ts`:
+  - nuevo `esPreparacionNueva`: exige `jornadaValida`, estado `preparacion`, `fechaSalida === null` y que no haya cierre;
+  - `crearPreparacionPersistida` lo aplica antes de cualquier lectura o escritura y devuelve `MENSAJE_PREPARACION_INVALIDA`;
+  - `crearJornadaPersistida` aplica el mismo guard y devuelve `null`.
+- `domain/movimientos.ts`: `validar_stock_movimiento` bloquea con `MENSAJE_SALIDAS_SUPERAN_CARGA` cualquier salida histórica de la jornada con una unidad incompatible, antes de sumar. Revisa ventas, mermas y entregados de cambios. Las ventas ahora llevan `unidadMedida` (`VentaConItemsConUnidad`).
+- `useMovimientos.ts`: `validarMovimientoConLecturas` exige el mismo `jornadaId` y `camionId` que la jornada revalidada. Si no coinciden, devuelve `MENSAJE_MOVIMIENTO_OTRA_JORNADA`.
+
+### Tests y evidencia
+- **+28 tests** en `crearPreparacion.test.ts` (+9), `persistencia.test.ts` (+2), `movimientos.test.ts` (+7) y `registrarMovimiento.test.ts` (+10). Los negativos verifican 0 `setItem` y raw intacto.
+- En `movimientos.test.ts` se agregó `unidadMedida: "unidad"` a dos fixtures de ventas. El test «ventas previas mayores que lo cargado» pasó a un producto `unidad`, porque las ventas por peso son de B3; la expectativa no cambió.
+- **Prueba de mutación:** contra el código sin fix, los 23 tests negativos fallan y los 5 controles pasan.
+
+| Verificación (desde `apps/web/`) | Resultado |
+|---|---|
+| Vitest de los 4 archivos afectados | 4 archivos, **391/391** |
+| `npx vitest run` | **30 archivos, 1060/1060** (antes 1032) |
+| `npx playwright test` | **95/95**, `retries=0` en local |
+| `npx tsc -b` | 0 |
+| `npx eslint .` | 0 |
+| `npm run build` | 0; sólo el aviso que ya existía de chunk > 500 kB |
+| `git diff --check` | 0 |
+
+### Integridad
+Los 7 archivos aplicados (`useJornadas.ts`, `useMovimientos.ts`, `domain/movimientos.ts` y los 4 archivos de tests) se verificaron con SHA256 y `cmp` contra las previews aprobadas, antes y después de la copia.
+
+### Deudas
+- **BAJO-2:** la unidad de una devolución, o del lado devuelto de un cambio, sale del catálogo del render y no se relee en la frontera. Queda para B4.
+- **BAJO-3:** el estado del camión no se relee en la frontera de preparación ni en la confirmación de salida. Queda para B4.
+- `crearJornadaPersistida` sigue sin validar stock y no tiene caller productivo.
+- La security review cubre esta capa local. La review de seguridad de backend (SQL, RPC, RLS) sigue pendiente para la fase en la que se implemente.
+
+---
+## 27/10/2026 — Modelo por peso, Slice B2: Jornadas y Movimientos con peso en la capa frontend/localStorage transitoria (sin commit)
+
+**Rama:** `feat/slice-b2-jornadas-movimientos-peso` desde `main` = `e698d4e66dcf3c53fcd2d71bf11e4312143fdecc` (merge del PR #28, B1). **Alcance:** capa frontend/localStorage transitoria y sus tests. Sin migraciones, sin SQL, sin Supabase, sin staging y sin producción. Las claves siguen en `_demo_v5` (sin rotación) y D-R4 queda intacta. Sin commit hasta la revisión humana.
+
+### Decisiones humanas aplicadas
+- **P-B2-1:** no se valoriza ninguna carga con `peso`. Si la selección o la jornada tiene cualquier ítem `peso`, el total estimado es `null` y se muestra «Sin valorizar», sin subtotal parcial de las líneas `unidad`. Ninguna línea `peso` pasa por la valorización y D-R1 queda para B3.
+- **P-B2-2:** una jornada con `peso` se prepara y se confirma (`preparacion` → `abierta`). El cierre, la rendición y los retornos con `peso` siguen bloqueados hasta B4 (`cerrarJornadaPersistida` conserva el guard). Una jornada con peso puede quedar abierta hasta B4; no se agregó ninguna transición para liberar el camión.
+- **P-B2-3:** se habilitan merma y devolución `peso` y el cambio `peso ↔ peso`, con una cantidad propia en cada lado y sin conversión. Los cambios `unidad ↔ peso` y `peso ↔ unidad` **no están aprobados** y fallan cerrado con `MENSAJE_CAMBIO_MIXTO_NO_HABILITADO`.
+- **Inversión de H-1:** la protección de B1 (auditoría de `8ff5bef`) se invierte deliberadamente sólo en creación, preparación y salida. Los tests de H-1 se reescribieron con la expectativa de B2, no se borraron.
+
+### Qué se hizo (por paso)
+- **Paso 2, dominio de movimientos:**
+  - `cantidad_movimiento_desde_entrada` acepta `peso` con `kg_a_gramos` (coma decimal, hasta 3 decimales, punto rechazado, BigInt, sin float);
+  - `es_cambio_mixto` y `movimiento_valido` rechazan el cambio mixto también al leer el storage.
+- **Paso 3, persistencia de jornadas (`useJornadas.ts`):**
+  - se levanta el guard `peso` en `crearPreparacionPersistida`, `crearJornadaPersistida` y `confirmarSalidaPersistida`;
+  - el cálculo de stock se movió desde la página a funciones puras exportadas: `calcularStockReservado` y `validarStockPreparacion`;
+  - la frontera relee Jornadas, Retornos y **Productos** al persistir (TOCTOU de catálogo, decisión humana);
+  - las sumas usan `sumar_cantidades_seguras`;
+  - el descuento de retornos falla cerrado si un ítem es inconsistente o si lo aprobado de una jornada supera lo cargado: nunca queda un reservado negativo;
+  - se eliminó el `Math.max` que ocultaba inconsistencias.
+- **Paso 4, UI de Jornadas:**
+  - `pages/jornadas_preparacion.ts` es un módulo puro nuevo: `entrada_carga`, `disponibilidad_carga`, `valor_estimado_carga`, `precio_item_valido` y `atributos_input_carga`;
+  - input `peso` con `type="text"`, `inputMode="decimal"` y `0,000`; `unidad` conserva su input numérico anterior;
+  - «Disponible» en kg con 3 decimales; si el disponible es negativo o no se puede calcular, la carga se deshabilita;
+  - «Sin valorizar» según P-B2-1, y «Confirmar salida» se habilita con peso.
+- **Paso 5, Movimientos:**
+  - se levanta el guard de B1 en la frontera y en la UI;
+  - el cambio mixto se rechaza antes de cualquier efecto, con el mensaje específico;
+  - el callback de validación con lecturas frescas se movió a `validarMovimientoConLecturas`;
+  - `validar_stock_movimiento` exige la misma `unidadMedida` que la carga en todos los lados y falla cerrado si las salidas existentes superan lo cargado. `disponibilidad_de_jornada` conserva su `Math.max` sólo para presentación;
+  - `pages/movimientos_formulario.ts` agrupa los atributos de UX del input.
+- **Paso 6, E2E:**
+  - `h1-confirmar-salida-peso.spec.ts` reescrito: invertido para B2 y con la regresión `unidad`;
+  - nuevos `b2-jornadas-peso.spec.ts` (3 tests) y `b2-movimientos-peso.spec.ts` (6 tests).
+
+### Archivos
+- **Modificados:** `src/domain/movimientos.ts`, `src/domain/movimientos.test.ts`, `src/hooks/useJornadas.ts`, `src/hooks/crearPreparacion.test.ts`, `src/hooks/persistencia.test.ts`, `src/hooks/useMovimientos.ts`, `src/pages/Jornadas.tsx`, `src/pages/Jornadas.test.ts`, `src/pages/Movimientos.tsx`, `tests/h1-confirmar-salida-peso.spec.ts` y `docs/progress-log.md`.
+- **Nuevos:** `src/pages/jornadas_preparacion.ts`, `src/pages/jornadas_preparacion.test.ts`, `src/pages/movimientos_formulario.ts`, `src/pages/movimientos_formulario.test.ts`, `src/hooks/registrarMovimiento.test.ts`, `tests/b2-jornadas-peso.spec.ts` y `tests/b2-movimientos-peso.spec.ts`.
+
+### Verificación (local, desde `apps/web/`)
+| Comando | Resultado |
+|---|---|
+| `npx playwright test` | `PLAYWRIGHT_EXIT=0`; **95/95** (1 setup + 94; antes de B2: 86); 0 retries, sin flaky |
+| `npx vitest run` | `VITEST_EXIT=0`; **30 archivos, 1032/1032** (B1: 27 / 891) |
+| `npx tsc -b` | `TYPECHECK_EXIT=0` |
+| `npx eslint .` | `LINT_EXIT=0` |
+| `npm run build` | `BUILD_EXIT=0`; sólo el aviso preexistente de chunk > 500 kB (`index-Ct-Znq6l.js`, 652,74 kB) |
+| `git diff --check` (raíz) | exit 0, sin salida |
+
+- Cada paso se validó primero en una copia aislada de `apps/web` en el scratchpad y se aplicó al repo byte a byte, verificado con `cmp` y SHA256. Los 3 specs E2E se corrieron antes de aplicarlos con una config de Playwright aislada: 13/13 en dos corridas con `retries: 0`.
+- Casos clave cubiertos:
+  - `1,250` → 1250 g, `28,680` → 28680 g, `1,005` → 1005 g y `0,001` → 1 g;
+  - se rechazan punto decimal, más de 3 decimales, cero, negativos y texto;
+  - 1 g de más se rechaza en Jornadas y en Movimientos;
+  - TOCTOU de productos, jornadas, ventas y movimientos;
+  - corrupción y overflow fallan cerrado, sin escritura y con el raw intacto;
+  - el cierre con peso sigue bloqueado.
+
+### Riesgos y deudas
+- **Pendiente de decisión:** la semántica del cambio mixto `unidad ↔ peso` requiere una decisión humana o una ADR. Hasta entonces falla cerrado.
+- **B3:** ventas `peso` con D-R1, valorización de cargas con peso, redondeo de líneas `unidad` y documentos mixtos (sin decidir) y retiro de `precioMediaPieza`.
+- **B4:** retornos, rendición y cierre con peso. Las jornadas con peso quedan `abierta` y ocupan el camión. **La pantalla Retornos todavía permite aprobar más de lo cargado:** con un retorno así, la preparación de jornadas queda bloqueada con `MENSAJE_STOCK_NO_CALCULABLE` hasta limpiar las operaciones. Hay que cerrar ese origen.
+- **B5:** limpieza de `piezas_a_medias`/`medias_a_piezas`. `disponibles_de_jornada` conserva el `Math.max` sólo para presentación. La UI de Movimientos no avisa por adelantado si el ledger es inconsistente, sólo al registrar.
+- **Deuda:** `crearJornadaPersistida` no valida stock (no tiene caller productivo; la cubren sus invariantes estructurales).
+- **Documentación:** hay notas de estado de Blueprint §2/§7.1, del PRD y de `AGENTS.md` §10 que todavía dicen que el prototipo usa pieza/`_demo_v4`. No son reglas y no se editaron por avance; se actualizan en una tarea documental aparte si se autoriza.
+- **Seguridad:** sin cambios de DB, RLS, RPC, Auth, grants ni `SECURITY DEFINER`. Toca fronteras de persistencia de jornadas y movimientos, así que corresponde una security review antes de la auditoría independiente del hash.
+- **Sin migración DB y sin cambios en Supabase, staging ni producción.**
+
+---
 ## 27/10/2026 — Slice B1, ciclo 2: auditoría de `8ff5bef`, corrección H-1 y security review H-2 (sin commit)
 
 **Rama:** `feat/slice-b1-modelo-demo-peso`. **Base del ciclo:** `8ff5bef2257c81d442cba489aeeb9465a66db21b`, el commit de B1, auditado y **no aprobado** para cierre. Es el ciclo 2 de 3 (AGENTS.md §2.3.5). Sin migraciones, sin SQL, sin Supabase remoto, sin staging y sin producción. Sin commit hasta la revisión humana.

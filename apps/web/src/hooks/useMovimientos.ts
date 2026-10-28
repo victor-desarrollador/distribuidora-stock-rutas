@@ -3,9 +3,18 @@ import { useState } from "react";
 
 import { CLAVES_STORAGE } from "../data/clavesStorage";
 
+import type { Jornada } from "../data/mockJornadas";
 import { type MovimientoReparto } from "../data/mockMovimientos";
-import { movimiento_valido } from "../domain/movimientos";
-import { MENSAJE_PESO_NO_OPERABLE } from "../domain/productos";
+import { revalidar_jornada_para_operacion } from "../domain/jornadas";
+import {
+  es_cambio_mixto,
+  MENSAJE_CAMBIO_MIXTO_NO_HABILITADO,
+  movimiento_valido,
+  producto_movimiento_valido,
+  validar_stock_movimiento,
+} from "../domain/movimientos";
+import { leerJornadasDiscriminado } from "./useJornadas";
+import { leerVentas } from "./useVentas";
 
 const STORAGE_KEY = CLAVES_STORAGE.movimientos;
 
@@ -79,9 +88,15 @@ export function leerMovimientos(): MovimientoReparto[] {
   return lectura.ok ? lectura.movimientos : [];
 }
 
+export type ResultadoRegistroMovimiento =
+  | { ok: true; movimientos: MovimientoReparto[] }
+  | { ok: false; error: string };
+
 /**
- * Operación pura de registro de movimiento: valida, persiste y devuelve el
- * resultado. Separada del hook para ser testeable sin React.
+ * Operación pura de registro de movimiento: valida y devuelve el ledger
+ * resultante, sin escribir nada. NO es una frontera: el único caller
+ * productivo es registrarMovimientoPersistido, que inyecta la validación
+ * autoritativa y persiste sólo si el resultado es ok.
  *
  * @param cargarActuales - Función que devuelve el estado actual con discriminación de corrupción.
  *   En producción usa `leerMovimientosDiscriminado()`. En tests puede inyectarse un mock.
@@ -89,21 +104,28 @@ export function leerMovimientos(): MovimientoReparto[] {
 export function registrarMovimientoOperacion(
   movimiento: MovimientoReparto,
   validar: (actuales: MovimientoReparto[]) => string | null,
-  cargarActuales: () => ResultadoLecturaMovimientos,
-  guardarActualizados: (movimientos: MovimientoReparto[]) => void
-): string | null {
-  // 1. Validación estructural y de cantidades ANTES de cualquier efecto.
-  if (!movimiento_valido(movimiento)) {
-    return "El movimiento no es válido: las cantidades deben ser enteros positivos y seguros.";
+  cargarActuales: () => ResultadoLecturaMovimientos
+): ResultadoRegistroMovimiento {
+  // 1a. Un cambio unidad ↔ peso con lados por lo demás válidos recibe su
+  //     motivo concreto, ANTES de cualquier efecto: no tiene semántica
+  //     aprobada (B2) y no se convierte entre unidades.
+  if (
+    movimiento.tipo === "cambio" &&
+    producto_movimiento_valido(movimiento.productoDevuelto) &&
+    producto_movimiento_valido(movimiento.productoEntregado) &&
+    es_cambio_mixto(movimiento.productoDevuelto, movimiento.productoEntregado)
+  ) {
+    return { ok: false, error: MENSAJE_CAMBIO_MIXTO_NO_HABILITADO };
   }
 
-  // 1b. B1: los movimientos de productos `peso` no están migrados (B2).
-  const productos =
-    movimiento.tipo === "cambio"
-      ? [movimiento.productoDevuelto, movimiento.productoEntregado]
-      : [movimiento.producto];
-  if (productos.some((p) => p.unidadMedida !== "unidad")) {
-    return MENSAJE_PESO_NO_OPERABLE;
+  // 1b. Validación estructural y de cantidades ANTES de cualquier efecto.
+  //     `unidad` (unidades) y `peso` (gramos) se validan igual: enteros
+  //     seguros > 0 en la unidad mínima.
+  if (!movimiento_valido(movimiento)) {
+    return {
+      ok: false,
+      error: "El movimiento no es válido: las cantidades deben ser enteros positivos y seguros.",
+    };
   }
 
   // 2. Cargar estado previo con discriminación de corrupción (usa función inyectada).
@@ -111,50 +133,104 @@ export function registrarMovimientoOperacion(
 
   // 2b. Si el almacenamiento está corrupto, ABORTAR antes de cualquier efecto lateral.
   if (!lectura.ok) {
-    return `No se puede registrar: ${lectura.error}`;
+    return { ok: false, error: `No se puede registrar: ${lectura.error}` };
   }
 
   const actuales = lectura.movimientos;
 
   // 3. Duplicado por ID.
   if (actuales.some((m) => m.id === movimiento.id)) {
-    return "Este movimiento ya está registrado.";
+    return { ok: false, error: "Este movimiento ya está registrado." };
   }
 
   // 4. Validación externa de stock/disponibilidad.
   const error = validar(actuales);
 
-  if (error) return error;
+  if (error) return { ok: false, error };
 
-  // 5. Persistencia SOLO si todo pasa.
-  guardarActualizados([...actuales, movimiento]);
+  // 5. Ledger resultante: quien llama persiste SOLO si todo pasó.
+  return { ok: true, movimientos: [...actuales, movimiento] };
+}
 
-  return null;
+export const MENSAJE_MOVIMIENTO_OTRA_JORNADA =
+  "No se puede registrar: el movimiento no corresponde a la jornada seleccionada.";
+
+/**
+ * M-2 (bloque E): validación de stock de un movimiento con lecturas frescas,
+ * justo antes de persistir. La ejecuta siempre registrarMovimientoPersistido;
+ * ningún caller puede reemplazarla ni omitirla:
+ *   - revalida la jornada del render contra Jornadas leídas AHORA (existe,
+ *     mismo camión, sigue abierta); storage corrupto → aborta;
+ *   - exige que el movimiento pertenezca a esa jornada (mismo id y camión):
+ *     si no, sus salidas nunca se descontarían de ella;
+ *   - relee Ventas; corrupto → aborta;
+ *   - valida las salidas contra lo cargado en la jornada vigente, menos
+ *     ventas y movimientos actuales (`actuales` lo relee la frontera), en la
+ *     unidad mínima y sin tolerancia (1 g de más se rechaza). Overflow →
+ *     falla cerrado.
+ */
+export function validarMovimientoConLecturas(
+  movimiento: MovimientoReparto,
+  jornadaRender: Jornada,
+  actuales: MovimientoReparto[]
+): string | null {
+  const revalidacionJornada = revalidar_jornada_para_operacion(
+    leerJornadasDiscriminado(),
+    jornadaRender,
+    "abierta"
+  );
+
+  if (!revalidacionJornada.ok) {
+    return `No se puede registrar: ${revalidacionJornada.error}`;
+  }
+
+  if (
+    movimiento.jornadaId !== revalidacionJornada.jornada.id ||
+    movimiento.camionId !== revalidacionJornada.jornada.camionId
+  ) {
+    return MENSAJE_MOVIMIENTO_OTRA_JORNADA;
+  }
+
+  const lecturaVentas = leerVentas();
+  if (!lecturaVentas.ok) {
+    return `No se puede registrar: ${lecturaVentas.error}`;
+  }
+
+  return validar_stock_movimiento(
+    movimiento,
+    revalidacionJornada.jornada.items,
+    lecturaVentas.ventas,
+    actuales
+  );
 }
 
 /**
  * Frontera REAL de escritura sin React: lee el ledger de localStorage con
- * discriminación de corrupción, valida y persiste. Es lo que ejecuta el hook.
- * Si el almacenamiento está corrupto no escribe nada (no lo reinterpreta
- * como vacío ni lo pisa con solo el movimiento nuevo).
+ * discriminación de corrupción, ejecuta SIEMPRE validarMovimientoConLecturas
+ * (no acepta un validador del caller) y persiste sólo si todo pasa. Es lo que
+ * ejecuta el hook. La jornada del render es un snapshot que se revalida
+ * contra Jornadas leídas ahora. Si el almacenamiento está corrupto no escribe
+ * nada (no lo reinterpreta como vacío ni lo pisa con solo el movimiento nuevo).
  */
 export function registrarMovimientoPersistido(
   movimiento: MovimientoReparto,
-  validar: (actuales: MovimientoReparto[]) => string | null,
-  alGuardar?: (nuevos: MovimientoReparto[]) => void
-): string | null {
+  jornadaRender: Jornada
+): ResultadoRegistroMovimiento {
   try {
-    return registrarMovimientoOperacion(
+    const resultado = registrarMovimientoOperacion(
       movimiento,
-      validar,
-      leerMovimientosDiscriminado,
-      (nuevos) => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos));
-        alGuardar?.(nuevos);
-      }
+      (actuales) =>
+        validarMovimientoConLecturas(movimiento, jornadaRender, actuales),
+      leerMovimientosDiscriminado
     );
+
+    if (!resultado.ok) return resultado;
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(resultado.movimientos));
+
+    return resultado;
   } catch {
-    return "No se pudo guardar el movimiento.";
+    return { ok: false, error: "No se pudo guardar el movimiento." };
   }
 }
 
@@ -164,11 +240,19 @@ export function useMovimientos() {
     lectura.ok ? lectura.movimientos : []
   );
 
+  // Devuelve el error concreto o null si se guardó.
   function registrarMovimiento(
     movimiento: MovimientoReparto,
-    validar: (actuales: MovimientoReparto[]) => string | null
+    jornadaRender: Jornada
   ): string | null {
-    return registrarMovimientoPersistido(movimiento, validar, setMovimientos);
+    const resultado = registrarMovimientoPersistido(movimiento, jornadaRender);
+
+    if (resultado.ok) {
+      setMovimientos(resultado.movimientos);
+      return null;
+    }
+
+    return resultado.error;
   }
 
   return {
