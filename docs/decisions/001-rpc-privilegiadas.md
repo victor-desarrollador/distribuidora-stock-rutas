@@ -554,7 +554,7 @@ Mismo alcance estricto: **sólo dominio Stock**. Estas decisiones **no resuelven
 
 Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarentena_merma.sql`, `supabase/tests/stock_cuarentena_merma.test.sql` y la entrada «Etapa 2 — Stock, slice 2: stock-cuarentena-merma» de `docs/progress-log.md`.
 
-### 18.4 Decisiones acotadas a Jornadas y carga (versión 0.4 con fe de erratas E1–E3 y correcciones H-01 y H-02 de la auditoría de Codex — PROPUESTA TÉCNICA NO APROBADA; candidata a revisión independiente y aprobación humana)
+### 18.4 Decisiones acotadas a Jornadas y carga (versión 0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1 y H2-R2 de la auditoría de Codex — PROPUESTA TÉCNICA NO APROBADA; candidata a revisión independiente y aprobación humana)
 
 > **Alcance estricto.** Aplica únicamente a las seis RPC de ADR-007 (`abrir_jornada`, `reasignar_vendedor`, `corregir_jornada`, `registrar_carga`, `registrar_descarga`, `confirmar_salida`), a `public.jornadas`, a sus dos historiales, a la extensión mínima de `operaciones` y `movimientos_stock`, a la lectura acotada de perfiles de la propia empresa (18.4.2.1) y al arnés de concurrencia (18.4.11). No resuelve P8–P10 ni P12–P17 globalmente, **no resuelve P8/F3**, **no modifica P11** (§18.2: `service_role` denegado, sin excepción nueva), no cambia el estado de esta ADR (APROBADA PARA VALIDACIÓN CONTROLADA) y no autoriza producción. Las reglas de negocio están en ADR-007, que prevalece ante conflicto. `propietario_rpc` sigue sin `UPDATE` ni `DELETE` sobre `operaciones` y `movimientos_stock`, y sin ningún privilegio ni política de escritura sobre `perfiles`. No resuelve el corte de jornada (Blueprint §15, «Fechas»), que sigue pendiente.
 
@@ -571,7 +571,7 @@ Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarenten
 
 Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotencia y el inventario de tests de v0.3. La estrategia de bloqueos cambia **únicamente** en `corregir_jornada` (H-01).
 
-> **Estado: PROPUESTA TÉCNICA NO APROBADA.** Este anexo no está aprobado, no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-1, D-2, el arnés, su ejecución en CI y la security review siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas y las correcciones H-01 y H-02 siguientes. **H-01 cambia el conjunto de bloqueos de `corregir_jornada`**; E2, E3 y H-02 no cambian decisiones de diseño ni el contrato funcional de idempotencia.
+> **Estado: PROPUESTA TÉCNICA NO APROBADA.** Este anexo no está aprobado, no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-1, D-2, el arnés, su ejecución en CI y la security review siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas y las correcciones H-01, H-02, H2-R1 y H2-R2 siguientes. **H-01 cambia el conjunto de bloqueos de `corregir_jornada`** y **H2-R1 agrega una segunda consulta de la clave idempotente (paso 8a) sin agregar bloqueos**; E2, E3, H-02 y H2-R2 no cambian decisiones de diseño. Ninguna corrección modifica el contrato funcional de idempotencia: misma clave, tipo y huella devuelve la respuesta original; otro tipo u otra huella es conflicto.
 
 **Fe de erratas y correcciones sobre v0.4** (candidata; detalle en `docs/progress-log.md`):
 
@@ -580,6 +580,9 @@ Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotenci
 | E1 / H-01 | ADR-007 §5 exige el bloqueo del vendedor y de los dos camiones en una corrección. `corregir_jornada` toma **siempre** el advisory del vendedor vigente (nivel 2), además de los dos camiones (nivel 1) y la jornada (nivel 3). Reemplaza la «equivalencia» de la primera candidata, que sólo bloqueaba al vendedor cuando cambiaba la fecha. Se documentan los bloqueos por RPC y el caso I-3c; K6, K7 y K9 se amplían y se agrega K12 | 18.4.3, 18.4.5, 18.4.9, 18.4.12 |
 | E2 | Se elimina la referencia a «auxiliares de error de jornadas», que el contrato no define; se declara que no hay funciones auxiliares fuera del inventario | 18.4.6, 18.4.10 |
 | E3 | Se agregan K10 (aperturas concurrentes) y K11 (salida contra cambios de carga neta), con resultados esperados e invariantes | 18.4.9, 18.4.11 |
+| H2-R1 | Segunda consulta de la clave idempotente (paso 8a) después de los bloqueos y antes de la reverificación (8b): una solicitud repetida y concurrente recibe la respuesta original y no `jornada_estado_invalido`. I10, I11 y K9 se alinean | 18.4.3, 18.4.5, 18.4.9 |
+| H2-R2b | Tabla de `uuid` obligatorios por RPC en 18.4.3 (nulo frente a inexistente o de otra empresa), caso I13 (el rechazo estructural no reserva la clave) y **decisión D-N1** (camión nulo y jornada nula → `PT404` existentes, opción A) resuelta, sin códigos nuevos | 18.4.3, 18.4.9, 18.4.13 |
+| H2-R2 | I5 sólo se ejecuta donde existe un parámetro estructural validable; tabla de aplicabilidad por RPC (`confirmar_salida`, no aplicable). El paso 3 precisa que el vendedor nulo en `abrir_jornada` y `reasignar_vendedor` se rechaza ahí con `jornada_vendedor_invalido`, código ya definido en 18.4.7 | 18.4.3, 18.4.7, 18.4.9 |
 | H-02 | Matriz normativa de idempotencia para las seis RPC (grupo I): primera ejecución, replay idéntico, replay tras cambio de estado, autorización perdida, estructura inválida, conflicto por payload y por tipo, aislamiento por actor, rechazo sin reserva de clave, concurrencia y canonicalización. No modifica el contrato funcional de 18.4.3 y 18.4.4 | 18.4.4, 18.4.9, 18.4.11 |
 
 #### 18.4.1 Modelo mínimo
@@ -711,18 +714,25 @@ No se introduce `INHERIT` ni ningún permiso para roles de la Data API.
 
 1. Aislamiento `READ COMMITTED`; si no, `PT500 jornada_error_interno`.
 2. Identidad y rol: `privado.usuario_actual()` no nulo (si no, `PT401`); perfil propio activo con rol `dueno` o `encargado` (si no, `PT403`).
-3. Estructura, sin leer estado mutable: clave, fecha, motivo, arreglos (no nulos, mismo largo, 1 elemento o más, sin nulos ni productos repetidos) y cantidades > 0.
+3. Estructura, sin leer estado mutable: clave, fecha, motivo, arreglos (no nulos, mismo largo, 1 elemento o más, sin nulos ni productos repetidos) y cantidades > 0; y el vendedor en `abrir_jornada` y `reasignar_vendedor` (vendedor destino), que no puede ser nulo: nulo → `PT400 jornada_vendedor_invalido`, el código que 18.4.7 ya define para «vendedor nulo»; y, por la decisión D-N1 (opción A), el camión (en `abrir_jornada`, y el camión final en `corregir_jornada`) y la jornada (en las otras cinco RPC), que no pueden ser nulos: camión nulo → `PT404 jornada_camion_no_encontrado`; jornada nula → `PT404 jornada_no_encontrada`, los códigos que 18.4.7 ya define. Todo esto se evalúa en este paso, antes de la huella (paso 4), de cualquier consulta de replay (pasos 5 y 8a) y de la reserva de la clave (paso 9). Que el vendedor, el camión o la jornada existan, sean de la empresa o estén activos depende de estado mutable y se resuelve en el paso 6 o en el 10; esos casos conservan el mismo `PT404`.
 4. Huella (18.4.4).
 5. **Replay previo, sin bloqueos:** `SELECT tipo, huella, … FROM operaciones WHERE (empresa_id, actor_id, idempotency_key) = …`. Esta lectura no toma bloqueos de FK.
    - Mismo tipo y misma huella → se devuelve la respuesta guardada (la jornada por `jornadas.operacion_apertura_id`, o el id de la operación), sin revalidar estado.
    - Otro tipo u otra huella → `PT409 jornada_conflicto_idempotencia`.
 6. Lectura sin bloqueo de la jornada (salvo en `abrir_jornada`) para obtener las claves de los advisory: `camion_id`, `vendedor_id` (vigente) y `fecha`. Inexistente o de otra empresa → `PT404`.
 7. Advisory locks de los niveles 1 y 2 (18.4.5), con el conjunto calculado en el paso 6 y los parámetros.
-8. `SELECT … FROM jornadas WHERE id = … FOR UPDATE` y **reverificación** de los valores usados como clave:
-   - `camion_id` (en `corregir_jornada`) y `vendedor_id` vigente (en `reasignar_vendedor` y en `corregir_jornada`, siempre), iguales a los del paso 6. Si cambiaron → `PT409 jornada_estado_invalido`, sin efectos y reintentable con la misma clave. No se toman bloqueos adicionales fuera de orden.
-   - `estado` y `fecha` se releen en este paso; todas las validaciones siguientes usan los valores leídos bajo `FOR UPDATE`. La clave de nivel 2 no incluye la fecha, así que un cambio de fecha no invalida los bloqueos tomados.
+8. `SELECT … FROM jornadas WHERE id = … FOR UPDATE` (salvo en `abrir_jornada`, que no tiene fila previa). Con los bloqueos de los pasos 7 y 8 en poder de la transacción, en este orden:
+   - **8a. Segunda consulta de la clave idempotente (H2-R1).** Sentencia nueva (en `READ COMMITTED` ve lo confirmado mientras esperaba los bloqueos), **antes** de la reverificación y de cualquier rechazo por valores desactualizados. Misma lectura que el paso 5: `SELECT tipo, huella, … FROM operaciones WHERE (empresa_id, actor_id, idempotency_key) = …`. Es una lectura sin bloqueos de fila ni de FK. Se aplica a las seis RPC; en `abrir_jornada` va inmediatamente después del paso 7.
+     - Mismo tipo y misma huella → se devuelve **exactamente** la respuesta original (la del paso 5), sin revalidar estado y sin efectos nuevos.
+     - Otro tipo u otra huella → `PT409 jornada_conflicto_idempotencia`.
+     - La clave no existe → se continúa con 8b.
+     - Por qué: dos solicitudes con la misma clave pueden leer el paso 6 antes de que la primera confirme; al obtener los bloqueos, los valores que leyó la segunda pueden haber sido cambiados por la propia operación de la primera (por ejemplo, el vendedor vigente tras `reasignar_vendedor`). Sin 8a, la reverificación respondería `PT409 jornada_estado_invalido` a un replay legítimo.
+     - La autenticación, la empresa, el rol (paso 2) y la estructura (paso 3) se validan **antes** de cualquier replay, en el paso 5 y en 8a.
+   - **8b. Reverificación** de los valores usados como clave:
+     - `camion_id` (en `corregir_jornada`) y `vendedor_id` vigente (en `reasignar_vendedor` y en `corregir_jornada`, siempre), iguales a los del paso 6. Si cambiaron → `PT409 jornada_estado_invalido`, sin efectos y reintentable con la misma clave. No se toman bloqueos adicionales fuera de orden.
+     - `estado` y `fecha` se releen en este paso; todas las validaciones siguientes usan los valores leídos bajo `FOR UPDATE`. La clave de nivel 2 no incluye la fecha, así que un cambio de fecha no invalida los bloqueos tomados.
 9. **Reserva:** `INSERT INTO operaciones (…, jornada_id) … ON CONFLICT (empresa_id, actor_id, idempotency_key) DO NOTHING`.
-   - Si no inserta porque otra transacción con la misma clave confirmó entre los pasos 5 y 9 → relectura y la misma regla del paso 5.
+   - Si no inserta porque otra transacción con la misma clave confirmó entre los pasos 8a y 9 → relectura y la misma regla del paso 5. Sólo es posible cuando esa transacción no comparte los bloqueos de los niveles 1 a 3 (por ejemplo, la misma clave sobre otra jornada); la UNIQUE y este `ON CONFLICT` siguen siendo el árbitro final.
    - El `FOR KEY SHARE` que la FK toma sobre la jornada es compatible con el `FOR UPDATE` propio.
 10. Validaciones de negocio de ADR-007 sobre datos leídos después de los pasos 7 y 8. El vendedor (nuevo o de apertura) se lee en `privado.perfiles_empresa_gestion` bajo su advisory de nivel 2:
     - no visible (inexistente o de otra empresa) → `PT404 jornada_vendedor_no_encontrado`;
@@ -732,7 +742,21 @@ No se introduce `INHERIT` ni ningún permiso para roles de la Data API.
 11. Advisory locks de stock (nivel 4) y lectura de saldos del ledger.
 12. Escrituras: jornada, historial, movimientos y `UPDATE` de `jornadas`. Una violación residual de restricción → `PT500 jornada_error_interno`, sin nombre de restricción.
 
-Un rechazo en los pasos 8 a 12 revierte la transacción completa, incluida la reserva del paso 9.
+**Parámetros `uuid` obligatorios y estructura (paso 3).** Un `uuid` **nulo** no es un `uuid` válido inexistente o de otra empresa: el nulo es un defecto de estructura y se rechaza en el paso 3, antes de la huella (paso 4), de cualquier replay (pasos 5 y 8a) y de la reserva (paso 9); el inexistente o de otra empresa depende de datos y se rechaza después (paso 6 o 10). Para el camión y la jornada, ambos casos usan el mismo `PT404` (D-N1, opción A); para el vendedor, el nulo es `PT400` y el inexistente o de otra empresa, `PT404`.
+
+| RPC | `uuid` obligatorios | Si es nulo (paso 3) | Si es válido pero inexistente o de otra empresa |
+|---|---|---|---|
+| `abrir_jornada` | clave; camión; vendedor | clave → `PT400 jornada_clave_invalida`; vendedor → `PT400 jornada_vendedor_invalido`; camión → `PT404 jornada_camion_no_encontrado` | camión → `PT404 jornada_camion_no_encontrado`; vendedor → `PT404 jornada_vendedor_no_encontrado` (paso 10) |
+| `reasignar_vendedor` | clave; jornada; vendedor | clave y vendedor, como arriba; jornada → `PT404 jornada_no_encontrada` | jornada → `PT404 jornada_no_encontrada` (paso 6); vendedor → `PT404 jornada_vendedor_no_encontrado` (paso 10) |
+| `corregir_jornada` | clave; jornada; camión final | clave, como arriba; jornada → `PT404 jornada_no_encontrada`; camión final → `PT404 jornada_camion_no_encontrado` | jornada → `PT404 jornada_no_encontrada` (paso 6); camión → `PT404 jornada_camion_no_encontrado` |
+| `registrar_carga` | clave; jornada; productos (arreglo) | clave, como arriba; elemento nulo del arreglo → `PT400 jornada_lineas_invalidas`; jornada → `PT404 jornada_no_encontrada` | jornada → `PT404 jornada_no_encontrada` (paso 6); producto → `PT404 jornada_producto_no_encontrado` |
+| `registrar_descarga` | clave; jornada; productos (arreglo) | igual que `registrar_carga` | igual que `registrar_carga` |
+| `confirmar_salida` | clave; jornada | clave, como arriba; jornada → `PT404 jornada_no_encontrada` | jornada → `PT404 jornada_no_encontrada` (paso 6) |
+
+- **Sin código nuevo:** el catálogo de 18.4.7 alcanza para todos los casos. La clave, el vendedor y los elementos nulos del arreglo de productos usan `PT400`; el camión y la jornada nulos usan los `PT404` ya definidos (D-N1, resuelta por el humano para jornadas; no extiende esta regla a Stock).
+- **Sin reserva de clave:** los rechazos de los pasos 1 a 8a ocurren antes de la reserva del paso 9, así que un rechazo estructural no deja fila en `operaciones` ni consume `idempotency_key`.
+
+Un rechazo en los pasos 8b a 12 revierte la transacción completa, incluida la reserva del paso 9. Una respuesta de replay (paso 5 u 8a) no escribe nada.
 
 #### 18.4.4 P12/P15-jornadas — idempotencia y huella
 
@@ -753,7 +777,7 @@ Un rechazo en los pasos 8 a 12 revierte la transacción completa, incluida la re
 
 `READ COMMITTED`. Advisory locks con `pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(<clave>, 0))`.
 
-**Orden global.** Cada RPC toma un subconjunto, siempre en orden ascendente de (nivel, uuid), sin repetir claves. Ninguna transacción toma un bloqueo de rango menor después de uno de rango mayor. Si después del bloqueo el conjunto correcto es otro, aborta con `PT409` (18.4.3, paso 8) en lugar de completarlo fuera de orden.
+**Orden global.** Cada RPC toma un subconjunto, siempre en orden ascendente de (nivel, uuid), sin repetir claves. Ninguna transacción toma un bloqueo de rango menor después de uno de rango mayor. Si después del bloqueo el conjunto correcto es otro, aborta con `PT409` (18.4.3, paso 8b, después de la segunda consulta de la clave, 8a) en lugar de completarlo fuera de orden.
 
 | Nivel | Bloqueo | Clave o sentencia | RPC |
 |---|---|---|---|
@@ -773,6 +797,12 @@ Un rechazo en los pasos 8 a 12 revierte la transacción completa, incluida la re
 | `registrar_descarga` | — | — | `FOR UPDATE` | ubicación del camión × producto, por `(ubicación, producto)` |
 | `confirmar_salida` | — | — | `FOR UPDATE` | — |
 
+**Segunda consulta de la clave (paso 8a) y bloqueos (H2-R1).**
+- Es una lectura MVCC de `operaciones`: no pide ningún bloqueo de fila, de FK ni advisory. No agrega esperas, no cambia el orden global y no puede formar parte de un ciclo.
+- Se hace después de tener los bloqueos de los niveles 1 a 3. Una solicitud con la misma clave y los mismos bloqueos sólo la ve confirmada tras haber esperado a la primera.
+- Las garantías de idempotencia no cambian: sólo se devuelve el resultado de una operación confirmada y visible, con el mismo tipo y la misma huella (si no, conflicto), y la UNIQUE y el `ON CONFLICT` del paso 9 siguen siendo el árbitro final.
+- No cubre la misma clave sobre otra jornada, que no comparte bloqueos: ese caso sigue resolviéndose en el paso 9 (K8).
+
 **Esperas fuera de los niveles.**
 - **Índices únicos.** Toda transacción que escribe la clave `(empresa_id, vendedor_id, fecha)` para un vendedor V tiene el advisory de V: abre con V, reasigna hacia V o desde V, o corrige (camión, fecha o ambos) una jornada cuyo vigente es V. La clave `(empresa_id, camion_id, fecha)` la escribe quien tiene el advisory del camión, o la misma jornada en un `UPDATE` no HOT. Por eso dos transacciones no pueden esperarse por un índice único mientras compiten por la misma clave: el advisory las serializa antes.
 - **FK.** Los `FOR KEY SHARE` de las FK sobre `productos`, `ubicaciones`, `perfiles` y `camiones` son compatibles con los `UPDATE` de baja, que no tocan claves (`FOR NO KEY UPDATE`).
@@ -788,7 +818,7 @@ Un rechazo en los pasos 8 a 12 revierte la transacción completa, incluida la re
 | 2 | Vendedor vigente de la jornada | Aperturas, reasignaciones y otras correcciones que escriban o evalúen `(vendedor, fecha)` del vigente (ADR-007 §2.3.2 y §2.4.3) |
 | 3 | La jornada, `FOR UPDATE` | Cualquier otra RPC sobre la misma jornada (reasignación, carga, descarga, salida) |
 
-- Los valores usados como clave (`camion_id` y `vendedor_id` vigente) se reverifican bajo `FOR UPDATE` (18.4.3, paso 8). Si cambiaron, `PT409 jornada_estado_invalido`, sin efectos y reintentable con la misma clave.
+- Los valores usados como clave (`camion_id` y `vendedor_id` vigente) se reverifican bajo `FOR UPDATE` (18.4.3, paso 8b, después de 8a). Si cambiaron, `PT409 jornada_estado_invalido`, sin efectos y reintentable con la misma clave.
 - **Costo:** toda corrección, aunque sólo cambie el camión, se serializa con las aperturas, reasignaciones y correcciones del mismo vendedor. Es una operación excepcional (jornada `abierta` sin movimientos), así que no se busca evitarlo.
 - **Evidencia:** este mecanismo **no** está cubierto por el laboratorio de 18.4.12, que lo ejecutó con el vendedor bloqueado sólo ante cambio de fecha. Se demuestra con K6, K7, K9 y K12 sobre la implementación real.
 
@@ -802,7 +832,7 @@ Un rechazo en los pasos 8 a 12 revierte la transacción completa, incluida la re
 | 4 | reserva (`KEY SHARE` propio), nivel 4, escribe y confirma | — |
 | 5 | — | obtiene J actualizada, reserva y valida; confirma o rechaza |
 
-Con la misma clave: en t5 el `ON CONFLICT` de T2 no inserta, T2 relee la operación y devuelve la misma respuesta si la huella coincide.
+Con la misma clave: en t5 T2 encuentra la operación de T1 en la segunda consulta (paso 8a) y devuelve la misma respuesta si la huella coincide, o `PT409 jornada_conflicto_idempotencia` si no. El `ON CONFLICT` del paso 9 queda como respaldo.
 
 **I-1: reasignación contra reasignación (intercambio).** J1 (vendedor A, fecha f) y J2 (B, f), con A < B. T1 reasigna J1 → B y T2 reasigna J2 → A.
 
@@ -854,8 +884,8 @@ Ninguna de las seis RPC ni `privado.empresa_gestion_actual()` tiene sobrecargas,
 |---|---|
 | `PT401` | `jornada_no_autenticado` |
 | `PT403` | `jornada_no_autorizado` |
-| `PT400` | `jornada_clave_invalida`, `jornada_fecha_invalida`, `jornada_cantidad_invalida`, `jornada_lineas_invalidas`, `jornada_producto_repetido`, `jornada_motivo_invalido`, `jornada_vendedor_invalido` (vendedor nulo, o perfil de la empresa **inactivo**) |
-| `PT404` | `jornada_no_encontrada`, `jornada_camion_no_encontrado`, `jornada_vendedor_no_encontrado`, `jornada_producto_no_encontrado` (otra empresa = inexistente) |
+| `PT400` | `jornada_clave_invalida`, `jornada_fecha_invalida`, `jornada_cantidad_invalida`, `jornada_lineas_invalidas`, `jornada_producto_repetido`, `jornada_motivo_invalido`, `jornada_vendedor_invalido` (vendedor nulo, evaluado en 18.4.3, paso 3; o perfil de la empresa **inactivo**, en el paso 10) |
+| `PT404` | `jornada_no_encontrada`, `jornada_camion_no_encontrado`, `jornada_vendedor_no_encontrado`, `jornada_producto_no_encontrado` (otra empresa = inexistente; un `uuid` nulo de camión o de jornada se rechaza con `jornada_camion_no_encontrado` o `jornada_no_encontrada` en 18.4.3, paso 3, por D-N1) |
 | `PT409` | `jornada_duplicada`, `jornada_camion_con_jornada_abierta`, `jornada_camion_inactivo`, `jornada_vendedor_ocupado`, `jornada_estado_invalido`, `jornada_con_movimientos`, `jornada_sin_cambios`, `jornada_producto_inactivo`, `jornada_stock_residual`, `jornada_stock_insuficiente`, `jornada_descarga_excede_carga`, `jornada_carga_neta_cero`, `jornada_conflicto_idempotencia` |
 | `PT500` | `jornada_error_interno`, `jornada_ubicacion_no_configurada` |
 
@@ -923,7 +953,7 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 | P13 | `EXECUTE` dentro de la política: en una transacción revertida se revoca a `propietario_rpc` el `EXECUTE` del helper y se lee la vista | `42501`: el privilegio se verifica contra el llamador, no contra el dueño de la vista |
 | P14 | `SET ROLE lector_perfiles_rpc` y `SELECT` directo de `public.perfiles` | `42501` (falla cerrado, sin recursión) |
 
-**I. Idempotencia (H-02).** Fija qué se prueba; no modifica el contrato de 18.4.3 y 18.4.4. Todos los casos se ejecutan para **cada una de las seis RPC**. I1 a I9 son pgTAP; I10 e I11 usan dos sesiones y se ejecutan con el arnés de 18.4.11, con su criterio de aprobación.
+**I. Idempotencia (H-02).** Fija qué se prueba; no modifica el contrato de 18.4.3 y 18.4.4. Todos los casos se ejecutan para **cada una de las seis RPC**. I1 a I9, I12 e I13 son pgTAP; I10 e I11 usan dos sesiones y se ejecutan con el arnés de 18.4.11, con su criterio de aprobación.
 
 | # | Caso | Esperado |
 |---|---|---|
@@ -931,14 +961,28 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 | I2 | Replay idéntico e inmediato (misma clave, mismo actor, mismos parámetros) | La **misma** respuesta (mismo uuid); cero filas nuevas en `operaciones`, `movimientos_stock`, `jornadas` y los dos historiales; las filas y los saldos existentes, byte a byte iguales (se comparan antes y después) |
 | I3 | Replay después de que la jornada cambió a un estado donde el comando nuevo se rechazaría (columna «Estado de I3») | La misma respuesta que en I1, **sin revalidar estado ni fecha** (18.4.3, paso 5); cero filas nuevas; la jornada conserva el estado alcanzado |
 | I4 | Replay con autorización perdida (perfil inactivo o rol `vendedor_piloto`) | `PT403`, sin efectos: la autorización vigente precede al replay (18.4.3, pasos 2 y 5) |
-| I5 | Replay con estructura inválida (misma clave, parámetro inválido: cantidad 0, motivo vacío, arreglos de largo distinto) | `PT400` con el código de estructura (18.4.3, paso 3 precede al replay); no `PT409` ni la respuesta guardada |
+| I5 | Replay con estructura inválida, **sólo en las RPC con un parámetro estructural validable** (tabla «Aplicabilidad de I5»): misma clave y un parámetro de esa tabla inválido | El SQLSTATE y el código de la tabla (`PT400`, o `PT404` para el camión o la jornada nulos; 18.4.3, el paso 3 precede al paso 5 y a 8a); no `PT409` ni la respuesta guardada |
 | I6 | **Conflicto por payload:** misma clave, payload válido distinto, un parámetro por vez (columna «Payload distinto») | `PT409 jornada_conflicto_idempotencia`; cero filas nuevas; la operación original y su huella, intactas |
 | I7 | **Conflicto por tipo:** la clave de una operación de cada uno de los otros cinco tipos de jornadas y de `ingreso`, `a_cuarentena` y `merma` de Stock | `PT409 jornada_conflicto_idempotencia`; cero filas nuevas. Regresión de Stock: las RPC de Stock con una clave de jornadas siguen devolviendo su propio `stock_conflicto_idempotencia`, sin cambio |
 | I8 | Misma clave usada por otro actor de la misma empresa y por un actor de otra empresa | No es replay: se ejecuta como operación nueva e independiente (`UNIQUE (empresa_id, actor_id, idempotency_key)`); la operación del primer actor no cambia |
-| I9 | Un rechazo no reserva la clave: ejecución rechazada en los pasos 8 a 12 (por ejemplo `jornada_estado_invalido` o `jornada_stock_insuficiente`) y después la misma clave con un payload válido | La segunda se ejecuta como primera ejecución (I1); la rechazada no dejó fila en `operaciones` |
-| I10 | Concurrentes, **misma clave y mismo payload**, en los dos órdenes de lanzamiento | Las dos confirman con la misma respuesta; exactamente una operación y un solo conjunto de efectos (los de I1); cero `40P01` |
-| I11 | Concurrentes, **misma clave y payload distinto**, en los dos órdenes; el payload distinto se elige de modo que ninguna otra validación de los pasos 8 a 10 lo rechace antes | Una confirma y la otra `PT409 jornada_conflicto_idempotencia`; efectos sólo de la que confirmó; cero `40P01` |
+| I9 | Un rechazo no reserva la clave: ejecución rechazada en los pasos 8b a 12 (por ejemplo `jornada_estado_invalido` o `jornada_stock_insuficiente`) y después la misma clave con un payload válido | La segunda se ejecuta como primera ejecución (I1); la rechazada no dejó fila en `operaciones` |
+| I10 | Concurrentes, **misma clave y mismo payload**, en los dos órdenes de lanzamiento. En `reasignar_vendedor` y `corregir_jornada` incluye el caso en que la segunda sesión leyó en el paso 6 los valores previos a la confirmación de la primera (el arnés las encola sobre los mismos advisory), de modo que sin el paso 8a fallaría la reverificación | Las dos confirman con la misma respuesta (la segunda por 8a, **nunca** `jornada_estado_invalido` ni conflicto); exactamente una operación y un solo conjunto de efectos (los de I1), sin historial duplicado; cero `40P01` |
+| I11 | Concurrentes, **misma clave y payload distinto**, en los dos órdenes; en `reasignar_vendedor` y `corregir_jornada` incluye el caso en que la primera cambia los valores usados como clave | Una confirma y la otra `PT409 jornada_conflicto_idempotencia`, detectado en 8a antes de la reverificación 8b (**nunca** `jornada_estado_invalido`); efectos sólo de la que confirmó; cero `40P01` |
 | I12 | **Canonicalización:** los mismos datos escritos de otra forma (columna «Canonicalización») | Replay idéntico (como I2), no conflicto; los datos realmente distintos dan I6 |
+| I13 | **Un rechazo estructural no reserva la clave:** con una clave nueva, cada caso de la tabla de aplicabilidad (y, para la clave, `clave` nula) | El SQLSTATE y el código de la tabla (`PT400`, o `PT404` para el camión o la jornada nulos); ninguna fila con esa clave en `operaciones` ni filas nuevas en el resto de las tablas; después, la misma clave con estructura válida se ejecuta como primera ejecución (I1). El paso 3 precede a la reserva del paso 9 |
+
+**Aplicabilidad de I5 (H2-R2).** I5 sólo se ejecuta donde 18.4.3 (paso 3) y 18.4.7 definen un parámetro estructural validable. No se agregan parámetros ni códigos de error. La clave no cuenta: en un replay es la misma. El vendedor, el camión y la jornada nulos cuentan como parámetros estructurales por el paso 3, con los códigos que 18.4.7 ya define (D-N1, opción A).
+
+| RPC | Parámetro estructural validable | Caso de I5 | Esperado |
+|---|---|---|---|
+| `abrir_jornada` | `fecha`; `vendedor`; `camion` | fecha nula; vendedor nulo; camión nulo | `PT400 jornada_fecha_invalida`; `PT400 jornada_vendedor_invalido`; `PT404 jornada_camion_no_encontrado` |
+| `reasignar_vendedor` | `vendedor` (destino); `jornada` | vendedor nulo; jornada nula | `PT400 jornada_vendedor_invalido`; `PT404 jornada_no_encontrada` |
+| `corregir_jornada` | `fecha`; `motivo`; `jornada`; `camion` (final) | fecha nula; motivo nulo o vacío después de `btrim`; jornada nula; camión final nulo | `PT400 jornada_fecha_invalida`; `PT400 jornada_motivo_invalido`; `PT404 jornada_no_encontrada`; `PT404 jornada_camion_no_encontrado` |
+| `registrar_carga` | arreglos; cantidades; `jornada` | arreglos nulos, de largo distinto, vacíos o con elementos nulos; producto repetido; cantidad 0 o negativa; jornada nula | `PT400 jornada_lineas_invalidas`; `PT400 jornada_producto_repetido`; `PT400 jornada_cantidad_invalida`; `PT404 jornada_no_encontrada` |
+| `registrar_descarga` | arreglos; cantidades; `motivo`; `jornada` | los de `registrar_carga` y motivo nulo o vacío después de `btrim` | los de `registrar_carga` y `PT400 jornada_motivo_invalido` |
+| `confirmar_salida` | `jornada` | jornada nula (la clave no cuenta: en un replay es la misma) | `PT404 jornada_no_encontrada` |
+
+**Decisión D-N1 (resuelta por el humano, opción A; exclusivamente para jornadas).** El camión nulo y la jornada nula se rechazan en el paso 3 con los `PT404` ya existentes, `jornada_camion_no_encontrado` y `jornada_no_encontrada`, antes de la huella, de cualquier consulta de replay y de la reserva de la clave. Un `uuid` válido pero inexistente o de otra empresa conserva el mismo `PT404`, validado después (paso 6 o 10). No se agregan códigos. Es la misma convención que hoy usan `registrar_ingreso`, `mover_a_cuarentena` y `registrar_merma` ante un producto o una ubicación nulos; la decisión rige sólo para las RPC de este anexo y no modifica Stock. La contrapartida es que el nulo y el inexistente comparten código; se distinguen por el paso en que se rechazan y por la prueba de I5.
 
 **Datos por RPC.** `<m>` y las líneas ordenadas se definen en 18.4.4. «Efectos» es lo que I1 debe comprobar exactamente.
 
@@ -963,7 +1007,7 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 | K6 | I-3b, en los dos órdenes, para una corrección con cambio de fecha y para una corrección sólo de camión | se serializan en el nivel 2 |
 | K7 | Correcciones cruzadas de camión (C1 → C2 y C2 → C1) sobre dos jornadas, ya con el bloqueo de vendedor de H-01: vendedores distintos; vendedores distintos con el orden de uuid inverso al de los camiones; el mismo vendedor en fechas distintas | cero `40P01`; el resultado de algún orden serial |
 | K8 | Regresiones: dos cargas de la misma J (CONC-18.4-01); `registrar_merma` contra `registrar_carga` con la misma clave y el mismo advisory de stock; misma clave en dos jornadas distintas; carga contra reasignación de la misma J; corrección de camión contra `mover_a_cuarentena`; baja concurrente de camión, producto o perfil | el resultado de algún orden serial; conflicto de idempotencia donde corresponde |
-| K9 | Se cambia el vigente entre los pasos 6 y 8, en `reasignar_vendedor` y en `corregir_jornada` (también la corrección sólo de camión) | `PT409 jornada_estado_invalido`, sin reserva ni historial |
+| K9 | Se cambia el vigente entre los pasos 6 y 8b por **otra operación confirmada con distinta clave**, en `reasignar_vendedor` y en `corregir_jornada` (también la corrección sólo de camión). La sesión afectada aún no tiene su clave reservada, así que 8a no encuentra nada | `PT409 jornada_estado_invalido`, sin reserva ni historial; reintentar con la misma clave y los valores nuevos confirma. Contrapartida: con la **misma** clave (I10) el resultado es la respuesta original, no este error |
 | K10 | **Aperturas concurrentes**, con claves distintas salvo en d) y e), en los dos órdenes de lanzamiento: a) mismo camión y misma fecha, vendedores distintos; b) mismo camión y fechas distintas; c) mismo vendedor y misma fecha, camiones distintos; d) misma clave y mismos parámetros; e) misma clave y distinto vendedor | a) una confirma y la otra `PT409` con `jornada_duplicada` o `jornada_camion_con_jornada_abierta` (el contrato no fija precedencia entre ambos códigos: el arnés acepta cualquiera de los dos); b) una confirma y la otra `PT409 jornada_camion_con_jornada_abierta`; c) una confirma y la otra `PT409 jornada_vendedor_ocupado`; d) las dos confirman con el **mismo** uuid de jornada; e) una confirma y la otra `PT409 jornada_conflicto_idempotencia`. **Invariantes:** I-J1 (a lo sumo una jornada por `(empresa, camión, fecha)` y por `(empresa, vendedor, fecha)`, y una sin cerrar por camión); en a) a d) queda exactamente **una** jornada y **una** operación `apertura_jornada` confirmada por clave (la rechazada revierte su reserva, sin historial ni fila huérfana) |
 | K11 | **Salida contra cambios de carga neta** sobre la misma jornada `cargada` con carga neta positiva, en los dos órdenes: a) `confirmar_salida` contra `registrar_descarga` de toda la carga neta; b) `confirmar_salida` contra `registrar_carga`; c) dos `confirmar_salida`, con claves distintas y con la misma clave; d) dos `registrar_descarga` con claves distintas, cada una dentro de lo cargado neto pero con suma mayor | a) salida primero: salida confirma (`en_reparto`) y la descarga `PT409 jornada_estado_invalido`; descarga primero: descarga confirma y la salida `PT409 jornada_carga_neta_cero`; **nunca confirman las dos**. b) carga primero: confirman las dos; salida primero: salida confirma y la carga `PT409 jornada_estado_invalido`, sin movimientos. c) claves distintas: una confirma y la otra `PT409 jornada_estado_invalido`; misma clave: las dos confirman con el mismo uuid y queda **una** operación `salida_jornada`. d) una confirma y la otra `PT409 jornada_descarga_excede_carga`. **Invariantes:** I-J4 (jornada en `en_reparto` ⇒ carga neta de la jornada positiva en al menos un producto); I-J2 (por producto, saldo del camión = Σ cargas − Σ descargas de la jornada y nunca negativo; saldo del depósito + saldo del camión, constante); I-J3 (una operación rechazada no deja filas en `operaciones` ni en `movimientos_stock`); como máximo una `salida_jornada` por jornada |
 | K12 | **Corrección sólo de camión contra reasignación de la misma J** (I-3c), en los dos órdenes de lanzamiento, con el vendedor nuevo mayor y menor que el vigente por uuid, incluida la variante en que la reasignación ya tiene sus advisory y la corrección tiene los camiones y espera al vendedor | Corrección primero: las dos confirman (equivale a corrección; reasignación). Reasignación primero: la reasignación confirma y la corrección `PT409 jornada_estado_invalido` por haber cambiado el vigente, sin reserva ni historial; reintentar con la misma clave confirma. **Invariantes:** I-J1; una fila de historial por operación confirmada y ninguna por la rechazada; camión y vendedor finales de la jornada consistentes con algún orden serial; cero `40P01` |
@@ -973,6 +1017,11 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 - **No cambian de diseño, pero se ejecutan igual con el código final:** K1 a K4 (sólo abren y reasignan), K10 y K11. Ninguno usa `corregir_jornada`.
 - **K8** incluye «corrección de camión contra `mover_a_cuarentena`»: se repite, porque la corrección ahora también toma un advisory de vendedor, que las RPC de Stock no toman; no se forma ciclo, pero hay que medirlo.
 - Los resultados de 18.4.12 **no** prueban el mecanismo nuevo. Hasta que K5 a K9 y K12 pasen sobre las migraciones reales, H-01 es un diseño razonado, no una propiedad demostrada.
+
+**Impacto de H2-R1.** Sólo ordena una consulta de la clave: no agrega ni cambia bloqueos ni estados, y no modifica el contrato funcional de idempotencia.
+- **Reescritos:** I10, I11 y K9, para que el orden 8a antes de 8b sea observable. I5 e I9 cambian sólo por H2-R2 y por la referencia al paso 8b.
+- **Sin cambio de diseño, se ejecutan igual con el código final:** K1 a K8 y K10 a K12. K8 («misma clave en dos jornadas distintas») sigue ejerciendo el `ON CONFLICT` del paso 9, porque esas solicitudes no comparten bloqueos. K10 d) y e) y K11 c) (misma clave) no reverifican valores clave y no cambian.
+- Nada de 18.4.12 prueba el paso 8a: queda demostrado sólo cuando I10, I11 y K9 pasen sobre las migraciones reales.
 
 #### 18.4.10 Cambios sobre objetos y tests existentes
 
@@ -1078,7 +1127,7 @@ No reemplaza a pgTAP ni a Playwright. No se versiona ningún estado generado.
 
 Esos puntos se cubren recién con los tests de 18.4.9 sobre las migraciones reales: pgTAP en Supabase local, y K8 con el arnés. Hasta que pasen, esta evidencia no sustituye a esos tests.
 
-#### 18.4.13 Autorizaciones humanas pendientes (ninguna concedida)
+#### 18.4.13 Autorizaciones humanas pendientes (ninguna concedida) y decisiones normativas resueltas
 
 Resumen del bloque B de la entrega original. Nada de lo siguiente está autorizado por la sola presencia de este anexo:
 
@@ -1090,6 +1139,9 @@ Resumen del bloque B de la entrega original. Nada de lo siguiente está autoriza
 6. Ejecutar el arnés en CI: autorización aparte (implica tocar `.github/workflows/ci.yml`).
 7. La tarea de implementación: rama, preámbulo de `AGENTS.md` §1.3, migraciones sólo en local o staging, **security review obligatoria** (toca Supabase, RLS, grants, `SECURITY DEFINER`, roles, `movimientos_stock`, idempotencia y concurrencia) y auditoría independiente del hash.
 8. El corte de jornada (Blueprint §15, «Fechas») sigue pendiente; según ADR-007 §3, P-1, no afecta a este bloque.
+
+**Decisiones normativas ya resueltas por el humano para este anexo** (no son autorizaciones de implementación):
+- **D-N1 (opción A, exclusivamente para jornadas):** camión nulo → `PT404 jornada_camion_no_encontrado`; jornada nula → `PT404 jornada_no_encontrada`; ambos en 18.4.3, paso 3, antes de la huella, del replay y de la reserva. Sin códigos nuevos.
 
 ---
 

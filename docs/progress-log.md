@@ -1,4 +1,30 @@
 ---
+## 29/10/2026 — ADR-001 §18.4: correcciones H2-R1 y H2-R2 tras la segunda auditoría de Codex (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `345f7a0010a2c7b7563e0ce5210d1cca7e253246` (padre `78958303168e9774fb15651cca411db484dbff6d`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Resultado de la auditoría de Codex sobre `345f7a00…`
+H-01 **resuelto**. H2-R1 **BLOCKER**. H2-R2 **MEDIUM**.
+
+### Correcciones
+- **H2-R1:** en 18.4.3, tras los bloqueos y el `FOR UPDATE` de la jornada, nueva **segunda consulta de la clave idempotente (paso 8a)**, antes de la reverificación (ahora 8b). Misma clave, tipo y huella → respuesta original sin efectos nuevos; otro tipo u otra huella → `PT409 jornada_conflicto_idempotencia`; clave inexistente → se continúa con 8b. Autenticación, empresa, rol y estructura siguen validándose antes de cualquier replay. Sin 8a, una solicitud repetida y concurrente de `reasignar_vendedor` o `corregir_jornada` recibía `jornada_estado_invalido` porque la primera había cambiado el vendedor o el camión que la segunda leyó en el paso 6.
+- **Evaluación de concurrencia:** 8a es una lectura MVCC; no toma bloqueos de fila, de FK ni advisory, no cambia el orden global ni puede formar un ciclo. No cubre la misma clave sobre otra jornada (sin bloqueos compartidos), que sigue resolviéndose en el `ON CONFLICT` del paso 9 (K8). Las garantías de idempotencia no cambian.
+- **Pruebas afectadas:** I10, I11 y K9 reescritos (K9 sigue cubriendo el cambio provocado por otra operación con distinta clave); I9 y las referencias pasan a «paso 8b». K1 a K8 y K10 a K12 sin cambio de diseño.
+- **H2-R2:** I5 sólo se ejecuta donde existe un parámetro estructural validable; tabla de aplicabilidad por RPC. `confirmar_salida`: no aplicable (sólo clave y jornada; el paso 3 no valida la jornada). Precisión posterior, autorizada por el humano: el paso 3 de 18.4.3 evalúa el **vendedor nulo** de `abrir_jornada` y `reasignar_vendedor` (destino) con `PT400 jornada_vendedor_invalido`, el código que 18.4.7 ya define; I5 incluye ambos casos. `corregir_jornada` conserva fecha y motivo. No se inventan parámetros, validaciones ni códigos.
+- Sin cambios: H-01, E1–E3, los contratos funcionales de las seis RPC y las restricciones de seguridad.
+
+### Parámetros `uuid` nulos y decisión D-N1 (resuelta)
+- Aceptado por el humano: el vendedor nulo se valida en el paso 3 en `abrir_jornada` y en `reasignar_vendedor`, con `jornada_vendedor_invalido`.
+- **D-N1, opción A (humano, exclusivamente para jornadas):** camión nulo → `PT404 jornada_camion_no_encontrado`; jornada nula → `PT404 jornada_no_encontrada`. Ambos en 18.4.3, paso 3, antes de la huella, de cualquier consulta de replay y de la reserva de la clave. El inexistente o de otra empresa conserva el mismo `PT404`, validado después. Sin códigos nuevos; no modifica Stock.
+- Se agregó en 18.4.3 la tabla de `uuid` obligatorios por RPC (nulo frente a inexistente), el caso I13 (el rechazo estructural no reserva la clave) y se actualizaron 18.4.7, I5 (ahora `confirmar_salida` aplica con la jornada nula), I13 y 18.4.13.
+- Verificado antes de commitear: el catálogo de 18.4.7 ya contiene ambos `PT404`; las firmas no cambian; el paso 3 precede a la huella, al replay y a la reserva, así que las garantías de replay no cambian.
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; alcance P10 y P12–P17 sólo para jornadas.
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- El próximo commit requiere nueva auditoría (Codex y OpenCode); la de `345f7a00…` no se reutiliza.
+
+---
 ## 29/10/2026 — ADR-001 §18.4: correcciones H-01 y H-02 tras la auditoría de Codex (sin commit)
 
 **Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `78958303168e9774fb15651cca411db484dbff6d` (padre `5efad2747066b1c64d6b2e8ab11073484c142d56`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
