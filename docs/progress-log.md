@@ -1,4 +1,32 @@
 ---
+## 29/10/2026 — ADR-001 §18.4 v0.4 + fe de erratas E1–E3: versión documental candidata (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, creada desde el head del PR #31 = `5efad2747066b1c64d6b2e8ab11073484c142d56`. Los commits y ramas de los PR #30 y #31 no se alteraron. Tarea **sólo documental**: sin SQL, migraciones, RPC, RLS, roles, grants, frontend, tests ni configuración. Sin commit, push, PR, merge ni deploy.
+
+### Qué se hizo
+- Se incorporó a `docs/decisions/001-rpc-privilegiadas.md` el anexo **§18.4** (jornadas y carga), tomado de la copia de transferencia de §18.4 v0.4 (471 líneas) cuyo bloque A (líneas 12–456) tiene SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039` y cuyo bloque B (líneas 462–471) tiene `1c743ac4a28343264f656c411b16c972d9fefe3a337c4c0d6e7d8abf624ad045`; ambos hashes se recalcularon y coinciden. El texto se generó por programa, con reemplazos exactos que abortan si el texto original no coincide.
+- Estado conservado: **PROPUESTA TÉCNICA NO APROBADA**. El estado de ADR-001 (APROBADA PARA VALIDACIÓN CONTROLADA) no cambia y ADR-007 no se modifica. En la cabecera de ADR-001 sólo se agregó la mención del anexo en «Versión» y una fila en §0.
+- Se agregó §18.4.13 con las autorizaciones pendientes (resumen del bloque B). **Ninguna está concedida.**
+
+### Fe de erratas (no cambia decisiones de diseño)
+- **E1 (§18.4.5):** párrafo «Equivalencia con ADR-007 §5» tras «Sin bloqueos de fila sobre catálogos». `corregir_jornada` bloquea siempre los dos camiones (nivel 1) y la jornada (nivel 3); bloquea al vendedor vigente (nivel 2) sólo cuando cambia la fecha, único caso en que escribe una clave `(empresa_id, vendedor_id, fecha)` nueva. Con cambio sólo de camión, esa clave no cambia: tomarla la rechaza la validación, liberarla exige el `FOR UPDATE` de la jornada y el `UNIQUE` es la última defensa. La estrategia de bloqueos no cambia.
+- **E2 (§18.4.6 y §18.4.10):** el original mencionaba «los auxiliares de error de jornadas» una sola vez (fila `productos_catalogo.test.sql:321-337`), sin que ningún apartado los defina. Se elimina la referencia y §18.4.6 declara que no hay otras funciones ni auxiliares de error: los errores se levantan en línea. No se introducen funciones nuevas.
+- **E3 (§18.4.9 y §18.4.11):** casos **K10** (aperturas concurrentes: mismo camión y fecha, mismo camión y fechas distintas, mismo vendedor y fecha, misma clave con mismos parámetros y con distinto vendedor) y **K11** (salida contra descarga de toda la carga neta, contra carga, entre salidas y entre descargas que exceden lo cargado), cada uno con resultado esperado e invariantes I-J1 a I-J4. «K1–K9» pasa a «K1–K11» y el criterio de aprobación exige también las invariantes.
+
+### Cómo se verificó
+- Integridad de la fuente: hashes A y B recalculados (arriba).
+- Diff: contra el head del PR #31 sólo cambian `docs/decisions/001-rpc-privilegiadas.md` y este registro.
+- Comparación contra el original: sólo difieren las líneas de E1–E3, el aviso de estado, la tabla de erratas y §18.4.13.
+- SHA-256 del texto candidato de §18.4 (desde `### 18.4` hasta el final de §18.4.13, sin salto final): `169cb279e83028b18e4fca5b3f05ea27f76553182a4da01f0f3dc903bac23282`.
+- No se ejecutaron tests, build ni SQL: el cambio es documental.
+
+### Pendientes
+- Revisión independiente (Codex y OpenCode) del hash que resulte del commit, exigida por ADR-007 §3, P-3; luego la aprobación humana de §18.4.
+- D-1, D-2, arnés, su ejecución en CI y la security review, sin autorizar.
+- Precedencia entre `jornada_duplicada` y `jornada_camion_con_jornada_abierta` cuando ambos aplican (K10 a): el contrato no la fija; se decide al implementar y se documenta.
+- Corte de jornada y F3 (P8), sin cambios.
+
+---
 ## 29/10/2026 — ADR-007 aprobada: jornadas y carga de camiones (documental, sin commit)
 
 **Rama:** `docs/adr-007-jornadas-carga` desde `feat/slice-b3-ventas-peso` = `abe38f2240e771b119ac451b64d0c967f089b2b9` (checkpoint B3 parcial, que incluye `BLUEPRINT.md` 2.4). Tarea **sólo documental**: sin cambios de SQL, migraciones, frontend, tests ni configuración de Supabase. ADR-001 no se modificó. Sin commit, push, merge ni deploy.
