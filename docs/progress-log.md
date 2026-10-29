@@ -1,4 +1,36 @@
 ---
+## 29/10/2026 — ADR-007 aprobada: jornadas y carga de camiones (documental, sin commit)
+
+**Rama:** `docs/adr-007-jornadas-carga` desde `feat/slice-b3-ventas-peso` = `abe38f2240e771b119ac451b64d0c967f089b2b9` (checkpoint B3 parcial, que incluye `BLUEPRINT.md` 2.4). Tarea **sólo documental**: sin cambios de SQL, migraciones, frontend, tests ni configuración de Supabase. ADR-001 no se modificó. Sin commit, push, merge ni deploy.
+
+### Contexto
+Cambio de estrategia autorizado: no se desarrollan funcionalidades nuevas en el prototipo `localStorage`; el foco pasa al sistema definitivo con Supabase. Primer bloque operativo: jornadas y carga de camiones.
+
+### Decisiones humanas (29/10/2026)
+- Primera carga válida como evento explícito de `abierta → cargada`; cargas incrementales; descarga compensatoria antes de la salida; salida con carga neta positiva.
+- No abrir otra jornada para un camión que tenga una sin cerrar; camión activo para abrir y cargar; stock del camión en cero antes de la primera carga.
+- **F1:** fecha operativa elegida por dueño o encargado; sólo el día actual o futuras. **Zona horaria operativa: `America/Argentina/Tucuman`.**
+- **F2:** vendedor con perfil activo de la misma empresa y rol `dueno`, `encargado` o `vendedor_piloto`; como máximo una jornada por persona y fecha, sin liberarse al cerrar; validado también en reasignaciones. Verificado contra el Blueprint 2.4 y el PRD 0.12: sin contradicción (`BLUEPRINT.md` §9 y `docs/PRD.md` §5 prevén que una persona acumule permisos).
+- **F4:** corrección de fecha o camión sólo en `abierta` y sin movimientos, con motivo, idempotente, revalidando todas las condiciones de apertura sobre los valores nuevos y con un historial append-only separado del de reasignaciones. Verificado que no permite eludir la unicidad por camión y fecha.
+- Reasignaciones de vendedor con historial append-only propio; una línea por producto activo en cada carga; en este bloque el vendedor sólo lee su jornada.
+- **F3** (participación y separación de funciones para el conteo): pendiente para su bloque.
+
+### Cambios
+- `docs/decisions/007-jornadas-y-carga-de-camiones.md` (nuevo): ADR-007 v1.0, **APROBADA**, con 24 pruebas normativas.
+- `docs/decisions/README.md`: fila de ADR-007 en el índice.
+- `BLUEPRINT.md`: §7.4 (tipo `descarga` y nota de `carga`), §7.5 (reglas de apertura, carga y salida), §8 (los dos historiales y la unicidad por vendedor y fecha), §12 (bloque «Jornada: apertura, carga y salida») y §15 («Fechas»: zona horaria resuelta; corte de jornada pendiente).
+
+### Ajustes documentales autorizados (29/10/2026)
+- **ADR-007** (sigue v1.0 APROBADA): §2.1.3 deja constancia de la confirmación humana de «día operativo actual» (fecha calendario del negocio calculada en `America/Argentina/Tucuman` a partir de la hora del servidor; el corte especial de jornada sigue pendiente); §5 actualiza las referencias a Blueprint 2.5 y PRD 0.13; §8 agrega que el Blueprint 2.4 se sincronizó en la 2.5 y conserva el PRD 0.12 como fuente de la decisión.
+- **`BLUEPRINT.md` 2.4 → 2.5**, fecha 29/10/2026, y fila 2.5 en §17 con el alcance de ADR-007: apertura, vendedor, correcciones, carga incremental, descarga, salida y pruebas normativas.
+- **`docs/PRD.md` 0.12 → 0.13** (versión aprobada por el dueño): referencia a Blueprint v2.5 en el encabezado y en §0, pendiente «Fechas» con la zona horaria definida y el corte de jornada pendiente, y fila 0.13 en su historial. Sin cambios de requisitos funcionales.
+- ADR-001 sin cambios.
+
+### Pendientes
+- **Anexo §18.4 de ADR-001** (P10, P12–P17 para jornadas): sigue **PROPUESTA TÉCNICA NO APROBADA**; requiere revisión independiente y aprobación humana antes de escribir SQL. Debe incluir la RPC de corrección, el bloqueo del vendedor y el de los dos camiones en una corrección.
+- F3 / P8 para el bloque de conteo; corte de jornada (§15).
+
+---
 ## 29/10/2026 — Slice B3 (parcial): GOV-B3-01 resuelto, ADR-006 aprobada y Blueprint sincronizado (sin commit)
 
 **Rama:** `feat/slice-b3-ventas-peso` desde `main` = `e21fe321045fa7f4232477b0bf5b3d24d7b6b3d3`. **Base del cambio:** freeze con patch `1a1bc204171202e5bf043f4465d48e173180ec474c32e131132aaf8ae67e22dd` y manifest `c7c694c1065d4f3f1d1f049ec3e29b1371cacbe460f7dcdee79a5774d703d3bb`. Tarea documental: **sin cambios de código productivo**, SQL, migraciones, Supabase, RPC ni producción. **Se agregó un test normativo en `registroVentas.test.ts`** (caso 4 de ADR-006; ver «Ajustes autorizados»). Sin commit, push, merge ni deploy.

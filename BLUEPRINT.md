@@ -1,7 +1,7 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 2.4 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Versión:** 2.5 (documento de trabajo controlado; propuestas no aprobadas identificadas)
 **Fecha:** 29/10/2026 (hora local Argentina)
 **Estado:** Apto para inventario técnico, planificación y validación controlada de ADR-001 exclusivamente en local/staging. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
@@ -200,7 +200,8 @@ Tipos de movimiento (conceptual; la lista exacta queda para diseño SQL):
 | Tipo | Origen → Destino |
 |---|---|
 | `ingreso` | (exterior) → depósito |
-| `carga` | depósito → camión |
+| `carga` | depósito → camión (ADR-007: incremental antes de la salida, con `jornada_id`) |
+| `descarga` | camión → depósito, sólo antes de la salida y con motivo; compensa una carga sin editarla (ADR-007) |
 | `venta` | camión → exterior/null; la contraparte queda en `ventas` |
 | `retorno` | camión → depósito (fin de jornada) |
 | `devolucion_cliente` | exterior → camión (recepción física); reclasificación posterior según aptitud |
@@ -220,6 +221,14 @@ El stock de cada ubicación es la **suma de sus movimientos**. **No se permiten 
 Flujo lógico: `abierta → cargada → en_reparto → ventas_finalizadas → regreso_contado → cerrada`. Los eventos se registran por separado y el cierre exige su validación; evitar transiciones implícitas. Puede registrarse un retiro de efectivo mientras la jornada esté en reparto.
 
 - **Una sola jornada por (`empresa_id`, `camion_id`, `fecha`)**, aunque otra del mismo día esté cerrada; no habrá segunda salida por camión ese día.
+- **Apertura, carga y salida ([ADR-007](docs/decisions/007-jornadas-y-carga-de-camiones.md), aprobada el 29/10/2026):**
+  - dueño o encargado abre la jornada con camión, fecha operativa y vendedor; la fecha es el **día operativo actual o futura**, en la zona horaria operativa **`America/Argentina/Tucuman`**;
+  - el camión debe estar activo y no tener otra jornada sin cerrar;
+  - el vendedor es un perfil activo de la empresa con rol `dueno`, `encargado` o `vendedor_piloto`; **una persona tiene como máximo una jornada por fecha**, aunque esté cerrada; se puede reasignar en `abierta` o `cargada`, con historial append-only;
+  - una jornada `abierta` sin movimientos puede corregirse en fecha o camión, con motivo, revalidando todas las condiciones de apertura y con un historial append-only propio;
+  - la **primera carga válida** es el evento de `abierta → cargada` y exige el camión con stock cero; las cargas siguientes son incrementales; antes de salir se admite la `descarga` compensatoria (§7.4);
+  - la confirmación expresa de salida pasa `cargada → en_reparto` y exige carga neta positiva de la jornada;
+  - en este tramo el vendedor lee sólo su jornada.
 - El vendedor registra ventas digitales con conexión. Sin conexión usa talonario numerado; **debe transcribir, guardar en servidor y declarar completas** las ventas en papel antes de que el encargado inicie el **conteo formal**. El camión puede ingresar físicamente al predio; el sistema solo bloquea el proceso administrativo.
 - Identificar origen de venta (`digital`/`papel`), serie y número de nota (cuando aplique), usuario, instante de registro del servidor, jornada, cliente, ítems, precios históricos y pagos. Cada ítem guarda la cantidad en unidad mínima (unidades o gramos), el precio aplicado (unitario o por kg) y el importe (§7.1). En un ítem `peso`, la cantidad es el **peso efectivamente entregado** al cliente (ADR-005 D-R2) y el importe es el redondeado por línea según D-R1. El total de la venta es la suma de los importes finales de cada línea según la regla aplicable a su tipo de producto (§7.1): D-R1 para `peso`; para `unidad`, y por lo tanto para los centavos de una venta mixta, sigue pendiente. Conviene diseñar la venta por peso sobre el modelo por peso ya migrado; el orden de ejecución lo autoriza el humano según §14.
 - **Una línea por producto ([ADR-006](docs/decisions/006-una-linea-por-producto-en-venta-nueva.md), aprobada el 29/10/2026):** en una venta **nueva**, `productoId` es único dentro de los ítems, cualquiera sea su unidad (`unidad` o `peso`, incluso con unidades distintas). Dos o más líneas del mismo producto **invalidan** la venta: se rechaza sin persistir y no se consolida automáticamente. La regla no se aplica retroactivamente: una venta histórica con líneas repetidas se sigue leyendo con sus valores almacenados, sin recalcularla ni migrarla, y su consumo de stock es la suma de sus líneas. Una nota de papel transcripta como venta nueva también debe cumplirla. D-R1 no cambia; la fragmentación en ventas distintas no queda resuelta por esta regla.
@@ -463,7 +472,9 @@ Como el número, la fecha/hora del servidor y los snapshots los debe fijar el se
 | `operaciones` | [APROBADA CONCEPTUALMENTE] | empresa_id, tipo, actor, jornada_id (opcional), idempotency_key, creado_en; ejecución lógica idempotente (§7.9) |
 | `movimientos_stock` | [APROBADA CONCEPTUALMENTE] | operacion_id, tipo_movimiento, producto_id, cantidad (entero, unidad mínima), ubicacion_origen_id (nullable), ubicacion_destino_id (nullable), jornada_id, actor, motivo, creado_en. **Sin `saldo_actual`.** Append-only |
 | `saldos_stock` | [DERIVADA] | **No es fuente de verdad en Fase 1.** El saldo se deriva de `movimientos_stock`. Caché/materialización = optimización futura |
-| `jornadas` | [APROBADA CONCEPTUALMENTE] | fecha, camion_id, vendedor_id, estado, ventas_finalizadas_at, abierta_por, contada_por, cerrada_por, cerrada_at, observaciones |
+| `jornadas` | [APROBADA CONCEPTUALMENTE] | fecha, camion_id, vendedor_id, estado, ventas_finalizadas_at, abierta_por, contada_por, cerrada_por, cerrada_at, observaciones. Reglas de apertura, carga y salida en ADR-007 |
+| historial de reasignaciones de vendedor | [APROBADA CONCEPTUALMENTE] (ADR-007) | jornada_id, vendedor anterior, vendedor nuevo, operacion_id, actor, creado_en. Append-only. Nombre definitivo en el diseño SQL |
+| historial de correcciones de jornada | [APROBADA CONCEPTUALMENTE] (ADR-007) | jornada_id, fecha y camión anteriores, fecha y camión nuevos, motivo, operacion_id, actor, creado_en. Append-only y separado del de reasignaciones. Nombre definitivo en el diseño SQL |
 | `conteos` | [APROBADA CONCEPTUALMENTE] | jornada_id, contado_por, contado_en, tipo; hecho observado, **no** modifica stock. Idempotente |
 | `conteos_items` | [APROBADA CONCEPTUALMENTE] | conteo_id, producto_id, cantidad_apta, cantidad_cuarentena, cantidad_no_apta |
 | `rendiciones` | [APROBADA CONCEPTUALMENTE] | jornada_id, totales históricos, diferencia_mercaderia_valorizada, diferencia_efectivo, diferencia_transferencias_declaradas_vs_verificadas, aprobado_por, aprobado_at, motivo_aprobacion, observaciones |
@@ -488,7 +499,7 @@ Restricciones clave:
 - `ventas`: único parcial (`empresa_id`, `serie_talonario`, `numero_nota`) cuando origen = papel; idempotencia en la operación para digital.
 - `retiros_efectivo`: efecto contable solo después de ambas confirmaciones; importes positivos; idempotencia.
 - `venta_pagos`: suma por venta = total confirmado; toda escritura en una transacción; importes `numeric(14,2)`, nunca float.
-- `jornadas`: único (`empresa_id`, `camion_id`, `fecha`), incluso cerrada.
+- `jornadas`: único (`empresa_id`, `camion_id`, `fecha`), incluso cerrada; único (`empresa_id`, `vendedor_id`, `fecha`), incluso cerrada (ADR-007).
 - `movimientos_stock`: append-only; sin UPDATE/DELETE; enteros positivos con dirección dada por origen/destino; rectificación por movimientos compensatorios.
 - `presupuestos`: sin efecto sobre `movimientos_stock`, `stock_actual`, `venta_pagos`, jornadas ni rendiciones. Secuencia, formato, unicidad y reinicio del número: pendientes (§15).
 - Cantidades registradas en documentos y movimientos: enteros positivos en unidad mínima (unidades o gramos). **Excepción no aprobada:** si se permitiera stock negativo transitorio, sería **solo** para ubicación camión en jornada abierta; depósito y cuarentena no podrán ser negativos. No activar sin decisión aprobada, implementación transaccional y pruebas de concurrencia.
@@ -572,6 +583,20 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] Las ventas de papel pendientes bloquean el conteo formal; la carga final se confirma en servidor.
 - [ ] No se puede cerrar sin conteo de regreso.
 - [ ] Una jornada cerrada rechaza cualquier modificación.
+
+**Jornada: apertura, carga y salida (ADR-007 §7)**
+- [ ] Apertura con otra jornada del camión sin cerrar (otra fecha) o con camión inactivo: rechazo.
+- [ ] Fecha pasada: rechazo; día operativo actual o fecha futura en `America/Argentina/Tucuman`: aceptación.
+- [ ] Vendedor con perfil inactivo, de otra empresa o inexistente: rechazo; `dueno`, `encargado` o `vendedor_piloto` activo de la empresa: aceptación.
+- [ ] Segunda jornada del mismo vendedor en la misma fecha, aunque la primera esté cerrada, también por reasignación: rechazo.
+- [ ] La reasignación en `abierta` o `cargada` queda en su historial append-only con vendedor anterior y nuevo; el vendedor anterior queda libre para esa fecha.
+- [ ] La corrección de fecha o camión de una jornada `abierta` sin movimientos, con motivo, revalida todas las condiciones de apertura sobre los valores nuevos y queda en su propio historial, sin tocar el de reasignaciones; en `cargada` o después, sin motivo, hacia un par `(camión, fecha)` ocupado (incluso por una jornada cerrada), hacia una fecha pasada, hacia un camión inactivo o con otra jornada sin cerrar, o con el vendedor ocupado en la fecha nueva, se rechaza sin cambios.
+- [ ] La primera carga válida mueve exactamente depósito → camión y pasa `abierta → cargada`; con stock residual en el camión se rechaza sin efectos; las cargas posteriores no cambian el estado.
+- [ ] Una carga mayor que el depósito, de cuarentena, de un producto inactivo o repetido, o con cantidad 0, negativa o fraccionaria se rechaza sin efectos; `1,250 kg` cargados son `1250` g en ambos lados.
+- [ ] La descarga antes de la salida, con motivo y dentro de lo cargado neto de la jornada, mueve camión → depósito sin editar la carga; por encima de lo cargado neto, sin motivo o en `abierta` se rechaza.
+- [ ] La salida desde `cargada` con carga neta positiva pasa a `en_reparto`; con carga neta cero o desde `abierta` se rechaza; en `en_reparto` se rechazan carga, descarga, reasignación y corrección.
+- [ ] El vendedor ve sólo su jornada: no ve el ledger, el stock ni los historiales.
+- [ ] Con el camión dado de baja y la jornada `cargada`: descarga y salida permitidas; carga, apertura y corrección hacia ese camión rechazadas.
 
 **Rendición**
 - [ ] **1A:** nota de papel de $100.000 con $40.000 efectivo, $35.000 transferencia declarada y $25.000 a cuenta: efectivo esperado $40.000 antes de retiros.
@@ -739,7 +764,7 @@ Estado: abierto | resuelto (solo con prueba)
 - [ ] **Presupuestos — precio:** origen del precio de cada línea (por ejemplo, si se toma automáticamente del catálogo), si es editable y quién puede modificarlo (sin descuentos en ningún caso).
 - [ ] **Clientes — DNI y cuenta:** agregarlos a la ficha (hoy no existen), su obligatoriedad, formato, unicidad y quién los carga; impacto sobre el alta por vendedor.
 - [ ] **Presupuestos — entrega:** en qué entrega (1A/1B) y etapa del plan entra el módulo.
-- [ ] **Fechas:** día operativo y zona horaria del negocio (distinción de UTC para auditoría); corte de jornada.
+- [ ] **Fechas:** ~~zona horaria del negocio~~ resuelta el 29/10/2026: **`America/Argentina/Tucuman`**; el día operativo actual es la fecha de calendario vigente en esa zona, y la fecha de una jornada nueva es la actual o una futura (ADR-007). Los timestamps de auditoría siguen en UTC. **Sigue pendiente:** corte de jornada.
 
 ### Prioridad media — antes de entrega
 - [ ] ¿Cómo verificar transferencias en Fase 1: declaración del vendedor, comprobante, o verificación del dueño?
@@ -793,6 +818,7 @@ Estado: abierto | resuelto (solo con prueba)
 | 2.2 | 26/10/2026 | **Cierre humano de ADR-005 D-R1–D-R4:** D-R1 (sólo líneas `peso`), importe redondeado una vez por línea al peso entero (0,50 hacia arriba), sumado al total sin recálculo, `numeric(14,2)` como tipo monetario general; D-R2, peso efectivamente medido en cada operación; D-R3, sin tolerancia automática de pesaje en Fase 1; D-R4, reinicio limpio del modelo pieza/media pieza, sin reinterpretación. Nuevo pendiente: redondeo de líneas `unidad` y centavos de documentos mixtos. §2, §7.1, §7.4, §7.5, §7.8, §7.10, §8, §11, §12, §14, §15, §16. **Sin código, SQL, migraciones ni pruebas**; la migración al modelo por peso requiere una tarea posterior autorizada. |
 | 2.3 | 26/10/2026 | **Estado de implementación, sin cambio de reglas:** Slice A del modelo por peso (`20261027001542_modelo_peso_gramos.sql`, validado sólo en local) deja el SQL en `unidad`/`peso` con enteros en unidad mínima (unidades o gramos), sin cambiar tipos ni firmas de RPC de stock y con falla cerrada ante datos `pieza` (D-R4). La pantalla Productos se adapta al contrato `unidad | peso` por compatibilidad inmediata. Se actualizan las notas de estado de §7.1 y §8; el resto del prototipo sigue pendiente (Slice B). |
 | 2.4 | 29/10/2026 | **ADR-006 aprobada — Una línea por producto en cada venta nueva** (formaliza la decisión humana del 28/10/2026, hallazgo AUD-B3-01; complementa ADR-005 sin modificar D-R1): en una venta nueva, `productoId` es único dentro de los ítems, cualquiera sea su unidad, y las líneas repetidas invalidan la venta. Los históricos con líneas repetidas no se ven afectados: se leen sin recalcular ni migrar. §7.5 incorpora la regla y §12, sus 6 pruebas normativas. |
+| 2.5 | 29/10/2026 | **ADR-007 aprobada — Jornadas y carga de camiones** (decisiones humanas del 29/10/2026), para el tramo `abierta → cargada → en_reparto`: **apertura** por dueño o encargado con fecha operativa actual o futura en la zona `America/Argentina/Tucuman`, camión activo y sin otra jornada sin cerrar; **vendedor** con perfil activo y rol `dueno`, `encargado` o `vendedor_piloto`, una jornada por persona y fecha aunque esté cerrada, reasignable antes de la salida con historial append-only; **corrección** de fecha o camión de una jornada `abierta` sin movimientos, con motivo, revalidación completa e historial propio; **carga incremental**, con la primera carga como evento de `abierta → cargada` y stock del camión en cero; **descarga** compensatoria antes de la salida; **salida** con carga neta positiva. §7.4 (tipo `descarga`), §7.5, §8 (dos historiales y unicidad por vendedor y fecha), §12 (pruebas normativas de ADR-007 §7) y §15 («Fechas»: zona horaria resuelta, corte de jornada pendiente). **Sin SQL, migraciones ni pruebas en este cambio**; el contrato técnico (anexo §18.4 de ADR-001) sigue PROPUESTA TÉCNICA NO APROBADA. |
 
 ---
 
