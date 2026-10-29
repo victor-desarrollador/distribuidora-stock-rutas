@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   centavos_a_pesos,
+  importe_linea_peso,
+  importe_linea_peso_centavos,
   precio_a_centavos,
   precio_media_pieza,
   precio_valido,
@@ -10,6 +12,7 @@ import {
   sumar_importes,
   validar_precio,
 } from "./precios";
+import { kg_a_gramos } from "./peso";
 
 const fiambre = { unidad_medida: "pieza", precio: 10000 } as const;
 
@@ -252,5 +255,64 @@ describe("sumar_importes y aritmética monetaria", () => {
     expect(() =>
       sumar_importes([5e15, 5e15])
     ).toThrow(Error);
+  });
+});
+
+// D-R1 (ADR-005 §2.3.3): N = gramos × centavos/kg está en milésimas de
+// centavo; el importe exacto en pesos es N / 100000 y se redondea UNA vez al
+// peso entero, con r >= 50000 hacia arriba. En cada caso se anota el importe
+// exacto en centavos (N / 1000) para mostrar que no hay redondeo intermedio.
+describe("importe_linea_peso (D-R1)", () => {
+  it.each([
+    // [gramos, precio/kg, exacto en ¢, pesos]
+    [1250, 1234.56, "154320", 1543], // §12: $1.543,20 → $1.543
+    [1250, 1235.6, "154450", 1545], // §12 empate: $1.544,50 → $1.545
+    [1, 1544490, "154449", 1544], // §12: $1.544,49 → $1.544
+    [1, 1544990, "154499", 1545], // §12: $1.544,99 → $1.545
+    [1, 1544499.99, "154449,999", 1544], // r = 49999 → baja
+    [1, 1544500, "154450", 1545], // r = 50000 → sube
+    [1, 0.01, "0,001", 0], // 1 g × $0,01/kg = $0,00001
+    [1250, 0, "0", 0], // precio 0 admitido (>= 0)
+  ])("%i g × $%s/kg = %s ¢ exactos → $%i", (gramos, precio, _exacto, pesos) => {
+    expect(importe_linea_peso(gramos, precio)).toBe(pesos);
+    expect(importe_linea_peso_centavos(gramos, precio)).toBe(pesos * 100);
+  });
+
+  it("un solo redondeo: $1.544,4995 exactos → $1.544 (a centavos primero daría $1.545)", () => {
+    // N = 1 × 154449950 → q = 1544, r = 49950 < 50000. Redondear antes a
+    // centavos (154449,95 ¢ → 154450 ¢ = $1.544,50) y después a pesos daría
+    // $1.545: ese doble redondeo está prohibido.
+    expect(importe_linea_peso(1, 1544499.5)).toBe(1544);
+  });
+
+  it("§12: dos líneas de 1,250 kg × $1.234,72 suman $3.086, no $3.087", () => {
+    // $1.543,40 exactos por línea → $1.543 cada una; el total suma importes
+    // ya redondeados y no redondea el total exacto $3.086,80.
+    const linea = importe_linea_peso(1250, 1234.72);
+    expect(linea).toBe(1543);
+    expect(sumar_importes([linea, linea])).toBe(3086);
+  });
+
+  it("sin punto flotante: 1,005 kg (1005 g) × $999,99/kg = 100498,995 ¢ → $1.005", () => {
+    const gramos = kg_a_gramos("1,005");
+    expect(gramos).toBe(1005);
+    expect(importe_linea_peso(gramos as number, 999.99)).toBe(1005);
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "rechaza gramos %s",
+    (gramos) => {
+      expect(() => importe_linea_peso(gramos, 1000)).toThrow(Error);
+    }
+  );
+
+  it.each([10.001, -1, NaN, Infinity])("rechaza precio/kg %s", (precio) => {
+    expect(() => importe_linea_peso(1250, precio)).toThrow(Error);
+  });
+
+  it("desbordamiento: falla con error, nunca un valor aproximado", () => {
+    expect(() =>
+      importe_linea_peso(Number.MAX_SAFE_INTEGER, 1_000_000)
+    ).toThrow("El importe excede el máximo entero seguro.");
   });
 });

@@ -32,7 +32,7 @@ export type ResultadoRevalidacionIdentidad =
  */
 export function revalidar_jornada_para_operacion(
   lectura: LecturaOperativaJornadas,
-  jornadaRender: Jornada,
+  jornadaRender: Pick<Jornada, "id" | "camionId">,
   estadoRequerido: "abierta" | "cerrada"
 ): ResultadoRevalidacion {
   if (!lectura.ok) {

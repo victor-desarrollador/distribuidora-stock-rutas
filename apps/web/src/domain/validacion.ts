@@ -1,20 +1,24 @@
-import { precio_valido, subtotal_linea_historica, sumar_importes, precio_a_centavos } from "./precios";
+import { precio_valido, sumar_importes, precio_a_centavos } from "./precios";
+import {
+  es_venta_mixta,
+  importe_linea_vigente,
+  tiene_productos_repetidos,
+} from "./venta";
 import type { Venta, DetalleVenta } from "../data/mockVentas";
 
 /**
- * Valida que el subtotal de un item coincida con el cálculo histórico.
- * B1: sólo líneas "unidad"; una línea "peso" es inválida hasta B3 (su importe
- * depende de D-R1).
+ * Escritura de una venta NUEVA: el subtotal coincide con la regla vigente de
+ * su tipo (`unidad`: cantidad × precio; `peso`: D-R1, ADR-005 §2.3.3).
+ * No se usa en lectura: el histórico no se recalcula (ADR-005 §2.3.4).
  */
 export function subtotal_coincide(item: DetalleVenta): boolean {
-  if (item.unidadMedida !== "unidad") return false;
+  if (item.unidadMedida !== "unidad" && item.unidadMedida !== "peso") return false;
   try {
     return (
-      subtotal_linea_historica({
-        unidad_medida: item.unidadMedida,
+      importe_linea_vigente({
+        unidadMedida: item.unidadMedida,
         cantidad: item.cantidad,
         precio: item.precioUnitario,
-        precio_media_pieza: item.precioMediaPieza,
       }) === item.subtotal
     );
   } catch {
@@ -23,24 +27,12 @@ export function subtotal_coincide(item: DetalleVenta): boolean {
 }
 
 /**
- * Valida que el total de una venta coincida con la suma exacta
- * de los subtotales históricos de sus items.
+ * Valida que el total de una venta coincida con la suma exacta de los
+ * subtotales ALMACENADOS de sus items. No recalcula ninguna línea.
  */
 export function total_coincide(venta: Venta): boolean {
   try {
-    const subtotales = venta.items.map((item) => {
-      // B1: una línea "peso" invalida la venta hasta B3 (D-R1).
-      if (item.unidadMedida !== "unidad") {
-        throw new Error("Línea por peso no admitida todavía.");
-      }
-      return subtotal_linea_historica({
-        unidad_medida: item.unidadMedida,
-        cantidad: item.cantidad,
-        precio: item.precioUnitario,
-        precio_media_pieza: item.precioMediaPieza,
-      });
-    });
-    const total_calculado = sumar_importes(subtotales);
+    const total_calculado = sumar_importes(venta.items.map((item) => item.subtotal));
     // Comparar EXACTAMENTE en centavos usando precio_a_centavos
     // Fallará cerrado si total o calculado tienen >2 decimales, NaN, Infinity o inválidos.
     return precio_a_centavos(total_calculado) === precio_a_centavos(venta.total);
@@ -50,33 +42,32 @@ export function total_coincide(venta: Venta): boolean {
 }
 
 /**
- * Valida un item de venta individual (línea de detalle).
- * Reglas (B1):
- * - unidadMedida "unidad" ("peso" es inválida hasta B3; "pieza" ya no existe)
- * - cantidad canónica > 0 (entera, finita)
- * - precioUnitario válido
- * - precioMediaPieza ausente (legacy ADR-003; ninguna venta v5 lo tiene)
- * - subtotal coincide con cálculo histórico usando snapshot
+ * Valida la ESTRUCTURA de una línea de venta (lectura / histórico).
+ * NO recalcula el subtotal con la regla vigente (ADR-005 §2.3.4).
+ * - unidadMedida "unidad" o "peso" ("pieza" ya no existe)
+ * - cantidad canónica: entero seguro > 0 (unidades o gramos)
+ * - precioUnitario válido (unitario o por kg)
+ * - precioMediaPieza ausente (legacy ADR-003)
+ * - subtotal monetario válido; si es "peso", entero en pesos (forma D-R1)
  */
 export function item_valido(item: DetalleVenta): boolean {
   return (
     item !== null &&
     Number.isSafeInteger(item.productoId) &&
     typeof item.nombreProducto === "string" &&
-    item.unidadMedida === "unidad" &&
-    Number.isFinite(item.cantidad) &&
+    (item.unidadMedida === "unidad" || item.unidadMedida === "peso") &&
+    Number.isSafeInteger(item.cantidad) &&
     item.cantidad > 0 &&
-    Number.isInteger(item.cantidad) &&
-    // Historial del precio aplicado: snapshot histórico.
     precio_valido(item.precioUnitario) &&
     item.precioMediaPieza === undefined &&
-    // Validación de subtotal usando snapshot histórico
-    subtotal_coincide(item)
+    precio_valido(item.subtotal) &&
+    (item.unidadMedida !== "peso" || Number.isInteger(item.subtotal))
   );
 }
 
 /**
- * Valida una venta completa.
+ * Valida una venta completa (lectura / histórico). Una venta mixta
+ * `unidad` + `peso` es inválida (falla cerrado; regla pendiente, ADR-005 §5).
  */
 export function venta_valida(venta: Venta): boolean {
   return (
@@ -93,8 +84,26 @@ export function venta_valida(venta: Venta): boolean {
     Number.isFinite(venta.total) &&
     venta.total >= 0 &&
     venta.items.every(item_valido) &&
+    !es_venta_mixta(venta.items) &&
     // Validación de total histórico: el total de la venta debe coincidir
-    // con la suma exacta de los subtotales de sus items.
+    // con la suma exacta de los subtotales almacenados de sus items.
     total_coincide(venta)
+  );
+}
+
+/**
+ * Frontera de escritura de una venta NUEVA: estructura e histórico válidos,
+ * al menos un ítem (el histórico sí admite una venta vacía), una sola línea
+ * por producto (AUD-B3-01; el histórico sí admite líneas repetidas), sin
+ * mezcla `unidad` + `peso` (defensa en profundidad aunque `venta_valida` ya
+ * la rechace) y cada subtotal igual a la regla vigente de su tipo.
+ */
+export function venta_nueva_valida(venta: Venta): boolean {
+  return (
+    venta_valida(venta) &&
+    venta.items.length > 0 &&
+    !tiene_productos_repetidos(venta.items) &&
+    !es_venta_mixta(venta.items) &&
+    venta.items.every(subtotal_coincide)
   );
 }

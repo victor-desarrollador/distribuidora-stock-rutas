@@ -9,15 +9,12 @@ import {
   Receipt,
 } from "lucide-react";
 
-import { useJornadas, leerJornadasDiscriminado } from "../hooks/useJornadas";
+import { useJornadas } from "../hooks/useJornadas";
 import { useClientes } from "../hooks/useClientes";
 import { useCamiones } from "../hooks/useCamiones";
 import { useVentas } from "../hooks/useVentas";
 
-import {
-  useMovimientos,
-  leerMovimientosDiscriminado,
-} from "../hooks/useMovimientos";
+import { useMovimientos } from "../hooks/useMovimientos";
 
 import {
   salidasPorMovimiento,
@@ -39,7 +36,6 @@ import {
   sumar_importes,
 } from "../domain/precios";
 import { construirItemsVenta } from "../domain/venta";
-import { revalidar_jornada_para_operacion } from "../domain/jornadas";
 import AvisoStorageOperativo from "../components/AvisoStorageOperativo";
 import { estadoStorageOperativo } from "./estadoStorageOperativo";
 
@@ -287,108 +283,10 @@ export default function Autoventa() {
       total,
     };
 
-    // ------------------------------------------------
-    // REVALIDACIÓN DEL STOCK
-    // ------------------------------------------------
-
-    const resultado = registrarVenta(
-      venta,
-      (ventasActuales) => {
-        // M-2 (bloque E): revalidar la Jornada vigente justo antes de
-        // persistir. La jornada del render es un snapshot: puede haberse
-        // cerrado, desaparecido o cambiado de camión, y el storage de
-        // Jornadas puede haberse corrompido, desde el montaje.
-        const revalidacionJornada = revalidar_jornada_para_operacion(
-          leerJornadasDiscriminado(),
-          jornada,
-          "abierta"
-        );
-
-        if (!revalidacionJornada.ok) {
-          return `No se puede registrar: ${revalidacionJornada.error}`;
-        }
-
-        // Leemos los movimientos más recientes de la demo.
-        const lecturaMovimientos = leerMovimientosDiscriminado();
-        if (!lecturaMovimientos.ok) {
-          return `No se puede registrar: ${lecturaMovimientos.error}`;
-        }
-        const movimientosActuales = lecturaMovimientos.movimientos;
-
-        for (const item of itemsVenta) {
-          // Cantidad que salió cargada en el camión.
-          const cargado = revalidacionJornada.jornada.items.find(
-            (producto) =>
-              producto.productoId === item.productoId
-          );
-
-          if (!cargado) {
-            return (
-              `El producto ${item.nombreProducto} ` +
-              "no está cargado en el camión."
-            );
-          }
-
-          // Cantidad ya vendida en esta jornada.
-          const vendido = ventasActuales
-            .filter(
-              (v) => v.jornadaId === jornada.id
-            )
-            .flatMap((v) => v.items)
-            .filter(
-              (p) => p.productoId === item.productoId
-            )
-            .reduce(
-              (suma, p) => suma + p.cantidad,
-              0
-            );
-
-          // Cantidad retirada por mermas y reemplazos.
-          const retirado = movimientosActuales
-            .filter(
-              (m) => m.jornadaId === jornada.id
-            )
-            .flatMap(salidasPorMovimiento)
-            .filter(
-              (p) => p.productoId === item.productoId
-            )
-            .reduce(
-              (suma, p) => suma + p.cantidad,
-              0
-            );
-
-          // Cantidad que realmente queda disponible.
-          const restante = Math.max(
-            0,
-            cargado.cantidad - vendido - retirado
-          );
-
-          // Validar cantidades y unidad de medida.
-          const cantidadValida =
-            Number.isFinite(item.cantidad) &&
-            item.cantidad > 0 &&
-            Number.isInteger(item.cantidad);
-
-          if (!cantidadValida) {
-            return (
-              `Cantidad inválida de ` +
-              item.nombreProducto
-            );
-          }
-
-          // Usar cantidad canónica para validar stock
-          const cantidadCanonica = item.cantidad;
-          if (cantidadCanonica > restante + 0.000001) {
-            return (
-              `Stock insuficiente de ` +
-              item.nombreProducto
-            );
-          }
-        }
-
-        return null;
-      }
-    );
+    // La frontera persistente relee Ventas, Jornada y Movimientos y valida el
+    // stock por sí misma justo antes de guardar (AUD-001): no recibe
+    // validadores de la pantalla.
+    const resultado = registrarVenta(venta);
 
     // Mostrar error si no se pudo registrar.
     if (resultado) {

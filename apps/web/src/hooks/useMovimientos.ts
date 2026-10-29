@@ -14,7 +14,7 @@ import {
   validar_stock_movimiento,
 } from "../domain/movimientos";
 import { leerJornadasDiscriminado } from "./useJornadas";
-import { leerVentas } from "./useVentas";
+import { leerVentas } from "./ventasStorage";
 
 const STORAGE_KEY = CLAVES_STORAGE.movimientos;
 

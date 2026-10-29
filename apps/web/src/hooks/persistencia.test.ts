@@ -27,11 +27,11 @@ import {
   MENSAJE_PREPARACION_INVALIDA,
 } from "./useJornadas";
 import type { ItemCarga, Jornada } from "../data/mockJornadas";
+import { cargarVentas } from "./useVentas";
 import {
-  cargarVentas,
   registrarVentaOperacion,
   registrarVentaPersistida,
-} from "./useVentas";
+} from "./registroVentas";
 import type { Venta } from "../data/mockVentas";
 import type { Cobro } from "../data/mockCobros";
 import {
@@ -862,16 +862,24 @@ describe("Frontera de persistencia: precios y snapshot de ventas (B1)", () => {
     total: 6900,
   };
 
-  it("ventas: conserva el precio aplicado y exige subtotal consistente", () => {
+  it("ventas: conserva el precio aplicado; el histórico no se recalcula y exige total = suma de subtotales", () => {
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
       JSON.stringify([{ ...ventaBase, items: [itemVenta] }])
     );
     expect(cargarVentas()).toHaveLength(1);
 
+    // Histórico unidad: subtotal ≠ cantidad × precio, total = suma almacenada → se lee (ADR-005 §2.3.4).
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
       JSON.stringify([{ ...ventaBase, items: [{ ...itemVenta, subtotal: 6901 }], total: 6901 }])
+    );
+    expect(cargarVentas()).toHaveLength(1);
+
+    // Total ≠ suma de subtotales almacenados → corrupto.
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([{ ...ventaBase, items: [itemVenta], total: 6901 }])
     );
     expect(cargarVentas()).toEqual([]);
   });
@@ -886,24 +894,35 @@ describe("Frontera de persistencia: precios y snapshot de ventas (B1)", () => {
     expect(cargarVentas()).toEqual([]);
   });
 
-  it("ventas: una línea peso se rechaza hasta B3 (subtotal arbitrario, sin D-R1)", () => {
+  const itemPeso = {
+    productoId: 4,
+    nombreProducto: "Jamón cocido",
+    unidadMedida: "peso",
+    cantidad: 1250,
+    precioUnitario: 12500,
+  };
+
+  it("ventas: una línea peso histórica con subtotal entero se lee sin recalcular D-R1", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([{ ...ventaBase, total: 123, items: [{ ...itemPeso, subtotal: 123 }] }])
+    );
+    expect(cargarVentas()).toHaveLength(1);
+  });
+
+  it("ventas: una línea peso con subtotal fraccionario es corrupta", () => {
+    mockLS._store.set(
+      CLAVES_STORAGE.ventas,
+      JSON.stringify([{ ...ventaBase, total: 123.5, items: [{ ...itemPeso, subtotal: 123.5 }] }])
+    );
+    expect(cargarVentas()).toEqual([]);
+  });
+
+  it("ventas: una venta mixta unidad + peso es corrupta", () => {
     mockLS._store.set(
       CLAVES_STORAGE.ventas,
       JSON.stringify([
-        {
-          ...ventaBase,
-          total: 123,
-          items: [
-            {
-              productoId: 4,
-              nombreProducto: "Jamón cocido",
-              unidadMedida: "peso",
-              cantidad: 1250,
-              precioUnitario: 12500,
-              subtotal: 123,
-            },
-          ],
-        },
+        { ...ventaBase, total: 22525, items: [itemVenta, { ...itemPeso, subtotal: 15625 }] },
       ])
     );
     expect(cargarVentas()).toEqual([]);
@@ -2115,54 +2134,77 @@ describe("ventas y cobros: escritura fail-closed ante storage corrupto", () => {
   ];
 
   describe("ventas", () => {
+    // Jornada abierta j1 (camión 1) con Yogur de sobra: la frontera la relee y
+    // valida el stock por sí misma (AUD-001); no hay validador del caller.
+    const jornadaJ1: Jornada = {
+      id: "j1",
+      camionId: 1,
+      chofer: "Chofer",
+      zona: "Zona",
+      fechaCreacion: "2026-10-21T08:00:00.000Z",
+      fechaSalida: "2026-10-21T09:00:00.000Z",
+      estado: "abierta",
+      items: [
+        {
+          productoId: 1,
+          nombreProducto: "Yogur",
+          unidadMedida: "unidad",
+          cantidad: 10,
+          precioReferencia: 100,
+        },
+      ],
+    };
+    const conJornada = () =>
+      mockLS._store.set(CLAVES_STORAGE.jornadas, JSON.stringify([jornadaJ1]));
+
     it("A. storage ausente: la venta válida se registra y se persiste", () => {
-      const validar = vi.fn(() => null);
+      conJornada();
       const v = venta("v1");
       expect(mockLS.getItem(CV)).toBeNull();
-      expect(registrarVentaPersistida(v, validar)).toBeNull();
-      expect(validar).toHaveBeenCalledWith([]);
+      expect(registrarVentaPersistida(v)).toBeNull();
       expect(JSON.parse(mockLS.getItem(CV) as string)).toEqual([v]);
     });
 
     it("B. storage válido: conserva el historial y agrega al final", () => {
+      conJornada();
       const previa = venta("v0");
       mockLS._store.set(CV, JSON.stringify([previa]));
       const v = venta("v1");
-      expect(registrarVentaPersistida(v, () => null)).toBeNull();
+      expect(registrarVentaPersistida(v)).toBeNull();
       expect(JSON.parse(mockLS.getItem(CV) as string)).toEqual([previa, v]);
     });
 
-    it("C. venta duplicada: rechazo sin escribir ni llamar a validar", () => {
+    it("C. venta duplicada: rechazo sin escribir ni leer jornadas", () => {
+      conJornada();
       const crudo = JSON.stringify([venta("v1")]);
       mockLS._store.set(CV, crudo);
       mockLS.setItem.mockClear();
-      const validar = vi.fn(() => null);
-      expect(registrarVentaPersistida(venta("v1"), validar)).toMatch(/ya fue registrada/);
-      expect(validar).not.toHaveBeenCalled();
+      expect(registrarVentaPersistida(venta("v1"))).toMatch(/ya fue registrada/);
+      expect(mockLS.getItem).not.toHaveBeenCalledWith(CLAVES_STORAGE.jornadas);
       expect(mockLS.getItem(CV)).toBe(crudo);
       expect(mockLS.setItem).not.toHaveBeenCalled();
     });
 
-    it("D. venta inválida: rechazo antes de leer, validar o escribir", () => {
-      const cargar = vi.fn();
-      const validar = vi.fn(() => null);
-      const guardar = vi.fn();
-      const error = registrarVentaOperacion({ ...venta("v1"), total: 1 }, validar, cargar, guardar);
-      expect(error).toMatch(/validación/);
-      expect(cargar).not.toHaveBeenCalled();
-      expect(validar).not.toHaveBeenCalled();
-      expect(guardar).not.toHaveBeenCalled();
+    it("D. venta inválida: rechazo antes de leer o escribir", () => {
+      const leer = { ventas: vi.fn(), jornadas: vi.fn(), movimientos: vi.fn() };
+      const resultado = registrarVentaOperacion({ ...venta("v1"), total: 1 }, leer);
+      expect(resultado.ok).toBe(false);
+      expect(resultado.ok ? "" : resultado.error).toMatch(/validación/);
+      expect(leer.ventas).not.toHaveBeenCalled();
+      expect(leer.jornadas).not.toHaveBeenCalled();
+      expect(leer.movimientos).not.toHaveBeenCalled();
+      expect(mockLS.setItem).not.toHaveBeenCalled();
     });
 
-    it.each(CORRUPTOS_VENTAS)("storage corrupto — %s: falla, sin validar de stock, sin setItem, raw intacto", (_n, crudo) => {
+    it.each(CORRUPTOS_VENTAS)("storage corrupto — %s: falla, sin leer jornadas, sin setItem, raw intacto", (_n, crudo) => {
+      conJornada();
       mockLS._store.set(CV, crudo);
       mockLS.setItem.mockClear();
       const antes = mockLS.getItem(CV);
-      const validar = vi.fn(() => null);
       const alGuardar = vi.fn();
-      const error = registrarVentaPersistida(venta("v1"), validar, alGuardar);
+      const error = registrarVentaPersistida(venta("v1"), alGuardar);
       expect(error).toMatch(/No se puede registrar/);
-      expect(validar).not.toHaveBeenCalled();
+      expect(mockLS.getItem).not.toHaveBeenCalledWith(CLAVES_STORAGE.jornadas);
       expect(alGuardar).not.toHaveBeenCalled();
       expect(mockLS.setItem).not.toHaveBeenCalled();
       expect(mockLS.getItem(CV)).toBe(antes);

@@ -1,4 +1,393 @@
 ---
+## 29/10/2026 — ADR-001 §18.4: registro de la aprobación para validación controlada, acotada a jornadas y carga (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (publicado). Tarea **sólo documental**; cambios locales sin commit. Sólo se modifican rótulos, referencias y trazabilidad en ADR-001, el índice de decisiones y esta bitácora. ADR-007, el contrato técnico, las firmas, las matrices de pruebas, los bloqueos y las reglas de seguridad no cambian. PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Decisión humana del 29/10/2026
+- **Contenido aprobado:** el auditado por Codex en `05c3dfe8…`, SHA-256 de §18.4 `0170ab56afff633457dc4547ec46ef6a1ada007ec904a7a33cffdb4f0f9763dd` (receta única, entrada A-01). Tree `9bd2062ad8381e61f36f97a6e8613119ce06b0c7`; blob del ADR `6443ad0125ea0ed43c419d21f130e7327bd23f6b`.
+- **Alcance:** P10 y P12–P17 sólo para las seis RPC de jornadas y carga, los objetos y mecanismos definidos en el anexo y D-N1. **No** P8, P9, otros dominios, decisiones globales ni producción. Levanta ADR-007 §3, P-3 (sólo la aprobación del anexo).
+- **Excepción aceptada** a `AGENTS.md` §2.2 (requisito conjunto Codex y OpenCode) **sólo para esta aprobación documental**: Codex PASS sobre `7ac6a2d8…` y sobre `05c3dfe8…`; **OpenCode no auditó** por falta de acceso a la evidencia y **no tiene PASS registrado**.
+- **La excepción no se extiende a la implementación:** las migraciones y las seis RPC requieren auditoría de Codex **y** OpenCode, más security review, antes de cualquier merge. Si OpenCode sigue sin estar disponible, se detiene ese paso y se solicita una nueva decisión humana.
+- **Desviación reconocida:** se superaron los tres ciclos de `AGENTS.md` §2.3.5 (FAIL de Codex sobre `78958303…`, `345f7a00…` y `e17d8b9f…`; cierre con `7ac6a2d8…` y confirmación con `05c3dfe8…`), con intervención humana durante el proceso. No se oculta.
+
+### Cambios
+- `docs/decisions/001-rpc-privilegiadas.md`: encabezado y fila de §0; texto de §18; en §18.4, título, bloque «Estado», rótulo de la fe de erratas, encabezado, párrafo introductorio y puntos 1 y 7 de 18.4.13; nuevo apartado 18.4.14 (identidad, rótulos modificados y decisión).
+- `docs/decisions/README.md`: filas de ADR-001 y ADR-007 y el párrafo de ADR-001.
+- `docs/progress-log.md`: esta entrada. La fila P-3 del propio ADR-007 no se modificó; su levantamiento queda registrado en ADR-001 §18.4.14 y en el índice.
+
+### Sigue pendiente (sin autorizar)
+D-1, D-2, el arnés, su integración en CI y la tarea de implementación (preámbulo de `AGENTS.md` §1.3, security review y auditoría de Codex y OpenCode). P8, P9 y el corte de jornada.
+
+---
+## 29/10/2026 — ADR-001 §18.4: PASS de Codex y dos correcciones editoriales L-01 y L-02 (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit `7ac6a2d805f015562014247e67aef4289c07d623` (padre `e17d8b9fda2ecd3a576e86f2cc6ceb7389df770b`), publicado en `origin`. Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Auditorías sobre `7ac6a2d8…`
+- **Codex:** PASS para aprobación técnica humana (informado por el humano). Dejó dos observaciones editoriales, L-01 y L-02.
+- **OpenCode:** **no auditó**, por falta de acceso a la evidencia. No hay PASS de OpenCode registrado ni se reintentó la transferencia; la auditoría de OpenCode queda en pausa por decisión humana.
+
+### Correcciones editoriales (no cambian contratos ni orden de bloqueos)
+- **L-01 (18.4.11, «Mecanismo»):** la sesión de control retiene el recurso de cola que corresponde a cada RPC (advisory o bloqueo de fila `FOR UPDATE` de la jornada) y lo libera según su tipo (`pg_advisory_unlock_all()` o `ROLLBACK`). Antes el preámbulo describía sólo advisory.
+- **L-02 (18.4.9, fila I11):** el conflicto se detecta en 8a cuando las solicitudes comparten los bloqueos correspondientes; las variantes sin bloqueos compartidos (por ejemplo «otra jornada») se resuelven mediante el `ON CONFLICT` del paso 9 (K8). En `confirmar_salida`, I11 no ejerce 8a.
+- No se tocaron firmas, permisos, RLS, idempotencia ni orden de bloqueos.
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; la aprobación es humana y no está dada. D-N1 resuelta (opción A, sólo jornadas).
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- Un commit nuevo cambia el hash de §18.4: la auditoría PASS de Codex es sobre `7ac6a2d8…` y no se extiende automáticamente al texto con L-01 y L-02.
+
+---
+## 29/10/2026 — ADR-001 §18.4: correcciones A-01, A-02 y A-03 tras la tercera auditoría de Codex (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `e17d8b9fda2ecd3a576e86f2cc6ceb7389df770b` (padre `345f7a0010a2c7b7563e0ce5210d1cca7e253246`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Resultado de la auditoría de Codex sobre `e17d8b9f…`
+FAIL por A-01, A-02 y A-03.
+
+### A-01 — identidad del documento (causa raíz)
+Codex obtuvo `0cec22731ed046914a5f3e07ee247f8031b5b9bf2e5e7c4c0cfae53add87ed41` y la evidencia declaraba `50fd5f3d…`. **El contenido es el mismo**; los bytes son idénticos (UTF-8, sin BOM, sin CR, sin NUL; el árbol local coincide con el commit). La diferencia es el LF final: el hash de Codex es el del texto **con** LF final (lo que produce `sha256sum` sobre el archivo extraído), y el mío se calculó sobre la cadena **sin** LF final, aunque el archivo que yo generaba sí lo llevaba. La propia evidencia era inconsistente: `sha256sum seccion-18.4.md` daba `0cec2273…` y `sha256-seccion.txt` decía `50fd5f3d…`.
+
+**Receta única de identidad** (`extraer-seccion.sh`): bytes desde la línea `### 18.4 Decisiones…` (inclusive) hasta la última línea no vacía antes del separador `---` que precede a `## 19.` (inclusive, con su LF final); se hashea con `sha256sum` sobre el archivo extraído.
+```
+git show <commit>:docs/decisions/001-rpc-privilegiadas.md | LC_ALL=C awk '/^### 18\.4 Decisiones/{f=1} f&&/^---$/{exit} f{b[++n]=$0} END{while(n>0&&b[n]=="")n--; for(i=1;i<=n;i++)print b[i]}' | sha256sum
+```
+Además se registran el Git blob SHA del archivo y el tree SHA del commit. Para `e17d8b9f`: blob `2d01755bf59968164fc03ea639164648972c6407`, tree `38ca21e4ec11f968edc21a3349e01499a5d32698`, §18.4 = `0cec2273…` (81 534 bytes). Los hashes de los commits anteriores bajo esta receta: `345f7a00` = `90ea848b…`, `78958303` = `a52067ec…`.
+
+### A-02 — arnés I10/I11
+Nueva sección en 18.4.11: mecanismo de cola por RPC (advisory para `abrir_jornada`, `reasignar_vendedor` y `corregir_jornada`; `SELECT … FOR UPDATE` de la jornada en una transacción de control para `registrar_carga`, `registrar_descarga` y `confirmar_salida`), evidencia exigida antes de liberar (ambas sesiones en `wait_event_type = 'Lock'`, bloqueo no concedido en `pg_locks`, sin `RowExclusiveLock` sobre tablas de negocio y sin fila de la clave) y evaluación del riesgo de deadlock del mecanismo. Se declara qué prueba 8a y qué no: sólo `reasignar_vendedor` y `corregir_jornada` distinguen 8a del paso 9; en `confirmar_salida` la única variante de I11 (otra jornada) no comparte bloqueos y se resuelve en el paso 9 (K8). I10 e I11 se ajustan sin cambiar el contrato funcional.
+
+### A-03 — I13
+I13 queda para el parámetro estructural inválido con clave `uuid` válida (rechazo sin reserva y reutilización posterior con el payload corregido); la clave nula pasa a **I14** (`PT400 jornada_clave_invalida`, cero efectos).
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; D-N1 resuelta (opción A, sólo jornadas); H-01, H2-R1, H2-R2 y E1–E3 sin cambios.
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- El próximo commit requiere nueva auditoría de Codex y OpenCode; la de `e17d8b9f…` no se reutiliza.
+
+---
+## 29/10/2026 — ADR-001 §18.4: correcciones H2-R1 y H2-R2 tras la segunda auditoría de Codex (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `345f7a0010a2c7b7563e0ce5210d1cca7e253246` (padre `78958303168e9774fb15651cca411db484dbff6d`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Resultado de la auditoría de Codex sobre `345f7a00…`
+H-01 **resuelto**. H2-R1 **BLOCKER**. H2-R2 **MEDIUM**.
+
+### Correcciones
+- **H2-R1:** en 18.4.3, tras los bloqueos y el `FOR UPDATE` de la jornada, nueva **segunda consulta de la clave idempotente (paso 8a)**, antes de la reverificación (ahora 8b). Misma clave, tipo y huella → respuesta original sin efectos nuevos; otro tipo u otra huella → `PT409 jornada_conflicto_idempotencia`; clave inexistente → se continúa con 8b. Autenticación, empresa, rol y estructura siguen validándose antes de cualquier replay. Sin 8a, una solicitud repetida y concurrente de `reasignar_vendedor` o `corregir_jornada` recibía `jornada_estado_invalido` porque la primera había cambiado el vendedor o el camión que la segunda leyó en el paso 6.
+- **Evaluación de concurrencia:** 8a es una lectura MVCC; no toma bloqueos de fila, de FK ni advisory, no cambia el orden global ni puede formar un ciclo. No cubre la misma clave sobre otra jornada (sin bloqueos compartidos), que sigue resolviéndose en el `ON CONFLICT` del paso 9 (K8). Las garantías de idempotencia no cambian.
+- **Pruebas afectadas:** I10, I11 y K9 reescritos (K9 sigue cubriendo el cambio provocado por otra operación con distinta clave); I9 y las referencias pasan a «paso 8b». K1 a K8 y K10 a K12 sin cambio de diseño.
+- **H2-R2:** I5 sólo se ejecuta donde existe un parámetro estructural validable; tabla de aplicabilidad por RPC. `confirmar_salida`: no aplicable (sólo clave y jornada; el paso 3 no valida la jornada). Precisión posterior, autorizada por el humano: el paso 3 de 18.4.3 evalúa el **vendedor nulo** de `abrir_jornada` y `reasignar_vendedor` (destino) con `PT400 jornada_vendedor_invalido`, el código que 18.4.7 ya define; I5 incluye ambos casos. `corregir_jornada` conserva fecha y motivo. No se inventan parámetros, validaciones ni códigos.
+- Sin cambios: H-01, E1–E3, los contratos funcionales de las seis RPC y las restricciones de seguridad.
+
+### Parámetros `uuid` nulos y decisión D-N1 (resuelta)
+- Aceptado por el humano: el vendedor nulo se valida en el paso 3 en `abrir_jornada` y en `reasignar_vendedor`, con `jornada_vendedor_invalido`.
+- **D-N1, opción A (humano, exclusivamente para jornadas):** camión nulo → `PT404 jornada_camion_no_encontrado`; jornada nula → `PT404 jornada_no_encontrada`. Ambos en 18.4.3, paso 3, antes de la huella, de cualquier consulta de replay y de la reserva de la clave. El inexistente o de otra empresa conserva el mismo `PT404`, validado después. Sin códigos nuevos; no modifica Stock.
+- Se agregó en 18.4.3 la tabla de `uuid` obligatorios por RPC (nulo frente a inexistente), el caso I13 (el rechazo estructural no reserva la clave) y se actualizaron 18.4.7, I5 (ahora `confirmar_salida` aplica con la jornada nula), I13 y 18.4.13.
+- Verificado antes de commitear: el catálogo de 18.4.7 ya contiene ambos `PT404`; las firmas no cambian; el paso 3 precede a la huella, al replay y a la reserva, así que las garantías de replay no cambian.
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; alcance P10 y P12–P17 sólo para jornadas.
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- El próximo commit requiere nueva auditoría (Codex y OpenCode); la de `345f7a00…` no se reutiliza.
+
+---
+## 29/10/2026 — ADR-001 §18.4: correcciones H-01 y H-02 tras la auditoría de Codex (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `78958303168e9774fb15651cca411db484dbff6d` (padre `5efad2747066b1c64d6b2e8ab11073484c142d56`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Resultado de la auditoría de Codex sobre `78958303…`
+FAIL por dos hallazgos:
+- **H-01 (BLOCKER):** ADR-007 §5 exige literalmente el bloqueo del vendedor cuando `corregir_jornada` cambia el camión; §18.4 sólo lo bloqueaba cuando cambiaba la fecha. La «equivalencia» redactada en la primera candidata no se acepta.
+- **H-02 (HIGH):** faltaba una matriz normativa completa de idempotencia para las seis RPC.
+
+### Correcciones
+- **H-01:** `corregir_jornada` toma **siempre** el advisory del vendedor vigente (nivel 2), además de los dos camiones (nivel 1) y la jornada (nivel 3), cambie el camión, la fecha o ambos; una corrección sin cambios se rechaza después con `jornada_sin_cambios`. Se conserva el orden global. Se documentan los bloqueos de cada RPC (tabla en 18.4.5), el caso **I-3c** (corrección sólo de camión contra reasignación de la misma jornada, deducido del orden global y **no medido**) y se amplían K6, K7 y K9. Nuevo **K12**. Se reemplaza el párrafo de equivalencia, se corrige el paso 8 de 18.4.3 y se declara en 18.4.12 que el laboratorio v0.4 no cubre el mecanismo nuevo.
+- **H-02:** grupo **I** en 18.4.9 (I1 a I12) y tabla «Datos por RPC»: primera ejecución con efectos exactos, replay idéntico, replay tras cambio de estado, autorización perdida, estructura inválida, conflicto por payload y por tipo, aislamiento por actor, rechazo que no reserva la clave, concurrencia (mismo payload y payload distinto) y canonicalización (orden de líneas, `btrim` del motivo, mayúsculas de uuid). No modifica el contrato funcional de 18.4.3 y 18.4.4; 18.4.4 sólo remite a la matriz.
+
+### Impacto sobre K1–K11
+- Se amplían o repiten con el código final: K5 (igual conjunto de bloqueos, otro camino de código), K6, K7, K9 y el nuevo K12. K8 se repite por su caso «corrección de camión contra `mover_a_cuarentena`».
+- K1 a K4, K10 y K11 no cambian de diseño y se ejecutan igual con el código final.
+- Ninguna evidencia de 18.4.12 prueba el mecanismo nuevo: hasta que pasen esos casos sobre las migraciones reales, H-01 es un diseño razonado, no una propiedad demostrada.
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; alcance P10 y P12–P17 sólo para jornadas.
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- Hay que volver a auditar el hash del próximo commit (Codex y OpenCode); la auditoría de `78958303…` no se reutiliza.
+- Precedencia `jornada_duplicada` / `jornada_camion_con_jornada_abierta` (K10 a), corte de jornada y F3: sin cambios.
+
+---
+## 29/10/2026 — ADR-001 §18.4 v0.4 + fe de erratas E1–E3: versión documental candidata (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, creada desde el head del PR #31 = `5efad2747066b1c64d6b2e8ab11073484c142d56`. Los commits y ramas de los PR #30 y #31 no se alteraron. Tarea **sólo documental**: sin SQL, migraciones, RPC, RLS, roles, grants, frontend, tests ni configuración. Sin commit, push, PR, merge ni deploy.
+
+### Qué se hizo
+- Se incorporó a `docs/decisions/001-rpc-privilegiadas.md` el anexo **§18.4** (jornadas y carga), tomado de la copia de transferencia de §18.4 v0.4 (471 líneas) cuyo bloque A (líneas 12–456) tiene SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039` y cuyo bloque B (líneas 462–471) tiene `1c743ac4a28343264f656c411b16c972d9fefe3a337c4c0d6e7d8abf624ad045`; ambos hashes se recalcularon y coinciden. El texto se generó por programa, con reemplazos exactos que abortan si el texto original no coincide.
+- Estado conservado: **PROPUESTA TÉCNICA NO APROBADA**. El estado de ADR-001 (APROBADA PARA VALIDACIÓN CONTROLADA) no cambia y ADR-007 no se modifica. En la cabecera de ADR-001 sólo se agregó la mención del anexo en «Versión» y una fila en §0.
+- Se agregó §18.4.13 con las autorizaciones pendientes (resumen del bloque B). **Ninguna está concedida.**
+
+### Fe de erratas (no cambia decisiones de diseño)
+- **E1 (§18.4.5):** párrafo «Equivalencia con ADR-007 §5» tras «Sin bloqueos de fila sobre catálogos». `corregir_jornada` bloquea siempre los dos camiones (nivel 1) y la jornada (nivel 3); bloquea al vendedor vigente (nivel 2) sólo cuando cambia la fecha, único caso en que escribe una clave `(empresa_id, vendedor_id, fecha)` nueva. Con cambio sólo de camión, esa clave no cambia: tomarla la rechaza la validación, liberarla exige el `FOR UPDATE` de la jornada y el `UNIQUE` es la última defensa. La estrategia de bloqueos no cambia. **Superado por H-01** (entrada siguiente): la auditoría de Codex rechazó esta equivalencia y `corregir_jornada` pasa a bloquear siempre al vendedor.
+- **E2 (§18.4.6 y §18.4.10):** el original mencionaba «los auxiliares de error de jornadas» una sola vez (fila `productos_catalogo.test.sql:321-337`), sin que ningún apartado los defina. Se elimina la referencia y §18.4.6 declara que no hay otras funciones ni auxiliares de error: los errores se levantan en línea. No se introducen funciones nuevas.
+- **E3 (§18.4.9 y §18.4.11):** casos **K10** (aperturas concurrentes: mismo camión y fecha, mismo camión y fechas distintas, mismo vendedor y fecha, misma clave con mismos parámetros y con distinto vendedor) y **K11** (salida contra descarga de toda la carga neta, contra carga, entre salidas y entre descargas que exceden lo cargado), cada uno con resultado esperado e invariantes I-J1 a I-J4. «K1–K9» pasa a «K1–K11» y el criterio de aprobación exige también las invariantes.
+
+### Cómo se verificó
+- Integridad de la fuente: hashes A y B recalculados (arriba).
+- Diff: contra el head del PR #31 sólo cambian `docs/decisions/001-rpc-privilegiadas.md` y este registro.
+- Comparación contra el original: sólo difieren las líneas de E1–E3, el aviso de estado, la tabla de erratas y §18.4.13.
+- SHA-256 del texto candidato de §18.4 (desde `### 18.4` hasta el final de §18.4.13, sin salto final): `169cb279e83028b18e4fca5b3f05ea27f76553182a4da01f0f3dc903bac23282`.
+- No se ejecutaron tests, build ni SQL: el cambio es documental.
+
+### Pendientes
+- Revisión independiente (Codex y OpenCode) del hash que resulte del commit, exigida por ADR-007 §3, P-3; luego la aprobación humana de §18.4.
+- D-1, D-2, arnés, su ejecución en CI y la security review, sin autorizar.
+- Precedencia entre `jornada_duplicada` y `jornada_camion_con_jornada_abierta` cuando ambos aplican (K10 a): el contrato no la fija; se decide al implementar y se documenta.
+- Corte de jornada y F3 (P8), sin cambios.
+
+---
+## 29/10/2026 — ADR-007 aprobada: jornadas y carga de camiones (documental, sin commit)
+
+**Rama:** `docs/adr-007-jornadas-carga` desde `feat/slice-b3-ventas-peso` = `abe38f2240e771b119ac451b64d0c967f089b2b9` (checkpoint B3 parcial, que incluye `BLUEPRINT.md` 2.4). Tarea **sólo documental**: sin cambios de SQL, migraciones, frontend, tests ni configuración de Supabase. ADR-001 no se modificó. Sin commit, push, merge ni deploy.
+
+### Contexto
+Cambio de estrategia autorizado: no se desarrollan funcionalidades nuevas en el prototipo `localStorage`; el foco pasa al sistema definitivo con Supabase. Primer bloque operativo: jornadas y carga de camiones.
+
+### Decisiones humanas (29/10/2026)
+- Primera carga válida como evento explícito de `abierta → cargada`; cargas incrementales; descarga compensatoria antes de la salida; salida con carga neta positiva.
+- No abrir otra jornada para un camión que tenga una sin cerrar; camión activo para abrir y cargar; stock del camión en cero antes de la primera carga.
+- **F1:** fecha operativa elegida por dueño o encargado; sólo el día actual o futuras. **Zona horaria operativa: `America/Argentina/Tucuman`.**
+- **F2:** vendedor con perfil activo de la misma empresa y rol `dueno`, `encargado` o `vendedor_piloto`; como máximo una jornada por persona y fecha, sin liberarse al cerrar; validado también en reasignaciones. Verificado contra el Blueprint 2.4 y el PRD 0.12: sin contradicción (`BLUEPRINT.md` §9 y `docs/PRD.md` §5 prevén que una persona acumule permisos).
+- **F4:** corrección de fecha o camión sólo en `abierta` y sin movimientos, con motivo, idempotente, revalidando todas las condiciones de apertura sobre los valores nuevos y con un historial append-only separado del de reasignaciones. Verificado que no permite eludir la unicidad por camión y fecha.
+- Reasignaciones de vendedor con historial append-only propio; una línea por producto activo en cada carga; en este bloque el vendedor sólo lee su jornada.
+- **F3** (participación y separación de funciones para el conteo): pendiente para su bloque.
+
+### Cambios
+- `docs/decisions/007-jornadas-y-carga-de-camiones.md` (nuevo): ADR-007 v1.0, **APROBADA**, con 24 pruebas normativas.
+- `docs/decisions/README.md`: fila de ADR-007 en el índice.
+- `BLUEPRINT.md`: §7.4 (tipo `descarga` y nota de `carga`), §7.5 (reglas de apertura, carga y salida), §8 (los dos historiales y la unicidad por vendedor y fecha), §12 (bloque «Jornada: apertura, carga y salida») y §15 («Fechas»: zona horaria resuelta; corte de jornada pendiente).
+
+### Ajustes documentales autorizados (29/10/2026)
+- **ADR-007** (sigue v1.0 APROBADA): §2.1.3 deja constancia de la confirmación humana de «día operativo actual» (fecha calendario del negocio calculada en `America/Argentina/Tucuman` a partir de la hora del servidor; el corte especial de jornada sigue pendiente); §5 actualiza las referencias a Blueprint 2.5 y PRD 0.13; §8 agrega que el Blueprint 2.4 se sincronizó en la 2.5 y conserva el PRD 0.12 como fuente de la decisión.
+- **`BLUEPRINT.md` 2.4 → 2.5**, fecha 29/10/2026, y fila 2.5 en §17 con el alcance de ADR-007: apertura, vendedor, correcciones, carga incremental, descarga, salida y pruebas normativas.
+- **`docs/PRD.md` 0.12 → 0.13** (versión aprobada por el dueño): referencia a Blueprint v2.5 en el encabezado y en §0, pendiente «Fechas» con la zona horaria definida y el corte de jornada pendiente, y fila 0.13 en su historial. Sin cambios de requisitos funcionales.
+- ADR-001 sin cambios.
+
+### Pendientes
+- **Anexo §18.4 de ADR-001** (P10, P12–P17 para jornadas): sigue **PROPUESTA TÉCNICA NO APROBADA**; requiere revisión independiente y aprobación humana antes de escribir SQL. Debe incluir la RPC de corrección, el bloqueo del vendedor y el de los dos camiones en una corrección.
+- F3 / P8 para el bloque de conteo; corte de jornada (§15).
+
+---
+## 29/10/2026 — Slice B3 (parcial): GOV-B3-01 resuelto, ADR-006 aprobada y Blueprint sincronizado (sin commit)
+
+**Rama:** `feat/slice-b3-ventas-peso` desde `main` = `e21fe321045fa7f4232477b0bf5b3d24d7b6b3d3`. **Base del cambio:** freeze con patch `1a1bc204171202e5bf043f4465d48e173180ec474c32e131132aaf8ae67e22dd` y manifest `c7c694c1065d4f3f1d1f049ec3e29b1371cacbe460f7dcdee79a5774d703d3bb`. Tarea documental: **sin cambios de código productivo**, SQL, migraciones, Supabase, RPC ni producción. **Se agregó un test normativo en `registroVentas.test.ts`** (caso 4 de ADR-006; ver «Ajustes autorizados»). Sin commit, push, merge ni deploy.
+
+### Hallazgo de gobernanza
+**GOV-B3-01:** la regla «una línea por `productoId` en cada venta nueva» (corrección de AUD-B3-01) era una decisión humana registrada sólo en esta bitácora. El freeze ya la implementaba sin una ADR que la respaldara (`AGENTS.md` §3 y §6.5).
+
+### Decisión humana (29/10/2026)
+- **ADR-006 — Una línea por producto en cada venta nueva:** **APROBADA** el 29/10/2026. Formaliza la decisión funcional tomada el 28/10/2026 durante AUD-B3-01.
+- La regla aplica a `unidad` y `peso`, y también al mismo `productoId` con unidades distintas. No se consolida automáticamente y D-R1 no cambia.
+- No se aplica a la lectura histórica: no se migra ni se recalcula nada, y los históricos válidos con líneas repetidas siguen legibles y consumen stock por la suma de sus líneas.
+- **Notas de papel:** una nota transcripta como venta nueva también debe cumplir la regla. No se implementa el flujo de notas de papel.
+- **Presupuestos:** fuera del alcance; una regla equivalente requiere una decisión separada.
+- **ADR-005:** no se modifica. ADR-006 aclara que sus ejemplos con varias líneas no autorizan líneas repetidas del mismo `productoId` en una venta nueva.
+
+### Cambios
+- `docs/decisions/006-una-linea-por-producto-en-venta-nueva.md` (nuevo): contexto, decisión, históricos, stock, notas de papel, alternativas descartadas, consecuencias, fuera de alcance y 6 pruebas normativas.
+- `docs/decisions/README.md`: fila de ADR-006 en el índice.
+- `BLUEPRINT.md` §7.5: viñeta «Una línea por producto (ADR-006)».
+- `BLUEPRINT.md` §12: bloque «Ventas: una línea por producto (ADR-006)» con los 6 casos normativos.
+- La versión, la fecha y el historial (§17) del Blueprint se actualizaron después, por ajuste autorizado (ver «Ajustes autorizados»).
+
+### Estado
+- **GOV-B3-01:** resuelto.
+- **AUD-B3-01:** mitigado dentro de una venta. Cobertura de los casos normativos de ADR-006 §6: los casos 1, 2, 3, 5 y 6 con tests existentes, sin cambios; para el caso 4 se agregó un test en la frontera:
+  - casos 1, 2, 3, 5 y 6: en la frontera real (`registroVentas.test.ts`, bloque «unicidad de producto por venta nueva»), con 0 escrituras en los rechazos;
+  - caso 4 (mismo `productoId` con unidades distintas): cubierto a nivel de predicado (`venta.test.ts`, `tiene_productos_repetidos`, se conserva) y, por ajuste autorizado, también en la frontera (ver «Ajustes autorizados»).
+- **Fragmentación entre ventas distintas:** sigue como riesgo y decisión de negocio o de proceso pendiente (ADR-006 §4).
+- Siguen abiertos SEC-B3-02 (cliente, antes del cierre de B3), SEC-B3-01 (precio, BLUEPRINT §7.5 sin aprobar) y la deuda conocida SEC-B3-03 a SEC-B3-06.
+
+### Ajustes autorizados (29/10/2026)
+- **`BLUEPRINT.md` 2.4 sincronizado:** versión 2.3 → 2.4, fecha 29/10/2026 y fila 2.4 en §17 (ADR-006 aprobada, unicidad de `productoId` en ventas nuevas, históricos no afectados y pruebas normativas en §12). No cambió ninguna otra sección.
+- **ADR-006, caso normativo 4, cubierto en la frontera:** test nuevo en `registroVentas.test.ts` (bloque «unicidad de producto por venta nueva»). Una venta con dos líneas del mismo `productoId` (una `peso`, otra `unidad`) se rechaza con `MENSAJE_VENTA_MIXTA_NO_HABILITADA`, sin `getItem` ni `setItem`, con el storage crudo intacto y sin llamar a `alGuardar`. La ADR exige el rechazo, no un mensaje concreto. **No se cambió el orden de los guards ni ningún código productivo.**
+- **GOV-B3-01: completamente resuelto.**
+
+### Pendientes
+- Freeze nuevo y reauditoría acotada de Codex y OpenCode sobre su hash, con foco en la coherencia ADR-006 ↔ Blueprint ↔ código ↔ tests.
+- Commit sólo con autorización humana. Sin push, PR, merge ni deploy.
+
+---
+## 28/10/2026 — Slice B3 (parcial): corrección de AUD-B3-01, una línea por producto en cada venta nueva (sin commit)
+
+**Rama:** `feat/slice-b3-ventas-peso` desde `main` = `e21fe321045fa7f4232477b0bf5b3d24d7b6b3d3`. **Base del cambio:** freeze `4f63f4c0cd86e27e809e5a1409b706d06e388c6e7a67e7ab5abc862b7ae27e19`; antes de modificar nada se verificó que el árbol coincidiera con ese freeze. Sin SQL, sin migraciones, sin Supabase, sin RPC, sin RLS y sin producción. Sin commit, push, merge ni deploy.
+
+### Hallazgo
+**AUD-B3-01 (HIGH, reproducido)** en la revisión adversarial del freeze anterior. D-R1 redondea **por línea** y la frontera aceptaba varias líneas del mismo producto. Partiendo una venta, el total se podía manipular sin que ninguna validación lo detectara, con el stock descontado completo:
+
+| Venta | Total aceptado |
+|---|---|
+| 1 kg a $499,99/kg en una línea | $500 |
+| la misma venta en 1000 líneas de 1 g | **$0** |
+| 1 kg a $500/kg en 1000 líneas de 1 g | **$1000** |
+
+La UI no lo producía, pero sí una llamada directa a la frontera.
+
+### Decisión humana
+Una venta **nueva** no puede tener más de una línea con el mismo `productoId`, sea cual sea su unidad de medida. La fórmula D-R1 no cambia.
+
+### Corrección
+- **`domain/venta.ts`:**
+  - `tiene_productos_repetidos(items)`: no lanza error con ítems malformados, porque sólo cuenta los `productoId` que son enteros seguros;
+  - `MENSAJE_VENTA_PRODUCTO_REPETIDO`: «Una venta no puede tener más de una línea del mismo producto. Unificá la cantidad en una sola línea.».
+- **`domain/validacion.ts`:** `venta_nueva_valida` exige `!tiene_productos_repetidos(venta.items)`. `venta_valida` e `item_valido`, que es la lectura histórica, **no** cambian: una venta histórica con líneas repetidas sigue siendo legible.
+- **`hooks/registroVentas.ts`:** el guard corre después del rechazo de venta mixta y **antes de cualquier lectura**, y devuelve el mensaje específico. `venta_nueva_valida` lo vuelve a exigir como defensa en profundidad.
+- **Sin cambios:** `validar_stock_venta` conserva la agrupación segura por producto, porque también se defiende de entradas directas. D-R1 y los mensajes ajenos al hallazgo tampoco cambiaron.
+
+### Tests
+- **`venta.test.ts`:**
+  - `tiene_productos_repetidos`, 5 casos: unidad, peso, mismo `productoId` con distinta unidad, productos distintos e ítems malformados;
+  - histórico con líneas repetidas: `venta_valida` lo acepta y `venta_nueva_valida` lo rechaza;
+  - frontera L: dos líneas del mismo producto devuelven el mensaje específico sin leer ningún ledger.
+- **`registroVentas.test.ts`:** el bloque «líneas duplicadas» pasó a ser «unicidad de producto por venta nueva». Cubre:
+  - 1000 g a $499,99/kg en una línea: se acepta con total $500;
+  - 1000 líneas de 1 g: se rechazan con 0 lecturas y 0 escrituras;
+  - dos líneas `peso` y dos líneas `unidad` con stock suficiente: se rechazan;
+  - dos productos distintos: se aceptan;
+  - venta histórica con líneas repetidas: sigue legible y su consumo cuenta para el stock (el exacto se acepta y +1 se rechaza).
+
+  El test de overflow del pedido nuevo usa ahora una sola línea, porque dos líneas del mismo producto ya se rechazan antes.
+- **Se mantienen:** los 18 casos de `validar_stock_venta` de `movimientos.test.ts`, incluidas las sumas seguras con líneas repetidas y el overflow del pedido; los casos de D-R1 de `precios.test.ts`; y la regresión de AUD-001.
+- **Sondeo de auditoría** sobre el código real, ejecutado fuera del repo: la venta de 1000 × 1 g, que antes guardaba $0 o $1000, ahora se rechaza sin escribir.
+
+### Verificación (repo real, desde `apps/web/`)
+| Verificación | Resultado |
+|---|---|
+| Focalizados (`registroVentas`, `venta`, `movimientos`, `precios`, `persistencia`) | 5 archivos, **499/499** |
+| `npm test` | **31 archivos, 1167/1167** |
+| `npx tsc -b` | 0 |
+| `npm run lint` | 0 |
+| `npx playwright test` | **96/96** |
+| Detector de ciclos de importación | sin ciclos |
+| `git diff --check` | 0 |
+
+- Búsquedas en `src`: 0 llamadas a `registrarVenta*` con validador o `() => null`; 0 apariciones de `ventasActuales`; una única `registrarVentaPersistida`.
+
+### Riesgos residuales
+- **Fragmentación entre ventas:** partir la mercadería en muchas **ventas** de 1 g sigue siendo posible. Es una consecuencia del redondeo por documento de D-R1 y corresponde a una decisión de negocio o de proceso, no a esta corrección.
+- **Hallazgos que siguen abiertos:**
+  - AUD-B3-02 / SEC-B3-02 (cliente): tarea separada antes del cierre de B3;
+  - AUD-B3-03 / SEC-B3-01 (precio): BLUEPRINT §7.5 sin aprobar;
+  - AUD-B3-04 (campos desconocidos persistidos, reproducido);
+  - AUD-B3-05 (concurrencia entre pestañas: venta de más y pérdida de ventas; el comentario del código no nombra la pérdida);
+  - AUD-B3-06 (carga contradictoria en `validar_stock_movimiento`);
+  - AUD-B3-07 (debilidades de tests);
+  - AUD-B3-08 a AUD-B3-10 (INFO).
+- La revisión adversarial del freeze anterior la hizo el implementador. **No reemplaza** la auditoría independiente de Codex y OpenCode, que debe hacerse sobre el freeze nuevo.
+
+---
+## 28/10/2026 — Slice B3 (parcial): ventas por peso con D-R1, separación lectura histórica / escritura nueva y corrección de AUD-001 (sin commit)
+
+**Rama:** `feat/slice-b3-ventas-peso` desde `main` = `e21fe321045fa7f4232477b0bf5b3d24d7b6b3d3`. **Alcance:** dominio de precios y ventas, frontera de persistencia frontend/localStorage de Ventas, Autoventa y sus tests. Sin SQL, sin migraciones, sin Supabase, sin RPC, sin RLS y sin producción. No se tocaron Blueprint, PRD, ADR ni `AGENTS.md`. Sin commit, push, merge ni deploy.
+
+**Estado:** AUD-001 **corregido**, con revisión de seguridad completada. **B3 todavía no está cerrado**: queda SEC-B3-02 como tarea separada y el resto del trabajo funcional (por ejemplo, la UI de venta por peso en Autoventa).
+
+### D-R1 y separación lectura histórica / escritura nueva (ADR-005 §2.3.3 y §2.3.4)
+- **`precios.ts`:** `importe_linea_peso_centavos` e `importe_linea_peso` calculan el importe `peso` con BigInt, con un único redondeo al peso entero y empate 0,50 hacia arriba (D-R1).
+- **`venta.ts`:**
+  - `importe_linea_vigente` aplica D-R1 a `peso` y `cantidad × precio` a `unidad`;
+  - `construirDetalleVenta` ya no bloquea `peso`;
+  - `construirItemsVenta` rechaza la venta mixta `unidad` + `peso` con `MENSAJE_VENTA_MIXTA_NO_HABILITADA`;
+  - `es_venta_mixta` no lanza error con elementos `null`.
+- **`validacion.ts`:**
+  - **Lectura e histórico** (`item_valido`, `total_coincide`, `venta_valida`): valida la estructura y que `total` sea igual a la suma de los subtotales **almacenados**, **sin recalcular** `cantidad × precio`. Un subtotal `peso` debe ser entero en pesos. La venta mixta se rechaza.
+  - **Escritura nueva** (`venta_nueva_valida`): exige además al menos un ítem, que no sea mixta y que cada subtotal coincida con la regla vigente (`subtotal_coincide` → `importe_linea_vigente`).
+
+### AUD-001: reproducido y corregido
+- **Hallazgo:** `registrarVentaPersistida(venta, validar)` delegaba toda la validación de stock en un callback que aportaba quien la llamaba. La lógica real vivía en una closure de `Autoventa.tsx`.
+- **Reproducción:** un PoC temporal sobre la frontera real persistió una venta de 2 unidades con 1 cargada usando `validar = () => null`, incluso sin jornadas ni movimientos en storage. Resultado: 2/2 tests pasados, o sea, bypass confirmado.
+- **Segundo bypass encontrado en el diseño:** la closure comparaba cada línea por separado, así que dos líneas del mismo producto podían superar lo cargado.
+- **Corrección** (en 4 pasos chicos, cada uno verificado):
+  1. `hooks/ventasStorage.ts` (nuevo): la lectura de ventas se movió sin cambios funcionales, a un módulo hoja que rompe el ciclo `useVentas ↔ useMovimientos`. `useVentas` la re-exporta y `useMovimientos` la importa desde ahí.
+  2. `domain/movimientos.ts`: `validar_stock_venta`, con mensajes propios de Ventas (`MENSAJE_VENTA_CARGA_INCONSISTENTE`, `MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA`). Reutiliza `salidas_de_jornada` y la suma segura, y hace esto:
+     - rechaza una carga contradictoria en **toda** la carga;
+     - exige que el producto esté cargado y con la misma unidad;
+     - rechaza unidades históricas incompatibles, salidas históricas de productos no cargados y saldos históricos negativos;
+     - **agrupa las líneas nuevas por producto** antes de comparar, en unidades o gramos exactos, sin `Math.max`, tolerancias ni redondeos.
+
+     `revalidar_jornada_para_operacion` acepta `Pick<Jornada, "id" | "camionId">`. `validar_stock_movimiento` no se modificó.
+  3. `hooks/registroVentas.ts` (nuevo): es la frontera autoritativa. Usa lectoras reales fijas y privadas y no acepta ningún callback de validación. Hace, en orden:
+     1. snapshot plano de la venta (`JSON.parse(JSON.stringify(...))`);
+     2. rechazo de venta mixta;
+     3. `venta_nueva_valida`;
+     4. relectura de Ventas y control de ID duplicado;
+     5. relectura de la jornada de `venta.jornadaId` (debe existir, ser del mismo camión y estar abierta);
+     6. relectura de Movimientos;
+     7. `validar_stock_venta`;
+     8. **una sola** escritura.
+
+     `alGuardar` se invoca sólo después de una escritura exitosa y no participa en ninguna decisión.
+  4. `useVentas.registrarVenta(venta)` usa la frontera nueva. Se eliminaron las implementaciones viejas, y `Autoventa.tsx` ya no tiene la closure de stock: llama sólo `registrarVenta(venta)`.
+
+  El PoC temporal se eliminó después de convertir sus dos escenarios en regresiones con expectativa segura en `registroVentas.test.ts`.
+
+### Tests
+- `registroVentas.test.ts` (nuevo, 33 casos contra la frontera real sobre `localStorage` simulado). En todo rechazo verifica 0 escrituras y el contenido crudo intacto; en todo éxito, exactamente 1 escritura. Cubre:
+  - regresión de AUD-001;
+  - stock exacto y +1 unidad / +1 g;
+  - líneas duplicadas;
+  - venta y merma registradas después del render;
+  - saldo histórico negativo y carga contradictoria;
+  - overflow;
+  - jornada inexistente, cerrada o de otro camión;
+  - storage corrupto;
+  - venta duplicada, mixta y vacía;
+  - snapshot con un getter cambiante;
+  - `alGuardar` y `setItem` que fallan.
+- `movimientos.test.ts`: 18 casos de `validar_stock_venta`.
+- `venta.test.ts` y `persistencia.test.ts`: adaptados a la separación histórico / nuevo y a la frontera sin callback. No se debilitó ninguna expectativa negativa.
+- `tests/autoventa-venta-unidad.spec.ts` (nuevo): E2E positivo. Registra 2 Yogur desde la UI, verifica 1 venta persistida, Jornadas y Movimientos intactos, la venta visible en el historial y que sigue persistida después de recargar.
+
+### Verificación (repo real, desde `apps/web/`)
+| Verificación | Resultado |
+|---|---|
+| `npm test` | **31 archivos, 1157/1157** |
+| `npx tsc -b` | 0 |
+| `npm run lint` | 0 |
+| `npx playwright test` | **96/96** |
+| Detector de ciclos de importación (script de solo lectura) | sin ciclos |
+| `git diff --check` | 0 |
+
+- Búsquedas en `src`: 0 llamadas a `registrarVenta*` con validador o `() => null`; 0 apariciones de `ventasActuales`; una única implementación de `registrarVentaPersistida` (`registroVentas.ts`). La única otra escritura de la clave de ventas es el reinicio de demo de `ConfiguracionDemo`, sólo para el dueño.
+
+### Revisión de seguridad focalizada (B3/AUD-001)
+Sin hallazgos CRITICAL ni HIGH. Hallazgos registrados según la decisión humana:
+- **SEC-B3-01 (MEDIUM, REQUIERE DECISIÓN):** la frontera no compara `precioUnitario` con el `precioReferencia` de la jornada. Depende de BLUEPRINT §7.5, que es una PROPUESTA NO APROBADA. No se implementa en B3/AUD-001.
+- **SEC-B3-02 (MEDIUM, tarea separada):** las reglas del cliente (que exista y esté activo, y que una venta a cuenta corriente exija `condicionPago === "cuenta_corriente"`) se validan sólo en la UI de Autoventa. **Pendiente antes de declarar B3 cerrado.**
+- **SEC-B3-03 (LOW):** limitación de concurrencia de `localStorage`. Entre la relectura y el `setItem`, otra pestaña puede intercalarse: puede haber venta de más o **pérdida** de una venta de otra pestaña al reescribir el ledger. La atomicidad real queda para la futura RPC o transacción.
+- **SEC-B3-04 (LOW):** el snapshot conserva campos desconocidos de la venta y se persisten sin validar. Hoy ningún consumidor los lee.
+- **SEC-B3-05 (LOW, hallazgo lateral):** `validar_stock_movimiento` no detecta una carga contradictoria en productos que no participan del movimiento. No se corrigió.
+- **SEC-B3-06 (LOW):** huecos menores de cobertura:
+  - Proxy, BigInt y referencias cíclicas del snapshot sin probar en la frontera;
+  - cantidad mayor que `MAX_SAFE_INTEGER` y salida histórica de un producto no cargado sin probar en la frontera;
+  - aserciones genéricas en los tests de storage corrupto;
+  - selector débil en el E2E positivo;
+  - sin E2E de stock consumido después del montaje.
+- **INFO-07 a INFO-10:** sólo registrados:
+  - reinicio de demo sólo para el dueño;
+  - texto visible `MENSAJE_VENTA_INVALIDA` que menciona ADR-003;
+  - `fecha` e `id` sin restricción adicional;
+  - Rendición bloquea las filas `peso` hasta B4.
+
+### Pendientes
+- Freeze y hash del diff exacto, y revisión independiente de Codex y OpenCode sobre ese hash.
+- Commit sólo con autorización humana. Sin push, PR, merge ni deploy.
+- SEC-B3-02 como tarea propia antes del cierre de B3; SEC-B3-01 sigue en espera de decisión del Blueprint; SEC-B3-03 a SEC-B3-06 quedan como deuda conocida.
+- Mensajes visibles que cambiaron con la frontera nueva, sin cambio de reglas:
+  - «El producto X no está cargado en el camión.» → «X no está cargado en el camión.»;
+  - «Stock insuficiente de X» → «Stock insuficiente de X.»;
+  - desaparece «Cantidad inválida de X», porque esos casos los rechaza antes `venta_nueva_valida`.
+
+---
 ## 28/10/2026 — Slice B2: auditoría Codex del freeze, fixes M-1/M-2 y security re-review (sin commit)
 
 **Rama:** `feat/slice-b2-jornadas-movimientos-peso` desde `main` = `e698d4e66dcf3c53fcd2d71bf11e4312143fdecc`. **Alcance:** fronteras de persistencia frontend/localStorage de Jornadas y Movimientos y sus tests. Sin SQL, sin migraciones, sin Supabase, sin RPC, sin RLS y sin producción. No se tocaron Blueprint, PRD, ADR ni `AGENTS.md`. Sin commit hasta la autorización humana.

@@ -155,6 +155,53 @@ export function subtotal_linea(entrada: EntradaSubtotal): number {
   return centavos_a_pesos(subtotal_linea_centavos(entrada));
 }
 
+// Milésimas de centavo por peso: 1000 g/kg × 100 centavos/peso.
+const MILESIMAS_DE_CENTAVO_POR_PESO = 100_000n;
+
+/**
+ * Importe de una línea `peso` en centavos enteros (ADR-005 §2.3.3, D-R1).
+ *
+ * Dimensiones:
+ *   c = precio_a_centavos(precio_por_kg)        → centavos/kg (entero exacto)
+ *   N = gramos × c                              → milésimas de centavo
+ *   importe exacto en pesos = N / 100000
+ * Un único redondeo al peso entero, con empate 0,50 hacia arriba:
+ *   pesos = q + (r >= 50000 ? 1 : 0), con q = N / 100000 y r = N % 100000.
+ * Sin redondeo intermedio a centavos, sin punto flotante y sin Math.round:
+ * todo el cálculo se hace con BigInt. Devuelve pesos × 100 (centavos .00).
+ *
+ * Lanza Error si los gramos no son un entero seguro > 0, si el precio no es
+ * válido o si el resultado excede el máximo entero seguro.
+ */
+export function importe_linea_peso_centavos(
+  gramos: number,
+  precio_por_kg: number
+): number {
+  validar_cantidad(gramos);
+  if (gramos === 0) {
+    throw new Error("Cantidad inválida: 0. Una línea por peso exige gramos > 0.");
+  }
+  const centavos_por_kg = precio_a_centavos(precio_por_kg);
+
+  const n = BigInt(gramos) * BigInt(centavos_por_kg);
+  const q = n / MILESIMAS_DE_CENTAVO_POR_PESO;
+  const r = n % MILESIMAS_DE_CENTAVO_POR_PESO;
+  const pesos = q + (r >= MILESIMAS_DE_CENTAVO_POR_PESO / 2n ? 1n : 0n);
+  const centavos = pesos * 100n;
+
+  if (centavos > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("El importe excede el máximo entero seguro.");
+  }
+  return Number(centavos);
+}
+
+/**
+ * Importe de una línea `peso` en pesos enteros (D-R1).
+ */
+export function importe_linea_peso(gramos: number, precio_por_kg: number): number {
+  return centavos_a_pesos(importe_linea_peso_centavos(gramos, precio_por_kg));
+}
+
 /**
  * Calcula el subtotal de una línea de venta usando precios históricos
  * (snapshot de venta). Única implementación para historial de ventas.
