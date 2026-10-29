@@ -1,4 +1,29 @@
 ---
+## 29/10/2026 — ADR-001 §18.4: correcciones H-01 y H-02 tras la auditoría de Codex (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `78958303168e9774fb15651cca411db484dbff6d` (padre `5efad2747066b1c64d6b2e8ab11073484c142d56`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Resultado de la auditoría de Codex sobre `78958303…`
+FAIL por dos hallazgos:
+- **H-01 (BLOCKER):** ADR-007 §5 exige literalmente el bloqueo del vendedor cuando `corregir_jornada` cambia el camión; §18.4 sólo lo bloqueaba cuando cambiaba la fecha. La «equivalencia» redactada en la primera candidata no se acepta.
+- **H-02 (HIGH):** faltaba una matriz normativa completa de idempotencia para las seis RPC.
+
+### Correcciones
+- **H-01:** `corregir_jornada` toma **siempre** el advisory del vendedor vigente (nivel 2), además de los dos camiones (nivel 1) y la jornada (nivel 3), cambie el camión, la fecha o ambos; una corrección sin cambios se rechaza después con `jornada_sin_cambios`. Se conserva el orden global. Se documentan los bloqueos de cada RPC (tabla en 18.4.5), el caso **I-3c** (corrección sólo de camión contra reasignación de la misma jornada, deducido del orden global y **no medido**) y se amplían K6, K7 y K9. Nuevo **K12**. Se reemplaza el párrafo de equivalencia, se corrige el paso 8 de 18.4.3 y se declara en 18.4.12 que el laboratorio v0.4 no cubre el mecanismo nuevo.
+- **H-02:** grupo **I** en 18.4.9 (I1 a I12) y tabla «Datos por RPC»: primera ejecución con efectos exactos, replay idéntico, replay tras cambio de estado, autorización perdida, estructura inválida, conflicto por payload y por tipo, aislamiento por actor, rechazo que no reserva la clave, concurrencia (mismo payload y payload distinto) y canonicalización (orden de líneas, `btrim` del motivo, mayúsculas de uuid). No modifica el contrato funcional de 18.4.3 y 18.4.4; 18.4.4 sólo remite a la matriz.
+
+### Impacto sobre K1–K11
+- Se amplían o repiten con el código final: K5 (igual conjunto de bloqueos, otro camino de código), K6, K7, K9 y el nuevo K12. K8 se repite por su caso «corrección de camión contra `mover_a_cuarentena`».
+- K1 a K4, K10 y K11 no cambian de diseño y se ejecutan igual con el código final.
+- Ninguna evidencia de 18.4.12 prueba el mecanismo nuevo: hasta que pasen esos casos sobre las migraciones reales, H-01 es un diseño razonado, no una propiedad demostrada.
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; alcance P10 y P12–P17 sólo para jornadas.
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- Hay que volver a auditar el hash del próximo commit (Codex y OpenCode); la auditoría de `78958303…` no se reutiliza.
+- Precedencia `jornada_duplicada` / `jornada_camion_con_jornada_abierta` (K10 a), corte de jornada y F3: sin cambios.
+
+---
 ## 29/10/2026 — ADR-001 §18.4 v0.4 + fe de erratas E1–E3: versión documental candidata (sin commit)
 
 **Rama:** `docs/adr-001-anexo-18-4-candidata`, creada desde el head del PR #31 = `5efad2747066b1c64d6b2e8ab11073484c142d56`. Los commits y ramas de los PR #30 y #31 no se alteraron. Tarea **sólo documental**: sin SQL, migraciones, RPC, RLS, roles, grants, frontend, tests ni configuración. Sin commit, push, PR, merge ni deploy.
@@ -9,7 +34,7 @@
 - Se agregó §18.4.13 con las autorizaciones pendientes (resumen del bloque B). **Ninguna está concedida.**
 
 ### Fe de erratas (no cambia decisiones de diseño)
-- **E1 (§18.4.5):** párrafo «Equivalencia con ADR-007 §5» tras «Sin bloqueos de fila sobre catálogos». `corregir_jornada` bloquea siempre los dos camiones (nivel 1) y la jornada (nivel 3); bloquea al vendedor vigente (nivel 2) sólo cuando cambia la fecha, único caso en que escribe una clave `(empresa_id, vendedor_id, fecha)` nueva. Con cambio sólo de camión, esa clave no cambia: tomarla la rechaza la validación, liberarla exige el `FOR UPDATE` de la jornada y el `UNIQUE` es la última defensa. La estrategia de bloqueos no cambia.
+- **E1 (§18.4.5):** párrafo «Equivalencia con ADR-007 §5» tras «Sin bloqueos de fila sobre catálogos». `corregir_jornada` bloquea siempre los dos camiones (nivel 1) y la jornada (nivel 3); bloquea al vendedor vigente (nivel 2) sólo cuando cambia la fecha, único caso en que escribe una clave `(empresa_id, vendedor_id, fecha)` nueva. Con cambio sólo de camión, esa clave no cambia: tomarla la rechaza la validación, liberarla exige el `FOR UPDATE` de la jornada y el `UNIQUE` es la última defensa. La estrategia de bloqueos no cambia. **Superado por H-01** (entrada siguiente): la auditoría de Codex rechazó esta equivalencia y `corregir_jornada` pasa a bloquear siempre al vendedor.
 - **E2 (§18.4.6 y §18.4.10):** el original mencionaba «los auxiliares de error de jornadas» una sola vez (fila `productos_catalogo.test.sql:321-337`), sin que ningún apartado los defina. Se elimina la referencia y §18.4.6 declara que no hay otras funciones ni auxiliares de error: los errores se levantan en línea. No se introducen funciones nuevas.
 - **E3 (§18.4.9 y §18.4.11):** casos **K10** (aperturas concurrentes: mismo camión y fecha, mismo camión y fechas distintas, mismo vendedor y fecha, misma clave con mismos parámetros y con distinto vendedor) y **K11** (salida contra descarga de toda la carga neta, contra carga, entre salidas y entre descargas que exceden lo cargado), cada uno con resultado esperado e invariantes I-J1 a I-J4. «K1–K9» pasa a «K1–K11» y el criterio de aprobación exige también las invariantes.
 

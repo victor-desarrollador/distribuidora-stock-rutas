@@ -554,7 +554,7 @@ Mismo alcance estricto: **sólo dominio Stock**. Estas decisiones **no resuelven
 
 Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarentena_merma.sql`, `supabase/tests/stock_cuarentena_merma.test.sql` y la entrada «Etapa 2 — Stock, slice 2: stock-cuarentena-merma» de `docs/progress-log.md`.
 
-### 18.4 Decisiones acotadas a Jornadas y carga (versión 0.4 con fe de erratas E1–E3 — PROPUESTA TÉCNICA NO APROBADA; candidata a revisión independiente y aprobación humana)
+### 18.4 Decisiones acotadas a Jornadas y carga (versión 0.4 con fe de erratas E1–E3 y correcciones H-01 y H-02 de la auditoría de Codex — PROPUESTA TÉCNICA NO APROBADA; candidata a revisión independiente y aprobación humana)
 
 > **Alcance estricto.** Aplica únicamente a las seis RPC de ADR-007 (`abrir_jornada`, `reasignar_vendedor`, `corregir_jornada`, `registrar_carga`, `registrar_descarga`, `confirmar_salida`), a `public.jornadas`, a sus dos historiales, a la extensión mínima de `operaciones` y `movimientos_stock`, a la lectura acotada de perfiles de la propia empresa (18.4.2.1) y al arnés de concurrencia (18.4.11). No resuelve P8–P10 ni P12–P17 globalmente, **no resuelve P8/F3**, **no modifica P11** (§18.2: `service_role` denegado, sin excepción nueva), no cambia el estado de esta ADR (APROBADA PARA VALIDACIÓN CONTROLADA) y no autoriza producción. Las reglas de negocio están en ADR-007, que prevalece ante conflicto. `propietario_rpc` sigue sin `UPDATE` ni `DELETE` sobre `operaciones` y `movimientos_stock`, y sin ningún privilegio ni política de escritura sobre `perfiles`. No resuelve el corte de jornada (Blueprint §15, «Fechas»), que sigue pendiente.
 
@@ -569,17 +569,18 @@ Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarenten
 | 5 | El arnés de concurrencia pasa a ser requisito, en `supabase/tests/concurrencia/` | 18.4.11 |
 | 6 | Límites del laboratorio explícitos | 18.4.12 |
 
-Sin cambios: las seis RPC, la estrategia de bloqueos, I-CAMION, D6/D8 y el inventario de tests de v0.3.
+Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotencia y el inventario de tests de v0.3. La estrategia de bloqueos cambia **únicamente** en `corregir_jornada` (H-01).
 
-> **Estado: PROPUESTA TÉCNICA NO APROBADA.** Este anexo no está aprobado, no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-1, D-2, el arnés, su ejecución en CI y la security review siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas siguiente, que **no cambia ninguna decisión de diseño**.
+> **Estado: PROPUESTA TÉCNICA NO APROBADA.** Este anexo no está aprobado, no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-1, D-2, el arnés, su ejecución en CI y la security review siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas y las correcciones H-01 y H-02 siguientes. **H-01 cambia el conjunto de bloqueos de `corregir_jornada`**; E2, E3 y H-02 no cambian decisiones de diseño ni el contrato funcional de idempotencia.
 
-**Fe de erratas sobre v0.4** (candidata; ver el diff contra el original en `docs/progress-log.md`):
+**Fe de erratas y correcciones sobre v0.4** (candidata; detalle en `docs/progress-log.md`):
 
 | # | Corrección | Sección |
 |---|---|---|
-| E1 | Se deja escrita la equivalencia entre ADR-007 §5 (bloqueo del vendedor y de los dos camiones en una corrección) y la estrategia de bloqueos de v0.4, sin cambiar los bloqueos | 18.4.5 |
+| E1 / H-01 | ADR-007 §5 exige el bloqueo del vendedor y de los dos camiones en una corrección. `corregir_jornada` toma **siempre** el advisory del vendedor vigente (nivel 2), además de los dos camiones (nivel 1) y la jornada (nivel 3). Reemplaza la «equivalencia» de la primera candidata, que sólo bloqueaba al vendedor cuando cambiaba la fecha. Se documentan los bloqueos por RPC y el caso I-3c; K6, K7 y K9 se amplían y se agrega K12 | 18.4.3, 18.4.5, 18.4.9, 18.4.12 |
 | E2 | Se elimina la referencia a «auxiliares de error de jornadas», que el contrato no define; se declara que no hay funciones auxiliares fuera del inventario | 18.4.6, 18.4.10 |
-| E3 | Se agregan K10 (aperturas concurrentes) y K11 (salida contra cambios de carga neta), con resultados esperados e invariantes; «K1–K9» pasa a «K1–K11» | 18.4.9, 18.4.11 |
+| E3 | Se agregan K10 (aperturas concurrentes) y K11 (salida contra cambios de carga neta), con resultados esperados e invariantes | 18.4.9, 18.4.11 |
+| H-02 | Matriz normativa de idempotencia para las seis RPC (grupo I): primera ejecución, replay idéntico, replay tras cambio de estado, autorización perdida, estructura inválida, conflicto por payload y por tipo, aislamiento por actor, rechazo sin reserva de clave, concurrencia y canonicalización. No modifica el contrato funcional de 18.4.3 y 18.4.4 | 18.4.4, 18.4.9, 18.4.11 |
 
 #### 18.4.1 Modelo mínimo
 
@@ -718,7 +719,7 @@ No se introduce `INHERIT` ni ningún permiso para roles de la Data API.
 6. Lectura sin bloqueo de la jornada (salvo en `abrir_jornada`) para obtener las claves de los advisory: `camion_id`, `vendedor_id` (vigente) y `fecha`. Inexistente o de otra empresa → `PT404`.
 7. Advisory locks de los niveles 1 y 2 (18.4.5), con el conjunto calculado en el paso 6 y los parámetros.
 8. `SELECT … FROM jornadas WHERE id = … FOR UPDATE` y **reverificación** de los valores usados como clave:
-   - `camion_id` (en `corregir_jornada`) y `vendedor_id` vigente (en `reasignar_vendedor` y en `corregir_jornada` con cambio de fecha), iguales a los del paso 6. Si cambiaron → `PT409 jornada_estado_invalido`, sin efectos y reintentable con la misma clave. No se toman bloqueos adicionales fuera de orden.
+   - `camion_id` (en `corregir_jornada`) y `vendedor_id` vigente (en `reasignar_vendedor` y en `corregir_jornada`, siempre), iguales a los del paso 6. Si cambiaron → `PT409 jornada_estado_invalido`, sin efectos y reintentable con la misma clave. No se toman bloqueos adicionales fuera de orden.
    - `estado` y `fecha` se releen en este paso; todas las validaciones siguientes usan los valores leídos bajo `FOR UPDATE`. La clave de nivel 2 no incluye la fecha, así que un cambio de fecha no invalida los bloqueos tomados.
 9. **Reserva:** `INSERT INTO operaciones (…, jornada_id) … ON CONFLICT (empresa_id, actor_id, idempotency_key) DO NOTHING`.
    - Si no inserta porque otra transacción con la misma clave confirmó entre los pasos 5 y 9 → relectura y la misma regla del paso 5.
@@ -737,6 +738,7 @@ Un rechazo en los pasos 8 a 12 revierte la transacción completa, incluida la re
 
 - Unicidad de Stock: `UNIQUE (empresa_id, actor_id, idempotency_key)`. La clave vive sólo en `operaciones` (P15) y se retiene indefinidamente. Es compartida con Stock: una clave ya usada en otro tipo, incluido uno de Stock, → `PT409 jornada_conflicto_idempotencia`.
 - Huella `v1` = `encode(sha256(convert_to(<texto>, 'UTF8')), 'hex')`. Las fechas se escriben con `to_char(fecha, 'YYYY-MM-DD')`, los uuid en texto canónico, y `<m>` = `+` más el motivo con `btrim`.
+- Las pruebas obligatorias de idempotencia de las seis RPC están en 18.4.9, grupo I. Esa matriz no modifica este contrato.
 
 | Tipo | Texto |
 |---|---|
@@ -756,33 +758,39 @@ Un rechazo en los pasos 8 a 12 revierte la transacción completa, incluida la re
 | Nivel | Bloqueo | Clave o sentencia | RPC |
 |---|---|---|---|
 | 1 | Camión | `'jornadas:camion:' \|\| empresa \|\| ':' \|\| camion`, en orden de uuid | `abrir_jornada`; `corregir_jornada` (actual y final, sin duplicar) |
-| 2 | Vendedor | `'jornadas:vendedor:' \|\| empresa \|\| ':' \|\| perfil`, en orden de uuid | `abrir_jornada` (el vendedor); `reasignar_vendedor` (vigente y nuevo; uno solo si coinciden); `corregir_jornada` si cambia la fecha (el vigente) |
+| 2 | Vendedor | `'jornadas:vendedor:' \|\| empresa \|\| ':' \|\| perfil`, en orden de uuid | `abrir_jornada` (el vendedor); `reasignar_vendedor` (vigente y nuevo; uno solo si coinciden); `corregir_jornada` (el vigente, **siempre**, cambie el camión, la fecha o ambos) |
 | 3 | Jornada | `SELECT … FROM jornadas … FOR UPDATE` | todas salvo `abrir_jornada` |
 | 4 | Stock | `'stock:' \|\| empresa \|\| ':' \|\| ubicacion \|\| ':' \|\| producto`, en orden de `(ubicacion, producto)` | `registrar_carga` (depósito); `registrar_descarga` (ubicación del camión) |
 
+**Bloqueos que adquiere cada RPC** (siempre en este orden; `—` = no toma ninguno de ese nivel):
+
+| RPC | Nivel 1: camión | Nivel 2: vendedor | Nivel 3: jornada | Nivel 4: stock |
+|---|---|---|---|---|
+| `abrir_jornada` | el del pedido | el del pedido | — (la fila aún no existe) | — |
+| `reasignar_vendedor` | — | vigente y nuevo (uno si coinciden) | `FOR UPDATE` | — |
+| `corregir_jornada` | actual y final (uno si coinciden) | el vigente | `FOR UPDATE` | — |
+| `registrar_carga` | — | — | `FOR UPDATE` | depósito × producto, por `(ubicación, producto)` |
+| `registrar_descarga` | — | — | `FOR UPDATE` | ubicación del camión × producto, por `(ubicación, producto)` |
+| `confirmar_salida` | — | — | `FOR UPDATE` | — |
+
 **Esperas fuera de los niveles.**
-- **Índices únicos.** Toda transacción que escribe la clave `(empresa_id, vendedor_id, fecha)` para un vendedor V tiene el advisory de V: abre con V, reasigna hacia V o desde V, o corrige la fecha de una jornada cuyo vigente es V. La clave `(empresa_id, camion_id, fecha)` la escribe quien tiene el advisory del camión, o la misma jornada en un `UPDATE` no HOT. Por eso dos transacciones no pueden esperarse por un índice único mientras compiten por la misma clave: el advisory las serializa antes.
+- **Índices únicos.** Toda transacción que escribe la clave `(empresa_id, vendedor_id, fecha)` para un vendedor V tiene el advisory de V: abre con V, reasigna hacia V o desde V, o corrige (camión, fecha o ambos) una jornada cuyo vigente es V. La clave `(empresa_id, camion_id, fecha)` la escribe quien tiene el advisory del camión, o la misma jornada en un `UPDATE` no HOT. Por eso dos transacciones no pueden esperarse por un índice único mientras compiten por la misma clave: el advisory las serializa antes.
 - **FK.** Los `FOR KEY SHARE` de las FK sobre `productos`, `ubicaciones`, `perfiles` y `camiones` son compatibles con los `UPDATE` de baja, que no tocan claves (`FOR NO KEY UPDATE`).
 - **Stock.** La clave de nivel 4 es la misma cadena que usan `mover_a_cuarentena` y `registrar_merma` (`20261025033454_stock_cuarentena_merma.sql:321` y `:494`). Esas RPC reservan antes de su único advisory y no bloquean filas; las jornadas reservan en el paso 9, antes del nivel 4.
 
 **Sin bloqueos de fila sobre catálogos.** `camiones.activo`, `productos.activo` y el perfil del vendedor se leen después de los niveles 1 a 3, sin `FOR SHARE`. Una baja concurrente equivale a una baja inmediatamente posterior, y ADR-007 §2.3 y §2.7 lo admiten. El vendedor se relee bajo su advisory de nivel 2.
 
-**Equivalencia con ADR-007 §5 (`corregir_jornada`).** ADR-007 §5 exige que este anexo incluya la RPC de corrección y el bloqueo del vendedor y de los dos camiones cuando una corrección cambia el camión. v0.4 lo cumple con el mismo efecto sobre las invariantes, mediante estos mecanismos:
+**Cumplimiento de ADR-007 §5 (`corregir_jornada`) — H-01.** ADR-007 §5 exige que este anexo incluya la RPC de corrección y el bloqueo del vendedor y de los dos camiones cuando una corrección cambia el camión. `corregir_jornada` los toma **siempre**, en el orden global, cualquiera sea el dato que cambie (camión, fecha o ambos). Una corrección que no cambia ninguno se rechaza en el paso 10 con `PT409 jornada_sin_cambios`, después de haber tomado los bloqueos.
 
-| Elemento de ADR-007 §5 | Mecanismo en `corregir_jornada` | Qué garantiza |
+| Nivel | Qué toma `corregir_jornada` | Qué serializa |
 |---|---|---|
-| Los dos camiones | Siempre, nivel 1: camión actual y camión final, en orden de uuid y sin duplicar si coinciden | Toda apertura o corrección que escriba o evalúe el par `(camión, fecha)` o «sin otra jornada sin cerrar» de cualquiera de los dos camiones espera a esta transacción (ADR-007 §2.1.4, §2.1.5 y §2.4.3) |
-| La fecha | Se relee bajo `FOR UPDATE` de la jornada (18.4.3, paso 8); la clave de nivel 2 no la incluye | Un cambio de fecha concurrente no invalida los bloqueos ya tomados |
-| El vendedor | Nivel 2 sobre el vendedor vigente **cuando la corrección cambia la fecha**, único caso en que se escribe una clave `(empresa_id, vendedor_id, fecha)` nueva | ADR-007 §2.3.2 y §2.4.3 (el vendedor no tiene otra jornada en la fecha nueva) |
-| La jornada | Nivel 3, `FOR UPDATE` | Serializa esta corrección con cualquier otra RPC sobre la misma jornada (reasignación, carga, descarga, salida) |
+| 1 | Camión actual y camión final, en orden de uuid y sin duplicar si coinciden | Aperturas y correcciones que escriban o evalúen el par `(camión, fecha)` o «sin otra jornada sin cerrar» de cualquiera de los dos camiones (ADR-007 §2.1.4, §2.1.5 y §2.4.3) |
+| 2 | Vendedor vigente de la jornada | Aperturas, reasignaciones y otras correcciones que escriban o evalúen `(vendedor, fecha)` del vigente (ADR-007 §2.3.2 y §2.4.3) |
+| 3 | La jornada, `FOR UPDATE` | Cualquier otra RPC sobre la misma jornada (reasignación, carga, descarga, salida) |
 
-Si la corrección cambia **sólo el camión**, el advisory del vendedor no agregaría exclusión:
-- la clave `(empresa_id, vendedor_id, fecha)` no cambia y la propia jornada sigue ocupándola;
-- quien quiera tomar esa clave para el mismo vendedor (apertura o reasignación hacia él) toma su advisory y su validación (18.4.3, paso 10) la encuentra ocupada: `PT409 jornada_vendedor_ocupado`, sin escribirla;
-- quien quiera liberarla (reasignar esa jornada a otra persona) debe tomar el `FOR UPDATE` de la jornada (nivel 3) y espera a esta transacción;
-- el `UNIQUE (empresa_id, vendedor_id, fecha)` queda como última defensa.
-
-La aprobación de este anexo (ADR-007 §3, P-3) fija esta lectura. No modifica ADR-007.
+- Los valores usados como clave (`camion_id` y `vendedor_id` vigente) se reverifican bajo `FOR UPDATE` (18.4.3, paso 8). Si cambiaron, `PT409 jornada_estado_invalido`, sin efectos y reintentable con la misma clave.
+- **Costo:** toda corrección, aunque sólo cambie el camión, se serializa con las aperturas, reasignaciones y correcciones del mismo vendedor. Es una operación excepcional (jornada `abierta` sin movimientos), así que no se busca evitarlo.
+- **Evidencia:** este mecanismo **no** está cubierto por el laboratorio de 18.4.12, que lo ejecutó con el vendedor bloqueado sólo ante cambio de fecha. Se demuestra con K6, K7, K9 y K12 sobre la implementación real.
 
 **Intercalación de CONC-18.4-01 (dos cargas de la misma J).**
 
@@ -820,6 +828,11 @@ Cero `40P01`. El intercambio directo se rechaza en cualquier orden serial por la
 - Cero `40P01`.
 
 **I-3b: corrección de J1 contra reasignación de J2 hacia el vigente de J1.** T1 corrige J1 (A, f → g) y T2 reasigna J2 (X, g) → A. Los dos necesitan adv(A) y se serializan en el nivel 2. Cero `40P01`.
+
+**I-3c: corrección sólo de camión contra reasignación de la misma J (H-01).** T1 corrige J1 (vendedor A, fecha f, camión C1 → C2, misma fecha) y T2 reasigna J1 A → B. Sea B mayor o menor que A: T2 toma {A, B} en orden de uuid.
+- Si T1 va primero: toma adv(C1, C2), adv(A) y J1. T2 toma adv(B) si B < A y espera adv(A). T1 confirma con J1 en C2 y vendedor A. T2 completa sus bloqueos, toma J1, el vigente sigue siendo A y valida B en f. Equivale a T1; T2.
+- Si T2 va primero: toma {A, B} y J1. T1, que ya tiene adv(C1, C2), espera adv(A). T2 confirma con J1 en B. T1 obtiene adv(A) y J1; el vigente ahora es B ≠ A → `PT409 jornada_estado_invalido`, sin efectos. Al reintentar con la misma clave toma adv(B) y confirma. Equivale a T2; T1.
+- T1 espera por un bloqueo de nivel 2 sosteniendo uno de nivel 1; T2 nunca espera por el nivel 1 ni por los camiones, así que no hay ciclo. Esto se **deduce del orden global; no está medido**: lo mide K12.
 
 **Invariante I-CAMION (vale para este bloque y para todo bloque futuro).**
 - Toda escritura en `movimientos_stock` cuyo origen o destino sea la ubicación de un camión, y toda fila que referencie una jornada por FK, se hace dentro de una RPC que:
@@ -910,7 +923,35 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 | P13 | `EXECUTE` dentro de la política: en una transacción revertida se revoca a `propietario_rpc` el `EXECUTE` del helper y se lee la vista | `42501`: el privilegio se verifica contra el llamador, no contra el dueño de la vista |
 | P14 | `SET ROLE lector_perfiles_rpc` y `SELECT` directo de `public.perfiles` | `42501` (falla cerrado, sin recursión) |
 
-**K. Concurrencia.** Se ejecutan con el arnés de 18.4.11. Cero `40P01` en todos los casos. Para K10 y K11 la ausencia de `40P01` no basta: se exigen también el resultado y las invariantes de la columna «Esperado», comprobadas con consultas sobre las tablas después de cada repetición.
+**I. Idempotencia (H-02).** Fija qué se prueba; no modifica el contrato de 18.4.3 y 18.4.4. Todos los casos se ejecutan para **cada una de las seis RPC**. I1 a I9 son pgTAP; I10 e I11 usan dos sesiones y se ejecutan con el arnés de 18.4.11, con su criterio de aprobación.
+
+| # | Caso | Esperado |
+|---|---|---|
+| I1 | Primera ejecución válida | Respuesta con la forma de 18.4.2; **efectos exactos** de la tabla «por RPC» (filas y columnas, ni una más); `operaciones.huella` igual a la fórmula de 18.4.4 recalculada en el test con un texto escrito aparte; `empresa_id`, `actor_id`, `idempotency_key` y `jornada_id` según 18.4.1 |
+| I2 | Replay idéntico e inmediato (misma clave, mismo actor, mismos parámetros) | La **misma** respuesta (mismo uuid); cero filas nuevas en `operaciones`, `movimientos_stock`, `jornadas` y los dos historiales; las filas y los saldos existentes, byte a byte iguales (se comparan antes y después) |
+| I3 | Replay después de que la jornada cambió a un estado donde el comando nuevo se rechazaría (columna «Estado de I3») | La misma respuesta que en I1, **sin revalidar estado ni fecha** (18.4.3, paso 5); cero filas nuevas; la jornada conserva el estado alcanzado |
+| I4 | Replay con autorización perdida (perfil inactivo o rol `vendedor_piloto`) | `PT403`, sin efectos: la autorización vigente precede al replay (18.4.3, pasos 2 y 5) |
+| I5 | Replay con estructura inválida (misma clave, parámetro inválido: cantidad 0, motivo vacío, arreglos de largo distinto) | `PT400` con el código de estructura (18.4.3, paso 3 precede al replay); no `PT409` ni la respuesta guardada |
+| I6 | **Conflicto por payload:** misma clave, payload válido distinto, un parámetro por vez (columna «Payload distinto») | `PT409 jornada_conflicto_idempotencia`; cero filas nuevas; la operación original y su huella, intactas |
+| I7 | **Conflicto por tipo:** la clave de una operación de cada uno de los otros cinco tipos de jornadas y de `ingreso`, `a_cuarentena` y `merma` de Stock | `PT409 jornada_conflicto_idempotencia`; cero filas nuevas. Regresión de Stock: las RPC de Stock con una clave de jornadas siguen devolviendo su propio `stock_conflicto_idempotencia`, sin cambio |
+| I8 | Misma clave usada por otro actor de la misma empresa y por un actor de otra empresa | No es replay: se ejecuta como operación nueva e independiente (`UNIQUE (empresa_id, actor_id, idempotency_key)`); la operación del primer actor no cambia |
+| I9 | Un rechazo no reserva la clave: ejecución rechazada en los pasos 8 a 12 (por ejemplo `jornada_estado_invalido` o `jornada_stock_insuficiente`) y después la misma clave con un payload válido | La segunda se ejecuta como primera ejecución (I1); la rechazada no dejó fila en `operaciones` |
+| I10 | Concurrentes, **misma clave y mismo payload**, en los dos órdenes de lanzamiento | Las dos confirman con la misma respuesta; exactamente una operación y un solo conjunto de efectos (los de I1); cero `40P01` |
+| I11 | Concurrentes, **misma clave y payload distinto**, en los dos órdenes; el payload distinto se elige de modo que ninguna otra validación de los pasos 8 a 10 lo rechace antes | Una confirma y la otra `PT409 jornada_conflicto_idempotencia`; efectos sólo de la que confirmó; cero `40P01` |
+| I12 | **Canonicalización:** los mismos datos escritos de otra forma (columna «Canonicalización») | Replay idéntico (como I2), no conflicto; los datos realmente distintos dan I6 |
+
+**Datos por RPC.** `<m>` y las líneas ordenadas se definen en 18.4.4. «Efectos» es lo que I1 debe comprobar exactamente.
+
+| RPC | Respuesta | Texto de la huella v1 | Efectos de I1 | Payload distinto (I6) | Estado de I3 | Canonicalización (I12) |
+|---|---|---|---|---|---|---|
+| `abrir_jornada` | uuid de la jornada (`jornadas.id`, la ligada por `operacion_apertura_id`) | `v1\|apertura_jornada\|<camión>\|<fecha>\|<vendedor>` | `operaciones` +1 (`apertura_jornada`, `jornada_id` NULL, actor = llamador); `jornadas` +1 (`abierta`, `abierta_por` = actor, `operacion_apertura_id` = esa operación, camión, fecha y vendedor del pedido); movimientos 0; historiales 0 | otro camión; otra fecha; otro vendedor | jornada ya `en_reparto` (tras carga y salida) | uuid escrito en mayúsculas = mismo valor; misma `date` |
+| `reasignar_vendedor` | uuid de la operación | `v1\|reasignacion_vendedor\|<jornada>\|<vendedor>` | `operaciones` +1 (`reasignacion_vendedor`, `jornada_id` = J); historial de reasignaciones +1 (anterior = vigente previo, nuevo, operación, actor); `jornadas.vendedor_id` = nuevo y nada más; movimientos 0 | otro vendedor; otra jornada | jornada `en_reparto`; o vendedor reasignado después por otra operación (el replay devuelve la operación original, no el estado actual) | uuid en mayúsculas |
+| `corregir_jornada` | uuid de la operación | `v1\|correccion_jornada\|<jornada>\|<fecha>\|<camión>\|<m>` | `operaciones` +1 (`correccion_jornada`); historial de correcciones +1 (fecha y camión anteriores y nuevos, motivo con `btrim`); `jornadas.fecha` y `camion_id` nuevos, vendedor y estado intactos; movimientos 0 | otra fecha; otro camión; otro motivo; otra jornada | jornada `cargada` (tras la primera carga) | motivo con espacios laterales = mismo motivo; mayúsculas o espacios internos distintos = conflicto |
+| `registrar_carga` | uuid de la operación | `v1\|carga\|<jornada>\|<producto>:<cantidad>,…` con líneas ordenadas por el texto del uuid del producto | `operaciones` +1 (`carga`, `jornada_id` = J); `movimientos_stock` +n, una por línea (`carga`, depósito propio → ubicación del camión, producto, cantidad, `jornada_id`, `operacion_id`, motivo NULL); estado `cargada` si estaba `abierta`, igual si no; por producto, depósito −c y camión +c | otra cantidad; otro producto; línea agregada o quitada; otra jornada | jornada `en_reparto` (tras la salida) | las mismas líneas en otro orden de los arreglos = replay; producto repetido = `PT400 jornada_producto_repetido` antes del replay; arreglos de largo distinto = `PT400 jornada_lineas_invalidas` |
+| `registrar_descarga` | uuid de la operación | `v1\|descarga\|<jornada>\|<líneas ordenadas>\|<m>` | `operaciones` +1 (`descarga`); `movimientos_stock` +n (`descarga`, ubicación del camión → depósito propio, motivo = `btrim`); estado igual; por producto, camión −c y depósito +c | otra cantidad; otro producto; otro motivo; línea agregada o quitada | jornada `en_reparto` | orden de líneas y `btrim` del motivo, como arriba |
+| `confirmar_salida` | uuid de la operación | `v1\|salida_jornada\|<jornada>` | `operaciones` +1 (`salida_jornada`); `jornadas.estado` = `en_reparto`; movimientos 0; historiales 0 | otra jornada | ya `en_reparto` por esta misma operación (el replay devuelve la original; una salida nueva daría `jornada_estado_invalido`) | uuid en mayúsculas |
+
+**K. Concurrencia.** Se ejecutan con el arnés de 18.4.11. Cero `40P01` en todos los casos. Para K10, K11 y K12 (y para I10 e I11) la ausencia de `40P01` no basta: se exigen también el resultado y las invariantes de la columna «Esperado», comprobadas con consultas sobre las tablas después de cada repetición.
 
 | # | Caso | Esperado |
 |---|---|---|
@@ -919,12 +960,19 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 | K3 | I-2, apertura con el vigente contra reasignación, en los dos órdenes | el resultado del orden serial correspondiente |
 | K4 | I-2 hacia el nuevo | una confirma y la otra `PT409 jornada_vendedor_ocupado` |
 | K5 | I-3, corrección con cambio de fecha contra reasignación de la misma J, en los dos órdenes, incluida la variante en que la reasignación ya tiene un advisory y espera el segundo mientras la corrección tiene el camión | OK/OK, o OK y `PT409 jornada_estado_invalido`; reintentar con la misma clave confirma |
-| K6 | I-3b, en los dos órdenes | se serializan en el nivel 2 |
-| K7 | Correcciones cruzadas de camión (C1 → C2 y C2 → C1) | cero `40P01` |
+| K6 | I-3b, en los dos órdenes, para una corrección con cambio de fecha y para una corrección sólo de camión | se serializan en el nivel 2 |
+| K7 | Correcciones cruzadas de camión (C1 → C2 y C2 → C1) sobre dos jornadas, ya con el bloqueo de vendedor de H-01: vendedores distintos; vendedores distintos con el orden de uuid inverso al de los camiones; el mismo vendedor en fechas distintas | cero `40P01`; el resultado de algún orden serial |
 | K8 | Regresiones: dos cargas de la misma J (CONC-18.4-01); `registrar_merma` contra `registrar_carga` con la misma clave y el mismo advisory de stock; misma clave en dos jornadas distintas; carga contra reasignación de la misma J; corrección de camión contra `mover_a_cuarentena`; baja concurrente de camión, producto o perfil | el resultado de algún orden serial; conflicto de idempotencia donde corresponde |
-| K9 | Se cambia el vigente entre los pasos 6 y 8 | `PT409 jornada_estado_invalido`, sin reserva ni historial |
+| K9 | Se cambia el vigente entre los pasos 6 y 8, en `reasignar_vendedor` y en `corregir_jornada` (también la corrección sólo de camión) | `PT409 jornada_estado_invalido`, sin reserva ni historial |
 | K10 | **Aperturas concurrentes**, con claves distintas salvo en d) y e), en los dos órdenes de lanzamiento: a) mismo camión y misma fecha, vendedores distintos; b) mismo camión y fechas distintas; c) mismo vendedor y misma fecha, camiones distintos; d) misma clave y mismos parámetros; e) misma clave y distinto vendedor | a) una confirma y la otra `PT409` con `jornada_duplicada` o `jornada_camion_con_jornada_abierta` (el contrato no fija precedencia entre ambos códigos: el arnés acepta cualquiera de los dos); b) una confirma y la otra `PT409 jornada_camion_con_jornada_abierta`; c) una confirma y la otra `PT409 jornada_vendedor_ocupado`; d) las dos confirman con el **mismo** uuid de jornada; e) una confirma y la otra `PT409 jornada_conflicto_idempotencia`. **Invariantes:** I-J1 (a lo sumo una jornada por `(empresa, camión, fecha)` y por `(empresa, vendedor, fecha)`, y una sin cerrar por camión); en a) a d) queda exactamente **una** jornada y **una** operación `apertura_jornada` confirmada por clave (la rechazada revierte su reserva, sin historial ni fila huérfana) |
 | K11 | **Salida contra cambios de carga neta** sobre la misma jornada `cargada` con carga neta positiva, en los dos órdenes: a) `confirmar_salida` contra `registrar_descarga` de toda la carga neta; b) `confirmar_salida` contra `registrar_carga`; c) dos `confirmar_salida`, con claves distintas y con la misma clave; d) dos `registrar_descarga` con claves distintas, cada una dentro de lo cargado neto pero con suma mayor | a) salida primero: salida confirma (`en_reparto`) y la descarga `PT409 jornada_estado_invalido`; descarga primero: descarga confirma y la salida `PT409 jornada_carga_neta_cero`; **nunca confirman las dos**. b) carga primero: confirman las dos; salida primero: salida confirma y la carga `PT409 jornada_estado_invalido`, sin movimientos. c) claves distintas: una confirma y la otra `PT409 jornada_estado_invalido`; misma clave: las dos confirman con el mismo uuid y queda **una** operación `salida_jornada`. d) una confirma y la otra `PT409 jornada_descarga_excede_carga`. **Invariantes:** I-J4 (jornada en `en_reparto` ⇒ carga neta de la jornada positiva en al menos un producto); I-J2 (por producto, saldo del camión = Σ cargas − Σ descargas de la jornada y nunca negativo; saldo del depósito + saldo del camión, constante); I-J3 (una operación rechazada no deja filas en `operaciones` ni en `movimientos_stock`); como máximo una `salida_jornada` por jornada |
+| K12 | **Corrección sólo de camión contra reasignación de la misma J** (I-3c), en los dos órdenes de lanzamiento, con el vendedor nuevo mayor y menor que el vigente por uuid, incluida la variante en que la reasignación ya tiene sus advisory y la corrección tiene los camiones y espera al vendedor | Corrección primero: las dos confirman (equivale a corrección; reasignación). Reasignación primero: la reasignación confirma y la corrección `PT409 jornada_estado_invalido` por haber cambiado el vigente, sin reserva ni historial; reintentar con la misma clave confirma. **Invariantes:** I-J1; una fila de historial por operación confirmada y ninguna por la rechazada; camión y vendedor finales de la jornada consistentes con algún orden serial; cero `40P01` |
+
+**Impacto de H-01 sobre K1–K11.** El cambio toca sólo el conjunto de bloqueos de `corregir_jornada` (el vendedor, siempre). Evaluación, sin atribuirle evidencia al laboratorio anterior:
+- **Se amplían o repiten con el código final y son necesarios para aceptar H-01:** K6 (variante sólo de camión), K7 (con el bloqueo de vendedor presente y el caso del mismo vendedor), K9 (también `corregir_jornada`) y el nuevo K12. K5 se repite igual: el conjunto de bloqueos con cambio de fecha no cambia, pero el camino de código sí.
+- **No cambian de diseño, pero se ejecutan igual con el código final:** K1 a K4 (sólo abren y reasignan), K10 y K11. Ninguno usa `corregir_jornada`.
+- **K8** incluye «corrección de camión contra `mover_a_cuarentena`»: se repite, porque la corrección ahora también toma un advisory de vendedor, que las RPC de Stock no toman; no se forma ciclo, pero hay que medirlo.
+- Los resultados de 18.4.12 **no** prueban el mecanismo nuevo. Hasta que K5 a K9 y K12 pasen sobre las migraciones reales, H-01 es un diseño razonado, no una propiedad demostrada.
 
 #### 18.4.10 Cambios sobre objetos y tests existentes
 
@@ -968,7 +1016,7 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 **Ubicación.** `supabase/tests/concurrencia/`:
 - `arnes.sh`: orquestador;
 - `00_bootstrap_descartable.sql`: roles y `auth` emulados;
-- `casos.sh` (o equivalente): definición de K1–K11.
+- `casos.sh` (o equivalente): definición de K1–K12 y de los casos I10 e I11.
 
 No reemplaza a pgTAP ni a Playwright. No se versiona ningún estado generado.
 
@@ -999,7 +1047,7 @@ No reemplaza a pgTAP ni a Playwright. No se versiona ningún estado generado.
 **Criterio de aprobación (exit 0).**
 - Cero `40P01` y cero `40001` en todos los casos K.
 - La diferencia de `pg_stat_database.deadlocks` es igual a la que produjo sólo la autoverificación.
-- Cada resultado coincide con alguno de los órdenes seriales esperados y, en K10 y K11, se cumplen las invariantes indicadas.
+- Cada resultado coincide con alguno de los órdenes seriales esperados y, en K10, K11, K12, I10 e I11, se cumplen las invariantes y los efectos indicados.
 - Ninguna espera supera el tiempo límite.
 - Cualquier otra cosa termina con exit ≠ 0 y el detalle por caso.
 
@@ -1025,6 +1073,7 @@ No reemplaza a pgTAP ni a Playwright. No se versiona ningún estado generado.
 - No se reprodujo la FK `perfiles.usuario_id → auth.users`.
 - Clúster Debian, no la imagen de Supabase.
 - Las RPC del laboratorio fueron reproducciones mínimas de los niveles 1 a 3: sin idempotencia, `operaciones`, historiales, camiones reales ni stock.
+- El laboratorio ejecutó `corregir_jornada` bloqueando al vendedor sólo ante cambio de fecha. **No cubre** el bloqueo permanente de H-01 (18.4.5) ni el caso I-3c.
 - No hubo pruebas completas de esperas por índices únicos, `FOR KEY SHARE` de FK, advisory de stock (nivel 4) ni reserva de idempotencia.
 
 Esos puntos se cubren recién con los tests de 18.4.9 sobre las migraciones reales: pgTAP en Supabase local, y K8 con el arnés. Hasta que pasen, esta evidencia no sustituye a esos tests.
