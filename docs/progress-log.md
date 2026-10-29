@@ -1,4 +1,24 @@
 ---
+## 29/10/2026 — ADR-001 §18.4: registro de la aprobación para validación controlada, acotada a jornadas y carga (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (publicado). Tarea **sólo documental**; cambios locales sin commit. Sólo se modifican rótulos, referencias y trazabilidad en ADR-001, el índice de decisiones y esta bitácora. ADR-007, el contrato técnico, las firmas, las matrices de pruebas, los bloqueos y las reglas de seguridad no cambian. PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Decisión humana del 29/10/2026
+- **Contenido aprobado:** el auditado por Codex en `05c3dfe8…`, SHA-256 de §18.4 `0170ab56afff633457dc4547ec46ef6a1ada007ec904a7a33cffdb4f0f9763dd` (receta única, entrada A-01). Tree `9bd2062ad8381e61f36f97a6e8613119ce06b0c7`; blob del ADR `6443ad0125ea0ed43c419d21f130e7327bd23f6b`.
+- **Alcance:** P10 y P12–P17 sólo para las seis RPC de jornadas y carga, los objetos y mecanismos definidos en el anexo y D-N1. **No** P8, P9, otros dominios, decisiones globales ni producción. Levanta ADR-007 §3, P-3 (sólo la aprobación del anexo).
+- **Excepción aceptada** a `AGENTS.md` §2.2 (requisito conjunto Codex y OpenCode) **sólo para esta aprobación documental**: Codex PASS sobre `7ac6a2d8…` y sobre `05c3dfe8…`; **OpenCode no auditó** por falta de acceso a la evidencia y **no tiene PASS registrado**.
+- **La excepción no se extiende a la implementación:** las migraciones y las seis RPC requieren auditoría de Codex **y** OpenCode, más security review, antes de cualquier merge. Si OpenCode sigue sin estar disponible, se detiene ese paso y se solicita una nueva decisión humana.
+- **Desviación reconocida:** se superaron los tres ciclos de `AGENTS.md` §2.3.5 (FAIL de Codex sobre `78958303…`, `345f7a00…` y `e17d8b9f…`; cierre con `7ac6a2d8…` y confirmación con `05c3dfe8…`), con intervención humana durante el proceso. No se oculta.
+
+### Cambios
+- `docs/decisions/001-rpc-privilegiadas.md`: encabezado y fila de §0; texto de §18; en §18.4, título, bloque «Estado», rótulo de la fe de erratas, encabezado, párrafo introductorio y puntos 1 y 7 de 18.4.13; nuevo apartado 18.4.14 (identidad, rótulos modificados y decisión).
+- `docs/decisions/README.md`: filas de ADR-001 y ADR-007 y el párrafo de ADR-001.
+- `docs/progress-log.md`: esta entrada. La fila P-3 del propio ADR-007 no se modificó; su levantamiento queda registrado en ADR-001 §18.4.14 y en el índice.
+
+### Sigue pendiente (sin autorizar)
+D-1, D-2, el arnés, su integración en CI y la tarea de implementación (preámbulo de `AGENTS.md` §1.3, security review y auditoría de Codex y OpenCode). P8, P9 y el corte de jornada.
+
+---
 ## 29/10/2026 — ADR-001 §18.4: PASS de Codex y dos correcciones editoriales L-01 y L-02 (sin commit)
 
 **Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit `7ac6a2d805f015562014247e67aef4289c07d623` (padre `e17d8b9fda2ecd3a576e86f2cc6ceb7389df770b`), publicado en `origin`. Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.

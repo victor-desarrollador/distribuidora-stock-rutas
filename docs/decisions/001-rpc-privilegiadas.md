@@ -2,7 +2,7 @@
 
 **Fecha:** 12/10/2026 · **Última revisión documental:** 25/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3, **PROPUESTA TÉCNICA NO APROBADA**, candidato a revisión independiente)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14)
 
 > **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; el 23/10/2026, P2, P3 y P4 (§18); y el 24/10/2026, P11 global y las observaciones O-3 y O-4, para validación controlada (§18.2). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P10 y P12–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P10 ni P12–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
@@ -28,6 +28,7 @@
 | v1.5 + anexo §18.3 | Claude Code | Registra las decisiones humanas del 25/10/2026 **acotadas al dominio Stock** (slice `stock-ingreso`): P10, P12, P13, P14, P15, P16 y P17 para Stock, más la huella de idempotencia v1. No resuelve esos puntos para jornadas, ventas ni dinero, no cambia el estado de la ADR ni autoriza producción. |
 | v1.5 + anexo §18.3 (slice 2) | Claude Code | Amplía §18.3 con las decisiones humanas del 25/10/2026 del slice `stock-cuarentena-merma` (D1–D9, huellas v1 de cuarentena y merma, lock concreto de débito y errores nuevos), **acotadas al dominio Stock**. No resuelve P10–P17 globalmente, no habilita la Etapa 3, `cuarentena_apta` ni el negativo transitorio, no cambia el estado de la ADR ni autoriza producción. |
 | v1.5 + anexo §18.4 (candidato) | Claude Code | Incorpora §18.4 v0.4 (contrato técnico de las seis RPC de ADR-007) con la fe de erratas E1–E3, como **PROPUESTA TÉCNICA NO APROBADA**. No aprueba el anexo, no cambia el estado de la ADR, no modifica ADR-007, no autoriza SQL ni producción; D-1, D-2, arnés, CI y security review siguen pendientes. |
+| v1.5 + anexo §18.4 (aprobado) | Claude Code | Registra la decisión humana del 29/10/2026: aprueba, **para validación controlada local/staging y acotado a jornadas y carga de camiones**, el contenido de §18.4 auditado por Codex en `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (SHA-256 `0170ab56afff633457dc4547ec46ef6a1ada007ec904a7a33cffdb4f0f9763dd`). Resuelve P10 y P12–P17 sólo para las seis RPC de ADR-007 y D-N1. No aprueba P8 ni P9, otros dominios, decisiones globales ni producción; el estado de la ADR no cambia. Registra la excepción aceptada a `AGENTS.md` §2.2 (OpenCode no auditó) y los ciclos que superaron `AGENTS.md` §2.3.5. Sólo cambian rótulos, referencias y trazabilidad; el contrato técnico no se modifica. |
 
 ---
 
@@ -444,7 +445,7 @@ Aserciones de catálogo que se repiten siempre:
 | P17 | Mecanismo de auditoría de operaciones exitosas | 14 |
 | P18 | Registro de intentos rechazados (**decisión futura separada**) | 14 |
 
-**P8–P10 y P12–P17 continúan pendientes como decisiones globales** (para el dominio Stock rigen las decisiones acotadas de §18.3). **P18 continúa como decisión futura separada y no es requisito previo.** P11 global quedó resuelta el 24/10/2026 para validación controlada (§18.2). Para el slice productos rigen además las decisiones acotadas de §18.1, que no cambian este estado global.
+**P8–P10 y P12–P17 continúan pendientes como decisiones globales** (para el dominio Stock rigen las decisiones acotadas de §18.3 y, para jornadas y carga de camiones, las de §18.4, aprobadas el 29/10/2026 para validación controlada). **P18 continúa como decisión futura separada y no es requisito previo.** P11 global quedó resuelta el 24/10/2026 para validación controlada (§18.2). Para el slice productos rigen además las decisiones acotadas de §18.1, que no cambian este estado global.
 
 | # | Decisión resuelta | Resultado | Sección |
 |---|---|---|---|
@@ -554,7 +555,7 @@ Mismo alcance estricto: **sólo dominio Stock**. Estas decisiones **no resuelven
 
 Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarentena_merma.sql`, `supabase/tests/stock_cuarentena_merma.test.sql` y la entrada «Etapa 2 — Stock, slice 2: stock-cuarentena-merma» de `docs/progress-log.md`.
 
-### 18.4 Decisiones acotadas a Jornadas y carga (versión 0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1 y H2-R2 de la auditoría de Codex — PROPUESTA TÉCNICA NO APROBADA; candidata a revisión independiente y aprobación humana)
+### 18.4 Decisiones acotadas a Jornadas y carga (versión 0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1 y H2-R2 de la auditoría de Codex — APROBADA PARA VALIDACIÓN CONTROLADA, acotada a jornadas y carga de camiones (decisión humana del 29/10/2026; ver 18.4.14))
 
 > **Alcance estricto.** Aplica únicamente a las seis RPC de ADR-007 (`abrir_jornada`, `reasignar_vendedor`, `corregir_jornada`, `registrar_carga`, `registrar_descarga`, `confirmar_salida`), a `public.jornadas`, a sus dos historiales, a la extensión mínima de `operaciones` y `movimientos_stock`, a la lectura acotada de perfiles de la propia empresa (18.4.2.1) y al arnés de concurrencia (18.4.11). No resuelve P8–P10 ni P12–P17 globalmente, **no resuelve P8/F3**, **no modifica P11** (§18.2: `service_role` denegado, sin excepción nueva), no cambia el estado de esta ADR (APROBADA PARA VALIDACIÓN CONTROLADA) y no autoriza producción. Las reglas de negocio están en ADR-007, que prevalece ante conflicto. `propietario_rpc` sigue sin `UPDATE` ni `DELETE` sobre `operaciones` y `movimientos_stock`, y sin ningún privilegio ni política de escritura sobre `perfiles`. No resuelve el corte de jornada (Blueprint §15, «Fechas»), que sigue pendiente.
 
@@ -571,9 +572,9 @@ Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarenten
 
 Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotencia y el inventario de tests de v0.3. La estrategia de bloqueos cambia **únicamente** en `corregir_jornada` (H-01).
 
-> **Estado: PROPUESTA TÉCNICA NO APROBADA.** Este anexo no está aprobado, no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-1, D-2, el arnés, su ejecución en CI y la security review siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas y las correcciones H-01, H-02, H2-R1 y H2-R2 siguientes. **H-01 cambia el conjunto de bloqueos de `corregir_jornada`** y **H2-R1 agrega una segunda consulta de la clave idempotente (paso 8a) sin agregar bloqueos**; E2, E3, H-02 y H2-R2 no cambian decisiones de diseño. Ninguna corrección modifica el contrato funcional de idempotencia: misma clave, tipo y huella devuelve la respuesta original; otro tipo u otra huella es conflicto.
+> **Estado: APROBADA PARA VALIDACIÓN CONTROLADA, acotada a jornadas y carga de camiones (decisión humana del 29/10/2026; registro en 18.4.14).** Esta aprobación no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-1, D-2, el arnés, su ejecución en CI y la security review siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas y las correcciones H-01, H-02, H2-R1 y H2-R2 siguientes. **H-01 cambia el conjunto de bloqueos de `corregir_jornada`** y **H2-R1 agrega una segunda consulta de la clave idempotente (paso 8a) sin agregar bloqueos**; E2, E3, H-02 y H2-R2 no cambian decisiones de diseño. Ninguna corrección modifica el contrato funcional de idempotencia: misma clave, tipo y huella devuelve la respuesta original; otro tipo u otra huella es conflicto.
 
-**Fe de erratas y correcciones sobre v0.4** (candidata; detalle en `docs/progress-log.md`):
+**Fe de erratas y correcciones sobre v0.4** (incorporadas antes de la aprobación; detalle en `docs/progress-log.md`):
 
 | # | Corrección | Sección |
 |---|---|---|
@@ -1153,21 +1154,49 @@ No reemplaza a pgTAP ni a Playwright. No se versiona ningún estado generado.
 
 Esos puntos se cubren recién con los tests de 18.4.9 sobre las migraciones reales: pgTAP en Supabase local, y K8 con el arnés. Hasta que pasen, esta evidencia no sustituye a esos tests.
 
-#### 18.4.13 Autorizaciones humanas pendientes (ninguna concedida) y decisiones normativas resueltas
+#### 18.4.13 Autorizaciones humanas (sólo la aprobación de §18.4 está concedida; el resto, pendiente) y decisiones normativas resueltas
 
-Resumen del bloque B de la entrega original. Nada de lo siguiente está autorizado por la sola presencia de este anexo:
+Resumen del bloque B de la entrega original. Con excepción del punto 1, nada de lo siguiente está autorizado por la sola presencia de este anexo:
 
-1. Aprobación de §18.4 como anexo de ADR-001 (P10 y P12–P17 sólo para jornadas), previa revisión independiente (ADR-007 §3, P-3). Levanta P-3.
+1. **CONCEDIDA el 29/10/2026 (ver 18.4.14).** Aprobación de §18.4 como anexo de ADR-001 (P10 y P12–P17 sólo para jornadas), previa revisión independiente (ADR-007 §3, P-3). Levanta P-3.
 2. **D-1.** Ampliar `operaciones` y `movimientos_stock` (CHECK, políticas D6/D8, columnas, FK, `UNIQUE`, índices) y actualizar las aserciones pgTAP de 18.4.10 sin relajar ninguna.
 3. **D-2.** Crear `lector_perfiles_rpc`, su vista, `privado.empresa_gestion_actual()` y la política `perfiles_select_empresa_lector`, con la membresía O-3 y el `CREATE` transitorio sobre `privado`. Introduce un segundo rol técnico, lo que amplía P2–P4 (hoy un solo rol técnico, `propietario_rpc`); hay que confirmar que no cambia P11 ni P5–P7.
 4. Catálogo de errores de 18.4.7, con el vendedor inactivo como `PT400 jornada_vendedor_invalido`.
 5. Versionar el arnés en `supabase/tests/concurrencia/` (18.4.11), solo contra su propio clúster efímero, con la versión de PostgreSQL y las rutas de binarios declaradas.
 6. Ejecutar el arnés en CI: autorización aparte (implica tocar `.github/workflows/ci.yml`).
-7. La tarea de implementación: rama, preámbulo de `AGENTS.md` §1.3, migraciones sólo en local o staging, **security review obligatoria** (toca Supabase, RLS, grants, `SECURITY DEFINER`, roles, `movimientos_stock`, idempotencia y concurrencia) y auditoría independiente del hash.
+7. La tarea de implementación: rama, preámbulo de `AGENTS.md` §1.3, migraciones sólo en local o staging, **security review obligatoria** (toca Supabase, RLS, grants, `SECURITY DEFINER`, roles, `movimientos_stock`, idempotencia y concurrencia) y auditoría independiente del hash, que para las migraciones y las seis RPC exige Codex y OpenCode antes de cualquier merge; si OpenCode no está disponible, se detiene ese paso y se solicita una nueva decisión humana (18.4.14).
 8. El corte de jornada (Blueprint §15, «Fechas») sigue pendiente; según ADR-007 §3, P-1, no afecta a este bloque.
 
 **Decisiones normativas ya resueltas por el humano para este anexo** (no son autorizaciones de implementación):
 - **D-N1 (opción A, exclusivamente para jornadas):** camión nulo → `PT404 jornada_camion_no_encontrado`; jornada nula → `PT404 jornada_no_encontrada`; ambos en 18.4.3, paso 3, antes de la huella, del replay y de la reserva. Sin códigos nuevos.
+
+
+#### 18.4.14 Registro de la aprobación (29/10/2026)
+
+Este apartado es sólo trazabilidad. No forma parte del contrato técnico de 18.4.1 a 18.4.12 y no lo modifica.
+
+**Identidad del contenido auditado y aprobado** (anterior a cualquier cambio de rótulos):
+
+| Dato | Valor |
+|---|---|
+| Commit | `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (padre `7ac6a2d805f015562014247e67aef4289c07d623`) |
+| SHA-256 de §18.4 en ese commit | `0170ab56afff633457dc4547ec46ef6a1ada007ec904a7a33cffdb4f0f9763dd` (87 863 bytes) |
+| Receta de identidad | Única y reproducible, con LF final; ver la entrada A-01 de `docs/progress-log.md` |
+| Tree SHA del commit | `9bd2062ad8381e61f36f97a6e8613119ce06b0c7` |
+| Git blob SHA de este archivo en ese commit | `6443ad0125ea0ed43c419d21f130e7327bd23f6b` |
+| Auditoría de Codex | PASS sobre `7ac6a2d8…` y PASS definitivo sobre `05c3dfe8…`, sin hallazgos nuevos |
+| Auditoría de OpenCode | **No auditó**, por falta de acceso a la evidencia. **No hay PASS de OpenCode.** |
+
+**Rótulos y referencias modificados por esta aprobación** (el resto del texto de §18.4 es idéntico al contenido auditado): el título de §18.4, el bloque «Estado», el rótulo de la fe de erratas, el encabezado, el párrafo introductorio y los puntos 1 y 7 de 18.4.13, y este apartado 18.4.14.
+
+**Decisión humana del 29/10/2026**
+
+1. **Contenido aprobado:** el auditado por Codex en el commit y con el SHA-256 de la tabla anterior.
+2. **Alcance:** P10 y P12–P17 únicamente para las seis RPC de jornadas y carga (`abrir_jornada`, `reasignar_vendedor`, `corregir_jornada`, `registrar_carga`, `registrar_descarga`, `confirmar_salida`), los objetos y mecanismos definidos expresamente en este anexo y la decisión D-N1. **No se aprueban** P8, P9, otros dominios, decisiones globales ni producción. El estado de ADR-001 y el de ADR-007 no cambian; se levanta ADR-007 §3, P-3, sólo en cuanto a la aprobación del anexo.
+3. **Excepción aceptada, sólo para esta aprobación documental:** el requisito conjunto de Codex y OpenCode de `AGENTS.md` §2.2. Codex emitió PASS sobre el hash definitivo; OpenCode no pudo completar la auditoría por problemas de acceso a la evidencia y no se registra PASS suyo.
+4. **La excepción no se extiende a la implementación.** Las migraciones y las seis RPC deberán contar con auditoría independiente de Codex **y** OpenCode, además de security review, antes de cualquier merge. Si OpenCode sigue sin estar disponible, se detiene ese paso y se solicita una nueva decisión humana.
+5. **Desviación reconocida y registrada:** el proceso superó los tres ciclos implementar → auditar → corregir de `AGENTS.md` §2.3.5 (FAIL de Codex sobre `78958303…`, `345f7a00…` y `e17d8b9f…`; cierre con `7ac6a2d8…`), con intervención humana durante todo el proceso. Ver `docs/progress-log.md`.
+6. **Siguen requiriendo autorizaciones específicas:** D-1, D-2, el arnés, su integración en CI y la tarea de implementación. Esta aprobación documental no autoriza migraciones, SQL, commits de código, cambios de RLS, grants ni roles.
 
 ---
 
