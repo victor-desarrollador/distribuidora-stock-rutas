@@ -1,4 +1,32 @@
 ---
+## 29/10/2026 — ADR-001 §18.4: correcciones A-01, A-02 y A-03 tras la tercera auditoría de Codex (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `e17d8b9fda2ecd3a576e86f2cc6ceb7389df770b` (padre `345f7a0010a2c7b7563e0ce5210d1cca7e253246`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Resultado de la auditoría de Codex sobre `e17d8b9f…`
+FAIL por A-01, A-02 y A-03.
+
+### A-01 — identidad del documento (causa raíz)
+Codex obtuvo `0cec22731ed046914a5f3e07ee247f8031b5b9bf2e5e7c4c0cfae53add87ed41` y la evidencia declaraba `50fd5f3d…`. **El contenido es el mismo**; los bytes son idénticos (UTF-8, sin BOM, sin CR, sin NUL; el árbol local coincide con el commit). La diferencia es el LF final: el hash de Codex es el del texto **con** LF final (lo que produce `sha256sum` sobre el archivo extraído), y el mío se calculó sobre la cadena **sin** LF final, aunque el archivo que yo generaba sí lo llevaba. La propia evidencia era inconsistente: `sha256sum seccion-18.4.md` daba `0cec2273…` y `sha256-seccion.txt` decía `50fd5f3d…`.
+
+**Receta única de identidad** (`extraer-seccion.sh`): bytes desde la línea `### 18.4 Decisiones…` (inclusive) hasta la última línea no vacía antes del separador `---` que precede a `## 19.` (inclusive, con su LF final); se hashea con `sha256sum` sobre el archivo extraído.
+```
+git show <commit>:docs/decisions/001-rpc-privilegiadas.md | LC_ALL=C awk '/^### 18\.4 Decisiones/{f=1} f&&/^---$/{exit} f{b[++n]=$0} END{while(n>0&&b[n]=="")n--; for(i=1;i<=n;i++)print b[i]}' | sha256sum
+```
+Además se registran el Git blob SHA del archivo y el tree SHA del commit. Para `e17d8b9f`: blob `2d01755bf59968164fc03ea639164648972c6407`, tree `38ca21e4ec11f968edc21a3349e01499a5d32698`, §18.4 = `0cec2273…` (81 534 bytes). Los hashes de los commits anteriores bajo esta receta: `345f7a00` = `90ea848b…`, `78958303` = `a52067ec…`.
+
+### A-02 — arnés I10/I11
+Nueva sección en 18.4.11: mecanismo de cola por RPC (advisory para `abrir_jornada`, `reasignar_vendedor` y `corregir_jornada`; `SELECT … FOR UPDATE` de la jornada en una transacción de control para `registrar_carga`, `registrar_descarga` y `confirmar_salida`), evidencia exigida antes de liberar (ambas sesiones en `wait_event_type = 'Lock'`, bloqueo no concedido en `pg_locks`, sin `RowExclusiveLock` sobre tablas de negocio y sin fila de la clave) y evaluación del riesgo de deadlock del mecanismo. Se declara qué prueba 8a y qué no: sólo `reasignar_vendedor` y `corregir_jornada` distinguen 8a del paso 9; en `confirmar_salida` la única variante de I11 (otra jornada) no comparte bloqueos y se resuelve en el paso 9 (K8). I10 e I11 se ajustan sin cambiar el contrato funcional.
+
+### A-03 — I13
+I13 queda para el parámetro estructural inválido con clave `uuid` válida (rechazo sin reserva y reutilización posterior con el payload corregido); la clave nula pasa a **I14** (`PT400 jornada_clave_invalida`, cero efectos).
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; D-N1 resuelta (opción A, sólo jornadas); H-01, H2-R1, H2-R2 y E1–E3 sin cambios.
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- El próximo commit requiere nueva auditoría de Codex y OpenCode; la de `e17d8b9f…` no se reutiliza.
+
+---
 ## 29/10/2026 — ADR-001 §18.4: correcciones H2-R1 y H2-R2 tras la segunda auditoría de Codex (sin commit)
 
 **Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `345f7a0010a2c7b7563e0ce5210d1cca7e253246` (padre `78958303168e9774fb15651cca411db484dbff6d`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
