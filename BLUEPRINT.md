@@ -1,8 +1,8 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 2.3 (documento de trabajo controlado; propuestas no aprobadas identificadas)
-**Fecha:** 26/10/2026 (hora local Argentina)
+**Versión:** 2.4 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Fecha:** 29/10/2026 (hora local Argentina)
 **Estado:** Apto para inventario técnico, planificación y validación controlada de ADR-001 exclusivamente en local/staging. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
 > Este documento es la fuente de referencia del proyecto. Todo agente (Claude Code, OpenCode, Codex) y toda persona que trabaje en el repositorio debe leerlo antes de escribir código. Si algo del código contradice este documento, el documento manda hasta que se registre una decisión que lo cambie (ver sección 13: ADR).
@@ -222,6 +222,7 @@ Flujo lógico: `abierta → cargada → en_reparto → ventas_finalizadas → re
 - **Una sola jornada por (`empresa_id`, `camion_id`, `fecha`)**, aunque otra del mismo día esté cerrada; no habrá segunda salida por camión ese día.
 - El vendedor registra ventas digitales con conexión. Sin conexión usa talonario numerado; **debe transcribir, guardar en servidor y declarar completas** las ventas en papel antes de que el encargado inicie el **conteo formal**. El camión puede ingresar físicamente al predio; el sistema solo bloquea el proceso administrativo.
 - Identificar origen de venta (`digital`/`papel`), serie y número de nota (cuando aplique), usuario, instante de registro del servidor, jornada, cliente, ítems, precios históricos y pagos. Cada ítem guarda la cantidad en unidad mínima (unidades o gramos), el precio aplicado (unitario o por kg) y el importe (§7.1). En un ítem `peso`, la cantidad es el **peso efectivamente entregado** al cliente (ADR-005 D-R2) y el importe es el redondeado por línea según D-R1. El total de la venta es la suma de los importes finales de cada línea según la regla aplicable a su tipo de producto (§7.1): D-R1 para `peso`; para `unidad`, y por lo tanto para los centavos de una venta mixta, sigue pendiente. Conviene diseñar la venta por peso sobre el modelo por peso ya migrado; el orden de ejecución lo autoriza el humano según §14.
+- **Una línea por producto ([ADR-006](docs/decisions/006-una-linea-por-producto-en-venta-nueva.md), aprobada el 29/10/2026):** en una venta **nueva**, `productoId` es único dentro de los ítems, cualquiera sea su unidad (`unidad` o `peso`, incluso con unidades distintas). Dos o más líneas del mismo producto **invalidan** la venta: se rechaza sin persistir y no se consolida automáticamente. La regla no se aplica retroactivamente: una venta histórica con líneas repetidas se sigue leyendo con sus valores almacenados, sin recalcularla ni migrarla, y su consumo de stock es la suma de sus líneas. Una nota de papel transcripta como venta nueva también debe cumplirla. D-R1 no cambia; la fragmentación en ventas distintas no queda resuelta por esta regla.
 - La validación de duplicados se realiza por empresa, serie y número **en todo el histórico**, no solamente dentro de una jornada; también idempotencia por solicitud. Notas anuladas se preservan con motivo y sin efecto de stock/dinero. Registrar saltos de numeración y resolución.
 - **Anulación — PROPUESTA NO APROBADA:** vendedor anula solo sus propias ventas antes de finalizar ventas (`ventas_finalizadas`) y con motivo obligatorio; luego solo dueño/encargado con operación compensatoria. Toda anulación aparece en rendición y auditoría. No implementar sin aprobación.
 - **Precios/descuentos — PROPUESTA NO APROBADA:** el vendedor no puede modificar precios ni otorgar descuentos en Fase 1; utiliza el precio configurado. Registrar precio de lista y precio aplicado históricos; excepciones futuras requieren nueva decisión.
@@ -589,6 +590,14 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] Devoluciones a cuarentena no vuelven al stock vendible.
 - [ ] Al cerrar, el stock del camión queda en 0.
 
+**Ventas: una línea por producto (ADR-006)**
+- [ ] Una venta nueva con una sola línea válida por producto se acepta (`1,000 kg × $499,99/kg` en una línea → total `$500`).
+- [ ] Una venta nueva con dos o más líneas `peso` del mismo `productoId` se rechaza sin persistir, aunque el stock alcance.
+- [ ] Una venta nueva con dos o más líneas `unidad` del mismo `productoId` se rechaza sin persistir, aunque el stock alcance.
+- [ ] Una venta nueva con dos líneas del mismo `productoId` y unidades distintas se rechaza sin persistir.
+- [ ] Una venta nueva con líneas de productos distintos, todo lo demás válido, se acepta.
+- [ ] Una venta histórica con líneas repetidas, estructura e importes válidos, se lee sin recalcular y su consumo cuenta para el stock.
+
 **Ventas en papel**
 - [ ] Número de nota duplicado en **cualquier jornada de la misma empresa/serie** es rechazado.
 - [ ] Salto en la numeración genera aviso.
@@ -783,6 +792,7 @@ Estado: abierto | resuelto (solo con prueba)
 | 2.1 | 25/10/2026 | **Reunión con el cliente — ADR-005 aprobada (fiambres por peso):** los fiambres dejan de venderse por pieza/media pieza y pasan a venderse por peso (kg ingresado con hasta 3 decimales y mostrado con 3 fijos, gramos enteros como canónico, precio por kg, nunca `float`; redondeo monetario completamente pendiente, D-R1). ADR-003 queda REEMPLAZADA por ADR-005 y ADR-002 sigue histórica. Origen del precio del presupuesto y ciclo de vida: pendientes. **Nuevo módulo Presupuestos** (Fase 1, entrega pendiente): documento interno sin efecto de stock ni dinero, IVA 21% sólo informativo, sin descuentos, snapshot de cliente y producto, dueño/encargado (vendedor pendiente) y productos `unidad` y `peso`. §2, §4, §5, §7.1, §7.4, §7.5, §7.10 (nueva), §8, §9, §11, §12, §14, §15, §16. Desambiguación «presupuesto» ↔ «cotización comercial del proyecto». **Sin código, SQL, migraciones ni pruebas en este cambio**; la implementación requiere una tarea posterior autorizada. ADR-001 sin cambios. |
 | 2.2 | 26/10/2026 | **Cierre humano de ADR-005 D-R1–D-R4:** D-R1 (sólo líneas `peso`), importe redondeado una vez por línea al peso entero (0,50 hacia arriba), sumado al total sin recálculo, `numeric(14,2)` como tipo monetario general; D-R2, peso efectivamente medido en cada operación; D-R3, sin tolerancia automática de pesaje en Fase 1; D-R4, reinicio limpio del modelo pieza/media pieza, sin reinterpretación. Nuevo pendiente: redondeo de líneas `unidad` y centavos de documentos mixtos. §2, §7.1, §7.4, §7.5, §7.8, §7.10, §8, §11, §12, §14, §15, §16. **Sin código, SQL, migraciones ni pruebas**; la migración al modelo por peso requiere una tarea posterior autorizada. |
 | 2.3 | 26/10/2026 | **Estado de implementación, sin cambio de reglas:** Slice A del modelo por peso (`20261027001542_modelo_peso_gramos.sql`, validado sólo en local) deja el SQL en `unidad`/`peso` con enteros en unidad mínima (unidades o gramos), sin cambiar tipos ni firmas de RPC de stock y con falla cerrada ante datos `pieza` (D-R4). La pantalla Productos se adapta al contrato `unidad | peso` por compatibilidad inmediata. Se actualizan las notas de estado de §7.1 y §8; el resto del prototipo sigue pendiente (Slice B). |
+| 2.4 | 29/10/2026 | **ADR-006 aprobada — Una línea por producto en cada venta nueva** (formaliza la decisión humana del 28/10/2026, hallazgo AUD-B3-01; complementa ADR-005 sin modificar D-R1): en una venta nueva, `productoId` es único dentro de los ítems, cualquiera sea su unidad, y las líneas repetidas invalidan la venta. Los históricos con líneas repetidas no se ven afectados: se leen sin recalcular ni migrar. §7.5 incorpora la regla y §12, sus 6 pruebas normativas. |
 
 ---
 

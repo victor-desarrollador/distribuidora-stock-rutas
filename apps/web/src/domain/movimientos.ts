@@ -363,3 +363,120 @@ export function validar_stock_movimiento(
 
   return null;
 }
+
+export const MENSAJE_VENTA_CARGA_INCONSISTENTE =
+  "La carga de la jornada tiene unidades de medida contradictorias para un mismo producto: hay datos inconsistentes. No se puede registrar la venta.";
+
+export const MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA =
+  "Las salidas registradas en la jornada superan lo cargado: hay datos inconsistentes. No se puede registrar la venta.";
+
+/** Venta nueva con nombre y unidad por línea: la exige validar_stock_venta. */
+interface VentaNuevaConItems {
+  jornadaId: string;
+  items: ReadonlyArray<{
+    productoId: number;
+    nombreProducto: string;
+    unidadMedida: UnidadMedida;
+    cantidad: number;
+  }>;
+}
+
+/**
+ * Validación AUTORITATIVA del stock de una venta nueva (AUD-001). La ejecuta
+ * la frontera de ventas con lecturas frescas; ningún caller la provee ni la
+ * reemplaza. Devuelve el mensaje de error o null. Cantidades enteras en la
+ * unidad mínima (unidades o gramos), exactas y sin tolerancia: no usa la
+ * disponibilidad visual (Math.max) ni convierte entre unidades.
+ *   0. Carga contradictoria: un mismo producto cargado con dos unidades, en
+ *      TODA la carga (aunque no se venda) → la jornada es inconsistente.
+ *   1. Cada producto vendido debe estar cargado y con la misma unidad.
+ *   2. Una salida ya registrada (ventas, mermas, entregados de cambios) con
+ *      otra unidad que la cargada no es sumable → ledger inconsistente.
+ *   3. Cargado, salidas y pedido nuevo exactos por producto (sumas seguras;
+ *      overflow o cantidad no canónica → no calculable).
+ *   4. Salidas que superan lo cargado en CUALQUIER producto (o salida de un
+ *      producto no cargado) → no se acepta ninguna venta nueva.
+ *   5. Las líneas nuevas se agrupan por producto ANTES de comparar: dos
+ *      líneas del mismo producto no esquivan el disponible (1 g de más se
+ *      rechaza).
+ */
+export function validar_stock_venta(
+  venta: VentaNuevaConItems,
+  cargados: ReadonlyArray<ItemCargadoConUnidad>,
+  ventas: ReadonlyArray<VentaConItemsConUnidad>,
+  movimientos_actuales: ReadonlyArray<MovimientoReparto>
+): string | null {
+  const unidad_cargada = new Map<number, UnidadMedida>();
+  for (const item of cargados) {
+    const previa = unidad_cargada.get(item.productoId);
+    if (previa !== undefined && previa !== item.unidadMedida) {
+      return MENSAJE_VENTA_CARGA_INCONSISTENTE;
+    }
+    unidad_cargada.set(item.productoId, item.unidadMedida);
+  }
+
+  for (const item of venta.items) {
+    const unidad = unidad_cargada.get(item.productoId);
+    if (unidad === undefined) {
+      return `${item.nombreProducto} no está cargado en el camión.`;
+    }
+    if (unidad !== item.unidadMedida) {
+      return `La forma de venta de ${item.nombreProducto} no coincide con la cargada en la jornada.`;
+    }
+  }
+
+  const salidas_registradas = [
+    ...ventas
+      .filter((v) => v.jornadaId === venta.jornadaId)
+      .flatMap((v) => v.items),
+    ...movimientos_actuales
+      .filter((m) => m.jornadaId === venta.jornadaId)
+      .flatMap(salidasPorMovimiento),
+  ];
+
+  if (
+    salidas_registradas.some((salida) => {
+      const unidad = unidad_cargada.get(salida.productoId);
+      return unidad !== undefined && unidad !== salida.unidadMedida;
+    })
+  ) {
+    return MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA;
+  }
+
+  const cargado: Record<number, number> = {};
+  const pedido: Record<number, number> = {};
+  let salidas: Record<number, number>;
+  try {
+    for (const item of cargados) {
+      validar_cantidad(item.cantidad);
+      acumular(cargado, item.productoId, item.cantidad);
+    }
+    salidas = salidas_de_jornada(
+      venta.jornadaId,
+      ventas,
+      movimientos_actuales
+    );
+    for (const item of venta.items) {
+      acumular(pedido, item.productoId, item.cantidad);
+    }
+  } catch {
+    return MENSAJE_STOCK_JORNADA_NO_CALCULABLE;
+  }
+
+  for (const [productoId, salida] of Object.entries(salidas)) {
+    if (salida > (cargado[Number(productoId)] ?? 0)) {
+      return MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA;
+    }
+  }
+
+  for (const item of venta.items) {
+    // Entero seguro >= 0: el paso anterior garantiza salidas <= cargado.
+    const disponible =
+      cargado[item.productoId] - (salidas[item.productoId] ?? 0);
+    if (pedido[item.productoId] > disponible) {
+      return `Stock insuficiente de ${item.nombreProducto}.`;
+    }
+  }
+
+  return null;
+}

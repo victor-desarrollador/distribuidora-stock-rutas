@@ -21,9 +21,12 @@ import {
   MENSAJE_CAMBIO_MIXTO_NO_HABILITADO,
   MENSAJE_SALIDAS_SUPERAN_CARGA,
   MENSAJE_STOCK_JORNADA_NO_CALCULABLE,
+  MENSAJE_VENTA_CARGA_INCONSISTENTE,
+  MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA,
   movimiento_valido,
   salidas_de_jornada,
   validar_stock_movimiento,
+  validar_stock_venta,
 } from "./movimientos";
 import { registrarMovimientoOperacion } from "../hooks/useMovimientos";
 
@@ -570,5 +573,154 @@ describe("security review B2: unidad de las salidas históricas vs carga (sin su
     expect(validar_stock_movimiento(merma(jamon(251)), cargaJamon, [], previos)).toBe(
       "Stock insuficiente de Jamón cocido."
     );
+  });
+});
+
+describe("validar_stock_venta (AUD-001)", () => {
+  const MAX = Number.MAX_SAFE_INTEGER;
+  // Carga de j1: Leche 3 unidades, Jamón 1250 g.
+  const cargados = [
+    { productoId: 2, unidadMedida: "unidad" as const, cantidad: 3 },
+    { productoId: 4, unidadMedida: "peso" as const, cantidad: 1250 },
+  ];
+  const nueva = (...items: ProductoMovimiento[]) => ({ jornadaId: "j1", items });
+  const previa = (jornadaId: string, ...items: ProductoMovimiento[]) => ({
+    jornadaId,
+    items,
+  });
+
+  it("unidad: exacto se acepta; +1 se rechaza", () => {
+    expect(validar_stock_venta(nueva(leche(3)), cargados, [], [])).toBeNull();
+    expect(validar_stock_venta(nueva(leche(4)), cargados, [], [])).toBe(
+      "Stock insuficiente de Leche."
+    );
+  });
+
+  it("unidad: descuenta lo ya vendido en la jornada", () => {
+    const ventas = [previa("j1", leche(1))];
+    expect(validar_stock_venta(nueva(leche(2)), cargados, ventas, [])).toBeNull();
+    expect(validar_stock_venta(nueva(leche(3)), cargados, ventas, [])).toBe(
+      "Stock insuficiente de Leche."
+    );
+  });
+
+  it("peso: exacto (1250 g) se acepta; +1 g se rechaza", () => {
+    expect(validar_stock_venta(nueva(jamon(1250)), cargados, [], [])).toBeNull();
+    expect(validar_stock_venta(nueva(jamon(1251)), cargados, [], [])).toBe(
+      "Stock insuficiente de Jamón cocido."
+    );
+  });
+
+  it("dos líneas del mismo producto unidad: suma exacta se acepta; excedida se rechaza", () => {
+    expect(
+      validar_stock_venta(nueva(leche(1), leche(2)), cargados, [], [])
+    ).toBeNull();
+    expect(validar_stock_venta(nueva(leche(2), leche(2)), cargados, [], [])).toBe(
+      "Stock insuficiente de Leche."
+    );
+  });
+
+  it("dos líneas del mismo producto peso: suma exacta se acepta; 1 g de más se rechaza", () => {
+    expect(
+      validar_stock_venta(nueva(jamon(1000), jamon(250)), cargados, [], [])
+    ).toBeNull();
+    expect(
+      validar_stock_venta(nueva(jamon(1000), jamon(251)), cargados, [], [])
+    ).toBe("Stock insuficiente de Jamón cocido.");
+  });
+
+  it("carga contradictoria se rechaza aunque el producto no se venda", () => {
+    const contradictoria = [
+      ...cargados,
+      { productoId: 4, unidadMedida: "unidad" as const, cantidad: 5 },
+    ];
+    expect(validar_stock_venta(nueva(leche(1)), contradictoria, [], [])).toBe(
+      MENSAJE_VENTA_CARGA_INCONSISTENTE
+    );
+  });
+
+  it("unidad nueva incompatible con la cargada se rechaza", () => {
+    const lechePorPeso: ProductoMovimiento = { ...leche(1), unidadMedida: "peso" };
+    expect(validar_stock_venta(nueva(lechePorPeso), cargados, [], [])).toBe(
+      "La forma de venta de Leche no coincide con la cargada en la jornada."
+    );
+  });
+
+  it("unidad histórica incompatible con la cargada se rechaza", () => {
+    const jamonComoUnidad: ProductoMovimiento = { ...jamon(1), unidadMedida: "unidad" };
+    expect(
+      validar_stock_venta(nueva(leche(1)), cargados, [previa("j1", jamonComoUnidad)], [])
+    ).toBe(MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA);
+  });
+
+  it("producto no cargado se rechaza", () => {
+    expect(validar_stock_venta(nueva(yogur(1)), cargados, [], [])).toBe(
+      "Yogur no está cargado en el camión."
+    );
+  });
+
+  it("salida histórica de un producto no cargado se rechaza", () => {
+    expect(
+      validar_stock_venta(nueva(leche(1)), cargados, [previa("j1", yogur(1))], [])
+    ).toBe(MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA);
+  });
+
+  it("saldo histórico negativo de OTRO producto se rechaza (sin Math.max)", () => {
+    expect(
+      validar_stock_venta(nueva(leche(1)), cargados, [previa("j1", jamon(1300))], [])
+    ).toBe(MENSAJE_VENTA_SALIDAS_SUPERAN_CARGA);
+  });
+
+  it("overflow al acumular la carga → no calculable", () => {
+    const cargaDesbordada = [
+      { productoId: 2, unidadMedida: "unidad" as const, cantidad: MAX },
+      { productoId: 2, unidadMedida: "unidad" as const, cantidad: 1 },
+    ];
+    expect(validar_stock_venta(nueva(leche(1)), cargaDesbordada, [], [])).toBe(
+      MENSAJE_STOCK_JORNADA_NO_CALCULABLE
+    );
+  });
+
+  it("overflow al acumular ventas previas → no calculable", () => {
+    const ventas = [previa("j1", leche(MAX)), previa("j1", leche(1))];
+    expect(validar_stock_venta(nueva(leche(1)), cargados, ventas, [])).toBe(
+      MENSAJE_STOCK_JORNADA_NO_CALCULABLE
+    );
+  });
+
+  it("overflow al agrupar el pedido nuevo → no calculable", () => {
+    expect(validar_stock_venta(nueva(leche(MAX), leche(1)), cargados, [], [])).toBe(
+      MENSAJE_STOCK_JORNADA_NO_CALCULABLE
+    );
+  });
+
+  it("merma resta del disponible", () => {
+    const movimientos = [merma(leche(1))];
+    expect(validar_stock_venta(nueva(leche(2)), cargados, [], movimientos)).toBeNull();
+    expect(validar_stock_venta(nueva(leche(3)), cargados, [], movimientos)).toBe(
+      "Stock insuficiente de Leche."
+    );
+  });
+
+  it("cambio: el entregado resta y el devuelto no suma", () => {
+    const movimientos = [cambio(leche(1), leche(1))];
+    expect(validar_stock_venta(nueva(leche(2)), cargados, [], movimientos)).toBeNull();
+    expect(validar_stock_venta(nueva(leche(3)), cargados, [], movimientos)).toBe(
+      "Stock insuficiente de Leche."
+    );
+  });
+
+  it("devolución no resta del disponible", () => {
+    expect(
+      validar_stock_venta(nueva(leche(3)), cargados, [], [devolucion(leche(2))])
+    ).toBeNull();
+  });
+
+  it("ventas y movimientos de otra jornada no afectan el stock", () => {
+    const ventas = [previa("j2", leche(3))];
+    const movimientos: MovimientoReparto[] = [{ ...merma(leche(3)), jornadaId: "j2" }];
+    expect(
+      validar_stock_venta(nueva(leche(3)), cargados, ventas, movimientos)
+    ).toBeNull();
   });
 });
