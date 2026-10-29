@@ -1,4 +1,23 @@
 ---
+## 29/10/2026 — ADR-001 §18.4: PASS de Codex y dos correcciones editoriales L-01 y L-02 (sin commit)
+
+**Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit `7ac6a2d805f015562014247e67aef4289c07d623` (padre `e17d8b9fda2ecd3a576e86f2cc6ceb7389df770b`), publicado en `origin`. Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
+
+### Auditorías sobre `7ac6a2d8…`
+- **Codex:** PASS para aprobación técnica humana (informado por el humano). Dejó dos observaciones editoriales, L-01 y L-02.
+- **OpenCode:** **no auditó**, por falta de acceso a la evidencia. No hay PASS de OpenCode registrado ni se reintentó la transferencia; la auditoría de OpenCode queda en pausa por decisión humana.
+
+### Correcciones editoriales (no cambian contratos ni orden de bloqueos)
+- **L-01 (18.4.11, «Mecanismo»):** la sesión de control retiene el recurso de cola que corresponde a cada RPC (advisory o bloqueo de fila `FOR UPDATE` de la jornada) y lo libera según su tipo (`pg_advisory_unlock_all()` o `ROLLBACK`). Antes el preámbulo describía sólo advisory.
+- **L-02 (18.4.9, fila I11):** el conflicto se detecta en 8a cuando las solicitudes comparten los bloqueos correspondientes; las variantes sin bloqueos compartidos (por ejemplo «otra jornada») se resuelven mediante el `ON CONFLICT` del paso 9 (K8). En `confirmar_salida`, I11 no ejerce 8a.
+- No se tocaron firmas, permisos, RLS, idempotencia ni orden de bloqueos.
+
+### Estado y pendientes
+- §18.4 sigue **PROPUESTA TÉCNICA NO APROBADA**; la aprobación es humana y no está dada. D-N1 resuelta (opción A, sólo jornadas).
+- Sin autorizar: D-1, D-2, arnés, su ejecución en CI y security review.
+- Un commit nuevo cambia el hash de §18.4: la auditoría PASS de Codex es sobre `7ac6a2d8…` y no se extiende automáticamente al texto con L-01 y L-02.
+
+---
 ## 29/10/2026 — ADR-001 §18.4: correcciones A-01, A-02 y A-03 tras la tercera auditoría de Codex (sin commit)
 
 **Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre el commit auditado `e17d8b9fda2ecd3a576e86f2cc6ceb7389df770b` (padre `345f7a0010a2c7b7563e0ce5210d1cca7e253246`). Tarea **sólo documental**; cambios locales sin commit. ADR-007, PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.
