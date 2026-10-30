@@ -20,7 +20,7 @@
 - **Incidente:** se separan la configuración observada, el comportamiento comprobado, los riesgos aceptados y las verificaciones futuras. El criterio de cierre queda en tres partes: A (controles), B (decisiones) y C (propuesta de cierre).
 - **Resolución:** el usuario aprobó expresamente la propuesta C, y el incidente pasa a **`resuelto` el 30/10/2026**.
   - La prueba es el merge real del PR #35: commit `03d41db`, con sólo el deployment `7429513466` (`Preview`) y ningún `Production`.
-  - El alcance preciso del cierre queda en la sección «Resolución» del incidente.
+  - El alcance preciso del cierre queda en la sección «Resolución» del incidente. Se limita a la causa neutralizada (A1, A3 y A5). La protección de acceso (A2, A4) y los dos rulesets son controles complementarios observados: no son requisitos del cierre (corrección del hallazgo H-01 de Codex sobre `1d4e3f4`).
   - Las tres ocurrencias anteriores de Production siguen registradas, sin autorización retroactiva.
   - El cierre no autoriza deployments productivos futuros.
 

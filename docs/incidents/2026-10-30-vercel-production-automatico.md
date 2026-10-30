@@ -114,17 +114,23 @@ Esta sección separa cuatro cosas: la configuración que se observó, el comport
 
 ## Criterio de cierre
 
-El incidente pasa a `resuelto` sólo cuando estén cumplidos **todos** los controles de la sección A, registradas **todas** las decisiones humanas de la sección B y **aprobado el cierre por el usuario** (sección C), con la evidencia en este archivo. Las tres condiciones se cumplieron el 30/10/2026.
+El cierre de este incidente se limita a su causa: los deployments automáticos de Production originados por merges o pushes a `main`. El incidente pasa a `resuelto` sólo cuando se cumplen tres condiciones, con la evidencia en este archivo:
+
+- los controles que acreditan que esa causa quedó neutralizada (A1, A3 y A5) están cumplidos;
+- **todas** las decisiones humanas de la sección B están registradas;
+- el usuario **aprobó el cierre** (sección C).
+
+A2, A4 y los rulesets son controles complementarios observados: se registran, pero no son causas corregidas ni requisitos de este cierre. Las tres condiciones se cumplieron el 30/10/2026.
 
 ### A. Controles verificados
 
-| # | Control | Tipo | Evidencia |
-|---|---|---|---|
-| A1 | `main` ya no despliega a Production | Comportamiento comprobado | El merge del PR #35 (`03d41db`) generó sólo el deployment `7429513466` (`Preview`, `success`) y ningún `Production` (API de GitHub, sólo lectura) |
-| A2 | Preview y Production protegidos | Comportamiento comprobado por el usuario | En incógnito, ambos redirigen al inicio de sesión de Vercel |
-| A3 | Branch Tracking = `production` | Configuración observada por el usuario | Captura del panel y confirmación de guardado, antes del merge del PR #35 |
-| A4 | Vercel Authentication = «All Deployments» | Configuración observada por el usuario | Comprobación del panel |
-| A5 | `production` intacta | Comportamiento comprobado | `refs/heads/production` = `964496d` antes y después del merge del PR #35 |
+| # | Control | Tipo | Rol en el cierre | Evidencia |
+|---|---|---|---|---|
+| A1 | `main` ya no despliega a Production | Comportamiento comprobado | Fundamento del cierre | El merge del PR #35 (`03d41db`) generó sólo el deployment `7429513466` (`Preview`, `success`) y ningún `Production` (API de GitHub, sólo lectura) |
+| A2 | Preview y Production protegidos | Comportamiento comprobado por el usuario | Complementario; no es requisito del cierre | En incógnito, ambos redirigen al inicio de sesión de Vercel |
+| A3 | Branch Tracking = `production` | Configuración observada por el usuario | Fundamento del cierre | Captura del panel y confirmación de guardado, antes del merge del PR #35 |
+| A4 | Vercel Authentication = «All Deployments» | Configuración observada por el usuario | Complementario; no es requisito del cierre | Comprobación del panel |
+| A5 | `production` intacta | Comportamiento comprobado | Fundamento del cierre | `refs/heads/production` = `964496d` antes y después del merge del PR #35 |
 
 ### B. Decisiones humanas (registradas el 30/10/2026)
 
@@ -139,7 +145,7 @@ El incidente pasa a `resuelto` sólo cuando estén cumplidos **todos** los contr
 
 Claude Code propuso considerar satisfecho el criterio de cierre por estos motivos, y el usuario aprobó la propuesta expresamente:
 
-- **La causa del incidente quedó neutralizada y se comprobó.** Los pushes a `main` disparaban Production. A1 lo demuestra con un merge real, y A3, A4 y A5 sostienen esa configuración.
+- **La causa del incidente quedó neutralizada y se comprobó.** Los pushes a `main` disparaban Production. A1 lo demuestra con un merge real, A3 es la configuración que lo produce y A5 confirma que `production` no cambió.
 - **Todas las decisiones de la sección B están registradas.** Ninguna queda abierta como pregunta.
 - **Los pendientes diferidos no impiden el cierre, y hay motivos para diferirlos:**
   - **B4 y la efectividad de `proteger-main`:** se pueden comprobar sólo con un PR real. Generar uno de prueba violaría la regla de no hacer pushes ni deployments de prueba. Además, el ruleset no interviene en la causa del incidente, que ya se comprobó en A1: su función es reforzar la compuerta.
@@ -155,9 +161,17 @@ Claude Code propuso considerar satisfecho el criterio de cierre por estos motivo
 
 ### Qué cierra
 
-- **La causa:** el despliegue automático a Production con cada push o merge a `main`. Quedó mitigada separando la rama `production` y fijando Branch Tracking en `production`, y se comprobó con el merge real del PR #35.
-- **La protección de acceso:** Production y Preview exigen inicio de sesión de Vercel. Lo comprobó el usuario en incógnito.
-- **Los rulesets:** `proteger-main` (`26207383`) y `proteger-production` (`26177269`) quedan registrados como **configuración observada**.
+- **Sólo la causa:** el despliegue automático a Production con cada push o merge a `main`.
+  - Quedó neutralizada separando la rama `production` y fijando Branch Tracking en `production` (A3).
+  - Se comprobó con el merge real del PR #35 (A1).
+  - `production` no cambió (A5).
+
+### Controles complementarios observados (fuera del alcance del cierre)
+
+Se registran como contexto. No son causas corregidas ni requisitos de esta resolución, y el cierre no certifica que funcionen.
+
+- **Protección de acceso:** Production y Preview exigen inicio de sesión de Vercel. El usuario lo comprobó en incógnito (A2) y observó la configuración en el panel (A4).
+- **Rulesets:** `proteger-main` (`26207383`) y `proteger-production` (`26177269`) son **configuración observada**; su efectividad no está probada.
 
 ### Qué no cierra ni afirma
 
