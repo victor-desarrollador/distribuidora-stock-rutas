@@ -1,4 +1,48 @@
 ---
+## 30/10/2026 — Incidente de Vercel Production: verificación posterior al merge del PR #35 y resolución (documental, sin commit)
+
+**Rama:** `docs/vercel-incidente-post-merge`, desde `origin/main` = `03d41db9268b8ea9f666ea1444f123960a66fa45`. Tarea **sólo documental**: actualiza `docs/incidents/2026-10-30-vercel-production-automatico.md`, `docs/incidents/README.md` y esta bitácora. Sin cambios de código, SQL, migraciones, RPC, RLS ni grants. Claude Code no modificó Vercel, GitHub ni Supabase, ni hizo pushes o deployments de prueba. No incluye D-1.
+
+### Qué se registró
+- **Merge del PR #35:** el 30/10/2026 a las 02:52:36 UTC, por el usuario. Commit de merge `03d41db9268b8ea9f666ea1444f123960a66fa45`.
+- **Deployments del merge** (API de GitHub, sólo lectura): sólo `7429513466`, `Preview`, `success`, creado por `vercel[bot]`. Ningún deployment nuevo en `Production`.
+- **Rama `production`:** sigue en `964496d`.
+- **Comprobaciones del usuario:**
+  - Branch Tracking = `production`, con captura del panel y confirmación de guardado, antes del merge;
+  - Vercel Authentication en «All Deployments»;
+  - bloqueo en incógnito de Production y de Preview.
+- **Ruleset `proteger-main` (`26207383`):** el usuario lo aplicó y lo verificó visualmente. Claude Code lo leyó por API en sólo lectura y coincide: activo, sólo `main`, sin bypass, PR con 0 aprobaciones, checks `Lint` y `Tipos, pruebas y build`, sin eliminación ni force push.
+- **Decisiones del usuario:**
+  - **B1:** Supabase remoto queda fuera del cierre del incidente;
+  - **B2:** se aceptan temporalmente 0 aprobaciones en `main` y en `production`, hasta que se incorpore otro colaborador. PR, CI y la autorización humana independiente de cada despliegue a Production siguen siendo obligatorios;
+  - **B3:** `main` protegida, con su efectividad práctica sin probar;
+  - **B4:** la efectividad del ruleset de `production` se comprueba en el primer PR real, como verificación diferida.
+- **Incidente:** se separan la configuración observada, el comportamiento comprobado, los riesgos aceptados y las verificaciones futuras. El criterio de cierre queda en tres partes: A (controles), B (decisiones) y C (propuesta de cierre).
+- **Resolución:** el usuario aprobó expresamente la propuesta C, y el incidente pasa a **`resuelto` el 30/10/2026**.
+  - La prueba es el merge real del PR #35: commit `03d41db`, con sólo el deployment `7429513466` (`Preview`) y ningún `Production`.
+  - El alcance preciso del cierre queda en la sección «Resolución» del incidente.
+  - Las tres ocurrencias anteriores de Production siguen registradas, sin autorización retroactiva.
+  - El cierre no autoriza deployments productivos futuros.
+
+### Verificaciones
+- `git diff --check`: PASS.
+- Alcance: exactamente los tres archivos indicados.
+- Sin secretos en el diff.
+- No aplican typecheck, lint, Vitest, build, pgTAP ni Playwright: el cambio es sólo documental.
+
+### Pendiente
+- **Verificaciones operativas diferidas:**
+  - efectividad de `proteger-production` (`26177269`) en el primer PR real hacia `production`;
+  - efectividad de `proteger-main` (`26207383`) en el próximo PR real hacia `main`.
+- **Revisión de las 0 aprobaciones:** cuando se incorpore otro colaborador.
+- **Supabase remoto (fuera del alcance del incidente):**
+  - sigue **no verificado**;
+  - no se sabe si la migración `20261029233000_lector_perfiles_rpc.sql` (D-2) está aplicada en algún proyecto remoto;
+  - por decisión del usuario, esta verificación se sigue en esta bitácora.
+
+El incidente queda **resuelto** con el alcance registrado en su sección «Resolución».
+
+---
 ## 30/10/2026 — Incidente de Vercel Production: medidas preventivas aplicadas y verificaciones pendientes (documental, sin commit)
 
 **Rama:** `docs/vercel-incidente-remediacion`, desde `main` = `964496dace6a09f4ff719c21ca11b61e70cd0b0d`. Tarea **sólo documental**: actualiza `docs/incidents/2026-10-30-vercel-production-automatico.md`, `docs/incidents/README.md` y esta bitácora. Sin cambios de código, SQL, migraciones, RPC, RLS ni grants. Claude Code no modificó Vercel, GitHub ni Supabase, ni hizo pushes o deployments de prueba.
