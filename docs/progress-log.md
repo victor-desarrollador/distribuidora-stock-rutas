@@ -1,4 +1,60 @@
 ---
+## 29/10/2026 — D-2: rol técnico `lector_perfiles_rpc` y lectura acotada de perfiles (implementación local, sin commit)
+
+**Rama:** `feat/d2-lector-perfiles-rpc`, desde `87469abe9f356f5ce6d80adb7d4c51c7988ee202`. La implementación se hizo en un entorno de Claude Code sin Docker ni Supabase CLI y se transfirió como parche (SHA-256 `8dc691a5f216815ba1676484d30d943efe1852a86bc2a5bd789b770c9b69dd45`). El usuario lo aplicó sobre esa base en el worktree `distribuidora-d2-prueba` (HEAD desacoplado), donde después se creó la rama local. **Alcance:** exclusivamente D-2 (ADR-001 §18.4.2.1, aprobado el 29/10/2026 para validación controlada, acotado a jornadas y carga). Sin commit, push ni PR. D-2 se aplicó sólo en el Supabase local del usuario (ver «Verificaciones»); nada en staging ni producción. Sin D-1, jornadas, las seis RPC ni arnés de concurrencia. Las RPC existentes y el comportamiento de Stock no cambian.
+
+### Qué se hizo
+- `supabase/migrations/20261029233000_lector_perfiles_rpc.sql` (única migración de D-2): rol `lector_perfiles_rpc` (`NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`), membresía de `postgres` con `SET` sin `INHERIT`, `SELECT` de cuatro columnas de `perfiles`, helper `privado.empresa_gestion_actual()` (owner `propietario_rpc`, `SECURITY DEFINER`, `STABLE`, `search_path` vacío, `EXECUTE` sólo de `propietario_rpc`), vista `privado.perfiles_empresa_gestion` (owner `lector_perfiles_rpc`, `security_barrier`, `SELECT` sólo de `propietario_rpc`), política `perfiles_select_empresa_lector` y una verificación fail-closed final. Los `CREATE` transitorios sobre `privado` se conceden y se revocan dentro de la misma migración.
+- `supabase/rollback/20261029233000_lector_perfiles_rpc.rollback.sql`: **procedimiento de reversión manual, fuera de `supabase/migrations/`**, que el CLI no ejecuta. No se ejecutó contra ningún entorno de Supabase.
+- `supabase/tests/lector_perfiles_rpc.test.sql` (52 aserciones desde H1; eran 50): P2–P10, P13 y P14. **P11 y P12 quedan DIFERIDOS** a la implementación de las RPC de jornadas (dependen de `abrir_jornada` y `reasignar_vendedor`); no se cuentan como cumplidos.
+- `supabase/tests/hardening_adr001.test.sql`: P1 (membresía; plan 51 → 58). `productos_catalogo.test.sql` y `camiones_catalogo.test.sql`: la lista de funciones `SECURITY DEFINER` de `privado` pasa de 13 a 14 (se agrega el helper). Ninguna aserción se elimina ni se debilita.
+- `AGENTS.md` §4.4: un único punto nuevo que refleja el segundo rol técnico aprobado (texto corregido en H3); las demás reglas no cambian.
+
+### Verificaciones
+
+**Ejecutadas por el usuario en su Supabase local** (contenido: el parche `8dc691a5…` sobre `87469abe…`, es decir, antes de H1–H3):
+- `supabase db reset --local`: PASS, 12 migraciones aplicadas, incluida `20261029233000_lector_perfiles_rpc.sql`.
+- `supabase test db`: PASS, **13 archivos, 1.057/1.057 pruebas**.
+- `supabase db lint --local --fail-on error`: PASS, sin errores.
+- `git diff --check`: PASS.
+
+**Histórico del entorno de implementación (Claude Code, sin Docker ni Supabase CLI):**
+- Desde `apps/web/` (tras `npm ci`): `npm run typecheck` OK; `npm run lint` OK (exit 0); `npm test` **31 archivos, 1168 pruebas, todas OK**; `npm run build` OK. D-2 no toca el frontend: son de regresión.
+- `npx playwright test`: **falló** en el `setup` de autenticación (1 failed, 95 did not run): requiere Supabase local con Auth, que no existe en este entorno. No es una regresión de D-2.
+- pgTAP real: no se pudo ejecutar en ese entorno; lo ejecutó después el usuario (arriba).
+- **Laboratorio auxiliar (NO es Supabase ni pgTAP):** PostgreSQL 16.15 descartable con roles emulados, un sucedáneo mínimo de pgTAP y copias de las migraciones sin `MAINTAIN` (exclusivo de PG17) y con `GRANT … WITH INHERIT TRUE` para emular el comportamiento de PG17. Resultado: las 11 migraciones previas y la de D-2 se aplican sin error y su verificación fail-closed no aborta; las 50 aserciones de `lector_perfiles_rpc.test.sql` dan 50 ok, 0 fallidas; las 7 de P1 y las 2 listas de 14 funciones dan ok; 9 mutaciones del diseño (política `USING (true)`, helper que admite vendedor, EXECUTE al lector, SELECT de la vista a `authenticated`, INSERT al lector, `security_invoker=true`, CREATE residual, EXECUTE a `service_role`, helper sin `search_path`) son detectadas; el ciclo reversión → reaplicación funciona. **Esto no reemplaza `supabase test db`.**
+
+**Ejecutadas por el usuario sobre el contenido actual (con H1–H3; manifest `54d496c5a23441a6b2c5c2b94c2f85009c692865d7b508fd133c665d0682aeb7`):**
+- `supabase db reset --local`: PASS, 12 migraciones.
+- `supabase test db`: PASS, **13 archivos, 1.059/1.059 pruebas**.
+- `supabase db lint --local --fail-on error`: PASS.
+- `git diff --check`: PASS.
+- `apps/web/`: typecheck PASS; lint PASS; Vitest **31 archivos, 1.168/1.168** PASS; build de Vite PASS.
+- Advertencias informadas por el usuario, sin detalle en este registro: `npm audit` (durante `npm ci`) y tamaño de bundle en el build de Vite. No se analizaron ni se corrigieron en esta tarea.
+- `npx playwright test`, primera corrida: **BLOQUEADO (resuelto, ver abajo).** El `setup` de autenticación (`tests/auth/auth.setup.ts:5`) falló por el timeout de 30 s; las 95 pruebas restantes no se ejecutaron.
+  - Evidencia del artefacto de esa corrida (`apps/web/test-results/…/error-context.md`): la pantalla de login muestra «Falta configurar VITE_SUPABASE_URL y VITE_SUPABASE_PUBLISHABLE_KEY (ver apps/web/.env.example)», con el botón «Ingresar al sistema» deshabilitado. En `apps/web/` del worktree sólo existía `.env.example`, sin `.env.local`. Era un bloqueo de configuración del entorno de prueba, no de Auth, del usuario de prueba ni del servidor. No se cambiaron el test ni el timeout.
+- `npx playwright test`, corrida final del usuario en `feat/d2-lector-perfiles-rpc` con la configuración local completa: **PASS, 96/96**, incluido el `setup` de autenticación. El bloqueo anterior queda cerrado.
+
+**Cierre de verificaciones locales confirmado por el usuario (29/10/2026):** `supabase db reset --local` (12 migraciones), `supabase test db` (13 archivos, 1.059/1.059), `supabase db lint --local --fail-on error`, `git diff --check`, typecheck, lint, Vitest (31 archivos, 1.168/1.168), build de Vite y Playwright (96/96): todos PASS.
+
+### Revisión de seguridad y correcciones (29/10/2026, sin commit)
+Revisión focalizada en RLS, `SECURITY DEFINER`, grants, membresías, ownership y aislamiento por empresa, hecha por Claude Code con consultas de sólo lectura sobre el Supabase local del usuario y un clúster PostgreSQL 17.11 descartable. **Sin hallazgos de seguridad en la migración**, que no se modificó. No reemplaza la auditoría independiente de Codex y OpenCode.
+- **H1 (P14):** con `select *`, la lectura de `public.perfiles` como `lector_perfiles_rpc` fallaba por privilegio de columna (`permission denied for table perfiles`), antes de evaluar la política. Ahora P14 lee las cuatro columnas concedidas y verifica `42501` con el mensaje `permission denied for function empresa_gestion_actual`, también para la vista. Los dos `select *` se conservan como pruebas de privilegio de columna, con su descripción correcta. Plan 50 → 52; ninguna aserción eliminada ni debilitada.
+- **H2:** esta entrada se actualizó con la ejecución real del usuario.
+- **H3:** `AGENTS.md` §4.4 distingue los grants propios del rol del `USAGE` efectivo sobre `public` que hereda de PUBLIC.
+- **H4:** se creó la rama local `feat/d2-lector-perfiles-rpc` desde el HEAD desacoplado, conservando los ocho archivos.
+- P13 verifica la causa correcta: sin el `EXECUTE` del helper, `permission denied for function empresa_gestion_actual`, entre controles positivos.
+
+### Pendiente y riesgos
+- Revisión de código y auditoría independiente de Codex **y** OpenCode sobre el hash del commit, todavía no realizadas, antes de cualquier merge (§18.4.14).
+- P11 y P12 siguen DIFERIDOS hasta las RPC de jornadas.
+- **Aclaración documental pendiente en ADR-001 §18.4.2.1** (no se edita en esta tarea; requiere un cambio documental posterior autorizado):
+  1. El texto dice que el rol no tiene `USAGE` ni `CREATE` en ningún esquema. Verificado en Supabase local: no tiene grants de esquema propios ni `CREATE` en ningún esquema, pero sí `USAGE` efectivo sobre `public`, heredado de PUBLIC como cualquier rol. No le da acceso a nada más: en `public` no puede ejecutar funciones ni leer otras relaciones, y no tiene `USAGE` sobre `extensions`.
+  2. §18.4.2.1 dice que la política vigente de `propietario_rpc` «no llama a ninguna función»: llama a `privado.usuario_actual()`, que no lee tablas, por lo que no hay recursión.
+- La reversión no es idempotente: una segunda ejecución falla y revierte sin cambios.
+- `CLAUDE.md` repite el resumen de P2–P4; no se modificó (sólo se autorizó `AGENTS.md` §4.4).
+
+---
 ## 29/10/2026 — ADR-001 §18.4: registro de la aprobación para validación controlada, acotada a jornadas y carga (sin commit)
 
 **Rama:** `docs/adr-001-anexo-18-4-candidata`, sobre `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (publicado). Tarea **sólo documental**; cambios locales sin commit. Sólo se modifican rótulos, referencias y trazabilidad en ADR-001, el índice de decisiones y esta bitácora. ADR-007, el contrato técnico, las firmas, las matrices de pruebas, los bloqueos y las reglas de seguridad no cambian. PR #30 y PR #31 sin cambios. Sin SQL, migraciones, RPC, RLS, roles ni cambios en Supabase.

@@ -227,11 +227,12 @@ select is(
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.empresa_gestion_actual()',
         'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
-  'las implementaciones SECURITY DEFINER de negocio son exactamente las trece privadas (productos, camiones, clientes y stock)');
+  'las funciones SECURITY DEFINER de privado son exactamente las catorce: trece implementaciones de negocio (productos, camiones, clientes y stock) y el auxiliar empresa_gestion_actual (D-2)');
 
 select is(
   pg_temp.sd_publicas_no_autorizadas(),
