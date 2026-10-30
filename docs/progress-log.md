@@ -1,5 +1,5 @@
 ---
-## 29/10/2026 — D-2: rol técnico `lector_perfiles_rpc` y lectura acotada de perfiles (implementación local, sin commit)
+## 29/10/2026 — D-2: rol técnico `lector_perfiles_rpc` y lectura acotada de perfiles (implementación local, cierre documental)
 
 **Rama:** `feat/d2-lector-perfiles-rpc`, desde `87469abe9f356f5ce6d80adb7d4c51c7988ee202`. La implementación se hizo en un entorno de Claude Code sin Docker ni Supabase CLI y se transfirió como parche (SHA-256 `8dc691a5f216815ba1676484d30d943efe1852a86bc2a5bd789b770c9b69dd45`). El usuario lo aplicó sobre esa base en el worktree `distribuidora-d2-prueba` (HEAD desacoplado), donde después se creó la rama local. **Alcance:** exclusivamente D-2 (ADR-001 §18.4.2.1, aprobado el 29/10/2026 para validación controlada, acotado a jornadas y carga). Sin commit, push ni PR. D-2 se aplicó sólo en el Supabase local del usuario (ver «Verificaciones»); nada en staging ni producción. Sin D-1, jornadas, las seis RPC ni arnés de concurrencia. Las RPC existentes y el comportamiento de Stock no cambian.
 
@@ -45,14 +45,33 @@ Revisión focalizada en RLS, `SECURITY DEFINER`, grants, membresías, ownership 
 - **H4:** se creó la rama local `feat/d2-lector-perfiles-rpc` desde el HEAD desacoplado, conservando los ocho archivos.
 - P13 verifica la causa correcta: sin el `EXECUTE` del helper, `permission denied for function empresa_gestion_actual`, entre controles positivos.
 
+### Cierre de auditoría, merge y despliegue (29/10/2026)
+Registro hecho en la rama `docs/d2-cierre-auditoria`, creada desde `origin/main` = `4654a95fb478c7b118dca4f67368ccd6a9b331b7`. Sólo cambian `docs/decisions/001-rpc-privilegiadas.md` (historial, bloque «Estado» de §18.4, 18.4.13 y el nuevo 18.4.15), `docs/decisions/README.md`, esta entrada, el incidente nuevo `docs/incidents/2026-10-30-vercel-production-automatico.md` y el índice `docs/incidents/README.md`. ADR-001 §18.4.1 a §18.4.12 no cambian (mismo SHA-256 antes y después; ver «Verificación del cierre»).
+- **Commit:** con autorización humana se creó `e826d308aab9a0b108ece17128c5c3448d7729ae` (padre `87469abe…`, tree `7c35852cfcef509170e24fdb267917cf6a6e3ac8`, 8 archivos, +869 −3), cuyo contenido coincide con el manifest `dfbf1743…` verificado por el usuario.
+- **Codex** sobre `e826d308`: PASS, sin hallazgos bloqueantes, altos ni medios.
+- **OpenCode** (subagente `auditor`, sólo lectura) sobre `e826d308`: PASS con observaciones no bloqueantes; leyó completos la migración, el test, el rollback y el diff.
+- **Security review:** el usuario aceptó, sólo para D-2 en `e826d308`, que los informes de Codex y OpenCode satisfacen su contenido técnico. Desviación puntual aceptada: security review y auditorías en una misma instancia. No se extiende a D-1 ni a las RPC futuras.
+- **Observaciones C-1 a C-4** (no bloqueantes), registradas en ADR-001 §18.4.15:
+  - C-1 (Codex LOW-01 / OpenCode H-01): `USAGE` efectivo sobre `public` heredado de PUBLIC, sin acceso adicional. Aclaración documental.
+  - C-2 (Codex LOW-02 / OpenCode H-04): la política de `propietario_rpc` llama a `privado.usuario_actual()`, que no lee tablas; no hay recursión. Aclaración documental.
+  - C-3 (OpenCode H-02): reversión de ejecución única, no idempotente y transaccional. Sin cambios.
+  - C-4 (OpenCode H-03): P11/P12 diferidos a `abrir_jornada` y `reasignar_vendedor`.
+- **PR #33** integrado a `main` con autorización humana el 30/10/2026 01:02:50 UTC (29/10/2026 22:02 en Argentina); merge `4654a95fb478c7b118dca4f67368ccd6a9b331b7`, con exactamente el tree auditado.
+- **CI:** `Lint` y `Tipos, pruebas y build` en verde sobre el PR y sobre el push a `main` (run `40983457559`). El CI no ejecuta pgTAP, `supabase db lint` ni Playwright.
+- **Despliegue automático a Production de Vercel, sin autorización humana de deploy:** el push a `main` disparó el GitHub deployment `7428037655` en el entorno `Production` (creado por `vercel[bot]` el 30/10/2026 01:03:06 UTC; estado `success`). El merge no cambia `apps/web/`, y `apps/web/vercel.json` no ejecuta migraciones. No se verificó el estado del Supabase remoto. Contradice `AGENTS.md` §2.2.1 y §2.3.8 (deploy sólo con autorización explícita); la medida para impedirlo queda pendiente de decisión humana. Incidente registrado según `AGENTS.md` §11.2 en `docs/incidents/2026-10-30-vercel-production-automatico.md` (abierto).
+
+### Verificación del cierre
+- SHA-256 de ADR-001 §18.4.1 a §18.4.12 (desde `#### 18.4.1` hasta la línea anterior a `#### 18.4.13`, extraído con `awk '/^#### 18.4.1 /{p=1} /^#### 18.4.13 /{p=0} p'`): `8c4d1de4fff11a91de67267b815b3bfd6837f32333198df49542c4abb42cdb62` en `4654a95` y en el árbol de trabajo. Sin cambios.
+- `git diff --check`: PASS.
+- Sin cambios de código, migraciones, tests ni configuración: no aplican typecheck, lint, Vitest, build, pgTAP ni Playwright.
+
 ### Pendiente y riesgos
-- Revisión de código y auditoría independiente de Codex **y** OpenCode sobre el hash del commit, todavía no realizadas, antes de cualquier merge (§18.4.14).
-- P11 y P12 siguen DIFERIDOS hasta las RPC de jornadas.
-- **Aclaración documental pendiente en ADR-001 §18.4.2.1** (no se edita en esta tarea; requiere un cambio documental posterior autorizado):
-  1. El texto dice que el rol no tiene `USAGE` ni `CREATE` en ningún esquema. Verificado en Supabase local: no tiene grants de esquema propios ni `CREATE` en ningún esquema, pero sí `USAGE` efectivo sobre `public`, heredado de PUBLIC como cualquier rol. No le da acceso a nada más: en `public` no puede ejecutar funciones ni leer otras relaciones, y no tiene `USAGE` sobre `extensions`.
-  2. §18.4.2.1 dice que la política vigente de `propietario_rpc` «no llama a ninguna función»: llama a `privado.usuario_actual()`, que no lee tablas, por lo que no hay recursión.
-- La reversión no es idempotente: una segunda ejecución falla y revierte sin cambios.
+- P11 y P12 siguen DIFERIDOS hasta las RPC de jornadas (C-4).
+- Las aclaraciones de ADR-001 §18.4.2.1 quedaron resueltas como C-1 y C-2 en §18.4.15, sin editar el texto auditado.
+- La reversión no es idempotente: una segunda ejecución falla y revierte sin cambios (C-3).
 - `CLAUDE.md` repite el resumen de P2–P4; no se modificó (sólo se autorizó `AGENTS.md` §4.4).
+- Control del despliegue automático de Vercel a Production desde `main`: pendiente de decisión humana.
+- D-1, `jornadas`, las seis RPC, el arnés y su CI: sin autorizar.
 
 ---
 ## 29/10/2026 — ADR-001 §18.4: registro de la aprobación para validación controlada, acotada a jornadas y carga (sin commit)

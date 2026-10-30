@@ -1,8 +1,8 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 25/10/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 29/10/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15)
 
 > **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; el 23/10/2026, P2, P3 y P4 (§18); y el 24/10/2026, P11 global y las observaciones O-3 y O-4, para validación controlada (§18.2). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P10 y P12–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P10 ni P12–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
@@ -29,6 +29,7 @@
 | v1.5 + anexo §18.3 (slice 2) | Claude Code | Amplía §18.3 con las decisiones humanas del 25/10/2026 del slice `stock-cuarentena-merma` (D1–D9, huellas v1 de cuarentena y merma, lock concreto de débito y errores nuevos), **acotadas al dominio Stock**. No resuelve P10–P17 globalmente, no habilita la Etapa 3, `cuarentena_apta` ni el negativo transitorio, no cambia el estado de la ADR ni autoriza producción. |
 | v1.5 + anexo §18.4 (candidato) | Claude Code | Incorpora §18.4 v0.4 (contrato técnico de las seis RPC de ADR-007) con la fe de erratas E1–E3, como **PROPUESTA TÉCNICA NO APROBADA**. No aprueba el anexo, no cambia el estado de la ADR, no modifica ADR-007, no autoriza SQL ni producción; D-1, D-2, arnés, CI y security review siguen pendientes. |
 | v1.5 + anexo §18.4 (aprobado) | Claude Code | Registra la decisión humana del 29/10/2026: aprueba, **para validación controlada local/staging y acotado a jornadas y carga de camiones**, el contenido de §18.4 auditado por Codex en `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (SHA-256 `0170ab56afff633457dc4547ec46ef6a1ada007ec904a7a33cffdb4f0f9763dd`). Resuelve P10 y P12–P17 sólo para las seis RPC de ADR-007 y D-N1. No aprueba P8 ni P9, otros dominios, decisiones globales ni producción; el estado de la ADR no cambia. Registra la excepción aceptada a `AGENTS.md` §2.2 (OpenCode no auditó) y los ciclos que superaron `AGENTS.md` §2.3.5. Sólo cambian rótulos, referencias y trazabilidad; el contrato técnico no se modifica. |
+| v1.5 + anexo §18.4 (cierre D-2) | Claude Code | Registra el cierre de D-2 (18.4.15): commit auditado `e826d308aab9a0b108ece17128c5c3448d7729ae`, PASS de Codex y de OpenCode, aceptación humana de esos informes como security review sólo para D-2, merge del PR #33 (`4654a95fb478c7b118dca4f67368ccd6a9b331b7`), CI en verde y el despliegue automático de Vercel a Production. Registra las aclaraciones C-1 y C-2 sobre el texto de 18.4.2.1 sin editarlo, y C-3 y C-4. No modifica 18.4.1 a 18.4.12, no cambia el estado de la ADR, no autoriza D-1, el arnés, las seis RPC ni producción. |
 
 ---
 
@@ -572,7 +573,7 @@ Implementación y evidencia: `supabase/migrations/20261025033454_stock_cuarenten
 
 Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotencia y el inventario de tests de v0.3. La estrategia de bloqueos cambia **únicamente** en `corregir_jornada` (H-01).
 
-> **Estado: APROBADA PARA VALIDACIÓN CONTROLADA, acotada a jornadas y carga de camiones (decisión humana del 29/10/2026; registro en 18.4.14).** Esta aprobación no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-1, D-2, el arnés, su ejecución en CI y la security review siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas y las correcciones H-01, H-02, H2-R1 y H2-R2 siguientes. **H-01 cambia el conjunto de bloqueos de `corregir_jornada`** y **H2-R1 agrega una segunda consulta de la clave idempotente (paso 8a) sin agregar bloqueos**; E2, E3, H-02 y H2-R2 no cambian decisiones de diseño. Ninguna corrección modifica el contrato funcional de idempotencia: misma clave, tipo y huella devuelve la respuesta original; otro tipo u otra huella es conflicto.
+> **Estado: APROBADA PARA VALIDACIÓN CONTROLADA, acotada a jornadas y carga de camiones (decisión humana del 29/10/2026; registro en 18.4.14).** Esta aprobación no autoriza SQL, migraciones, RPC, RLS, roles, grants ni producción, y no cambia el estado de ADR-001 ni modifica ADR-007. D-2 se implementó e integró a `main` el 29/10/2026 para validación controlada (18.4.15). D-1, el arnés, su ejecución en CI y la security review de la implementación de jornadas siguen **pendientes de autorización humana** (18.4.13). Texto base: §18.4 v0.4 original (SHA-256 `85260b1a275b8483f28aa3d8056880e185c592215a478d8358a90678ca1a7039`), con la fe de erratas y las correcciones H-01, H-02, H2-R1 y H2-R2 siguientes. **H-01 cambia el conjunto de bloqueos de `corregir_jornada`** y **H2-R1 agrega una segunda consulta de la clave idempotente (paso 8a) sin agregar bloqueos**; E2, E3, H-02 y H2-R2 no cambian decisiones de diseño. Ninguna corrección modifica el contrato funcional de idempotencia: misma clave, tipo y huella devuelve la respuesta original; otro tipo u otra huella es conflicto.
 
 **Fe de erratas y correcciones sobre v0.4** (incorporadas antes de la aprobación; detalle en `docs/progress-log.md`):
 
@@ -1154,13 +1155,13 @@ No reemplaza a pgTAP ni a Playwright. No se versiona ningún estado generado.
 
 Esos puntos se cubren recién con los tests de 18.4.9 sobre las migraciones reales: pgTAP en Supabase local, y K8 con el arnés. Hasta que pasen, esta evidencia no sustituye a esos tests.
 
-#### 18.4.13 Autorizaciones humanas (sólo la aprobación de §18.4 está concedida; el resto, pendiente) y decisiones normativas resueltas
+#### 18.4.13 Autorizaciones humanas (concedidas: la aprobación de §18.4 y D-2; el resto, pendiente) y decisiones normativas resueltas
 
-Resumen del bloque B de la entrega original. Con excepción del punto 1, nada de lo siguiente está autorizado por la sola presencia de este anexo:
+Resumen del bloque B de la entrega original. Con excepción de los puntos 1 y 3, nada de lo siguiente está autorizado por la sola presencia de este anexo:
 
 1. **CONCEDIDA el 29/10/2026 (ver 18.4.14).** Aprobación de §18.4 como anexo de ADR-001 (P10 y P12–P17 sólo para jornadas), previa revisión independiente (ADR-007 §3, P-3). Levanta P-3.
 2. **D-1.** Ampliar `operaciones` y `movimientos_stock` (CHECK, políticas D6/D8, columnas, FK, `UNIQUE`, índices) y actualizar las aserciones pgTAP de 18.4.10 sin relajar ninguna.
-3. **D-2.** Crear `lector_perfiles_rpc`, su vista, `privado.empresa_gestion_actual()` y la política `perfiles_select_empresa_lector`, con la membresía O-3 y el `CREATE` transitorio sobre `privado`. Introduce un segundo rol técnico, lo que amplía P2–P4 (hoy un solo rol técnico, `propietario_rpc`); hay que confirmar que no cambia P11 ni P5–P7.
+3. **IMPLEMENTADA e integrada a `main` el 29/10/2026, para validación controlada (ver 18.4.15).** **D-2.** Crear `lector_perfiles_rpc`, su vista, `privado.empresa_gestion_actual()` y la política `perfiles_select_empresa_lector`, con la membresía O-3 y el `CREATE` transitorio sobre `privado`. Introduce un segundo rol técnico, lo que amplía P2–P4 (hoy un solo rol técnico, `propietario_rpc`); hay que confirmar que no cambia P11 ni P5–P7.
 4. Catálogo de errores de 18.4.7, con el vendedor inactivo como `PT400 jornada_vendedor_invalido`.
 5. Versionar el arnés en `supabase/tests/concurrencia/` (18.4.11), solo contra su propio clúster efímero, con la versión de PostgreSQL y las rutas de binarios declaradas.
 6. Ejecutar el arnés en CI: autorización aparte (implica tocar `.github/workflows/ci.yml`).
@@ -1197,6 +1198,41 @@ Este apartado es sólo trazabilidad. No forma parte del contrato técnico de 18.
 4. **La excepción no se extiende a la implementación.** Las migraciones y las seis RPC deberán contar con auditoría independiente de Codex **y** OpenCode, además de security review, antes de cualquier merge. Si OpenCode sigue sin estar disponible, se detiene ese paso y se solicita una nueva decisión humana.
 5. **Desviación reconocida y registrada:** el proceso superó los tres ciclos implementar → auditar → corregir de `AGENTS.md` §2.3.5 (FAIL de Codex sobre `78958303…`, `345f7a00…` y `e17d8b9f…`; cierre con `7ac6a2d8…`), con intervención humana durante todo el proceso. Ver `docs/progress-log.md`.
 6. **Siguen requiriendo autorizaciones específicas:** D-1, D-2, el arnés, su integración en CI y la tarea de implementación. Esta aprobación documental no autoriza migraciones, SQL, commits de código, cambios de RLS, grants ni roles.
+
+#### 18.4.15 Cierre de D-2 (29/10/2026)
+
+Este apartado es sólo trazabilidad. No forma parte del contrato técnico de 18.4.1 a 18.4.12, no lo modifica y no autoriza nada nuevo.
+
+**Identidad de lo integrado**
+
+| Dato | Valor |
+|---|---|
+| Commit auditado | `e826d308aab9a0b108ece17128c5c3448d7729ae` (padre `87469abe9f356f5ce6d80adb7d4c51c7988ee202`), un único commit, 8 archivos, +869 −3 |
+| Tree del commit | `7c35852cfcef509170e24fdb267917cf6a6e3ac8` |
+| Migración | `supabase/migrations/20261029233000_lector_perfiles_rpc.sql`, SHA-256 `a8843f229dc727fc733c88fbccf37380558bc62db55252ecb0e7286c109ec64f` |
+| PR | #33, integrado a `main` el 30/10/2026 01:02:50 UTC (29/10/2026 22:02 en Argentina) |
+| Commit de merge | `4654a95fb478c7b118dca4f67368ccd6a9b331b7`; deja exactamente el tree del commit auditado |
+
+**Verificaciones.** Ejecutadas por el usuario en su Supabase local sobre un contenido idéntico al del commit (manifest `dfbf174385f2874dd46e1cc45da11b2f54bf97fb7a099eb57e67f2fc073b5925`): `supabase db reset --local` (12 migraciones), `supabase test db` (13 archivos, 1.059/1.059), `supabase db lint --local --fail-on error`, typecheck, lint, build, Vitest (31 archivos, 1.168/1.168), Playwright (96/96) y `git diff --check`: todos PASS. CI de GitHub Actions (`ci.yml`: typecheck, Vitest, lint y build) en verde sobre el PR y sobre el push a `main` del merge (run `40983457559`). **El CI no ejecuta pgTAP, `supabase db lint` ni Playwright**: esa evidencia es la ejecución local del usuario.
+
+**Auditorías y security review**
+
+- Codex sobre `e826d308`: **PASS**, sin hallazgos bloqueantes, altos ni medios.
+- OpenCode (subagente `auditor`, sólo lectura) sobre `e826d308`: **PASS** con observaciones no bloqueantes.
+- Security review (`AGENTS.md` §2.4): el usuario aceptó expresamente, **sólo para D-2 en `e826d308`**, que los informes de Codex y OpenCode satisfacen su contenido técnico. **Desviación puntual aceptada:** la security review y las auditorías se hicieron en una misma instancia, no en etapas sucesivas (`AGENTS.md` §2.3.6). **La excepción no se extiende a D-1, a las seis RPC ni a ninguna tarea futura**; para ellas rige 18.4.13, punto 7, y 18.4.14, punto 4.
+
+**Observaciones consolidadas (no bloqueantes).** C-1 y C-2 son aclaraciones de lectura del texto de 18.4.2.1, que se conserva sin cambios para no alterar el contenido auditado y aprobado. No cambian el diseño, los privilegios ni las pruebas.
+
+| ID | Origen | Observación | Resolución |
+|---|---|---|---|
+| C-1 | Codex LOW-01 / OpenCode H-01 | 18.4.2.1 dice que `lector_perfiles_rpc` no tiene `USAGE` ni `CREATE` en ningún esquema. El rol no tiene grants de esquema propios ni `CREATE` en ningún esquema, pero sí el `USAGE` efectivo sobre `public` que todo rol hereda de PUBLIC. Ese `USAGE` no le da acceso adicional: no puede ejecutar funciones ni leer otras relaciones de `public`, y no tiene `USAGE` sobre `privado` ni sobre `extensions`. | Aclaración: «ningún esquema» se lee como «ningún grant de esquema propio y ningún `CREATE`». La verificación fail-closed y las pruebas ya controlan `CREATE` sobre `privado` y `public` y `USAGE` sobre `privado`. |
+| C-2 | Codex LOW-02 / OpenCode H-04 | 18.4.2.1 dice que la política vigente `perfiles_select_propio_propietario_rpc` «no llama a ninguna función». Llama a `privado.usuario_actual()`, que no lee tablas. | Aclaración: la política no llama a ninguna función que lea `perfiles` ni otra tabla; por eso no hay recursión y la profundidad sigue en 1. |
+| C-3 | OpenCode H-02 | El procedimiento de reversión manual (`supabase/rollback/20261029233000_lector_perfiles_rpc.rollback.sql`) es de ejecución única: no es idempotente y es transaccional, así que una segunda ejecución falla y revierte sin cambios. | Documentado; sin cambios. |
+| C-4 | OpenCode H-03 | Las pruebas P11 y P12 de 18.4.9 para D-2 quedan diferidas porque dependen de `abrir_jornada` y `reasignar_vendedor`. | Se implementan junto con esas RPC; hasta entonces no se cuentan como cumplidas. |
+
+**Despliegue a Production de Vercel.** El push del merge a `main` disparó un despliegue automático de Vercel en el entorno **Production** (GitHub deployment `7428037655`, creado por `vercel[bot]` el 30/10/2026 01:03:06 UTC; estado `success`). **No hubo una autorización humana de deploy** (`AGENTS.md` §2.2.1 y §2.3.8). Hechos verificados en el repositorio: el merge no modifica `apps/web/`, y `apps/web/vercel.json` sólo declara un `rewrite` al `index.html` y no ejecuta migraciones. No hay evidencia de que la migración de D-2 se haya aplicado en el Supabase remoto, pero tampoco se verificó su estado. La forma de impedir que se repita queda pendiente de decisión humana. Registro: `docs/incidents/2026-10-30-vercel-production-automatico.md` (abierto).
+
+**Pendiente después del cierre:** D-1, la tabla `jornadas`, las seis RPC (con P11/P12 de D-2), el arnés y su integración en CI, el corte de jornada y el control del despliegue automático a Production. Producción sigue bloqueada para ADR-001 (§15 y §19).
 
 ---
 
