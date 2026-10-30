@@ -9,7 +9,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(119);
+select plan(120);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como owner; se revierten al final)
@@ -105,8 +105,8 @@ select is(
          order by a.attnum),
   array['id:uuid:true:gen_random_uuid()', 'empresa_id:uuid:true:-', 'actor_id:uuid:true:-',
         'tipo:text:true:-', 'idempotency_key:uuid:true:-', 'huella:text:true:-',
-        'creado_en:timestamp with time zone:true:now()'],
-  'operaciones: columnas, tipos, NOT NULL y defaults aprobados');
+        'creado_en:timestamp with time zone:true:now()', 'jornada_id:uuid:false:-'],
+  'operaciones: columnas, tipos, NOT NULL y defaults aprobados (jornada_id nullable, D-1)');
 
 select is(
   array(select a.attname::text || ':' || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull::text
@@ -118,16 +118,31 @@ select is(
         'tipo_movimiento:text:true:-', 'producto_id:uuid:true:-', 'cantidad:integer:true:-',
         'ubicacion_origen_id:uuid:false:-', 'ubicacion_destino_id:uuid:false:-',
         'actor_id:uuid:true:-', 'motivo:text:false:-',
-        'creado_en:timestamp with time zone:true:now()', 'motivo_codigo:text:false:-'],
-  'movimientos_stock: columnas, tipos, NOT NULL y defaults aprobados');
+        'creado_en:timestamp with time zone:true:now()', 'motivo_codigo:text:false:-',
+        'jornada_id:uuid:false:-'],
+  'movimientos_stock: columnas, tipos, NOT NULL y defaults aprobados (jornada_id nullable, D-1)');
 
 select is(
   (select count(*)::int from pg_attribute
     where attrelid in ('public.operaciones'::regclass, 'public.movimientos_stock'::regclass)
       and not attisdropped
-      and attname in ('jornada_id', 'saldo_actual', 'resultado', 'importe')),
+      and attname in ('saldo_actual', 'resultado', 'importe')),
   0,
-  'sin jornada_id (E13), saldo_actual, resultado (E8) ni importe');
+  'sin saldo_actual, resultado (E8) ni importe');
+
+-- E13 (ADR-001 §18.4.1, D-1): jornada_id se agrega con FK real; los tipos de
+-- Stock siguen sin jornada (CHECK ..._jornada_por_tipo, probado en
+-- jornadas_esquema.test.sql). Aserción positiva que reemplaza la prohibición.
+select is(
+  array(select c.relname::text || '.' || a.attname::text || ':'
+               || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull::text
+               || ':' || (a.atthasdef)::text
+          from pg_attribute a join pg_class c on c.oid = a.attrelid
+         where a.attrelid in ('public.operaciones'::regclass, 'public.movimientos_stock'::regclass)
+           and a.attname = 'jornada_id' and not a.attisdropped
+         order by 1),
+  array['movimientos_stock.jornada_id:uuid:false:false', 'operaciones.jornada_id:uuid:false:false'],
+  'E13 (D-1): jornada_id existe en operaciones y movimientos_stock como uuid nullable y sin default');
 
 select is(
   array(select a.attname::text || ':' || format_type(a.atttypid, a.atttypmod)
@@ -145,8 +160,12 @@ select is(
         'operaciones_empresa_id_unico:UNIQUE (empresa_id, id)',
         'operaciones_huella_sha256:CHECK ((huella ~ ''^[0-9a-f]{64}$''::text))',
         'operaciones_idempotencia_unica:UNIQUE (empresa_id, actor_id, idempotency_key)',
+        'operaciones_jornada_fk:FOREIGN KEY (empresa_id, jornada_id) REFERENCES jornadas(empresa_id, id) ON DELETE RESTRICT',
+        'operaciones_jornada_por_tipo:CHECK ((((tipo = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text, ''apertura_jornada''::text])) AND (jornada_id IS NULL)) OR ((tipo = ANY (ARRAY[''reasignacion_vendedor''::text, ''correccion_jornada''::text, ''carga''::text, ''descarga''::text, ''salida_jornada''::text])) AND (jornada_id IS NOT NULL))))',
         'operaciones_pkey:PRIMARY KEY (id)',
-        'operaciones_tipo_valido:CHECK ((tipo = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text])))'],
+        'operaciones_referencia_apertura:UNIQUE (empresa_id, id, tipo, actor_id)',
+        'operaciones_referencia_unica:UNIQUE (empresa_id, id, tipo, actor_id, jornada_id)',
+        'operaciones_tipo_valido:CHECK ((tipo = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text, ''apertura_jornada''::text, ''reasignacion_vendedor''::text, ''correccion_jornada''::text, ''carga''::text, ''descarga''::text, ''salida_jornada''::text])))'],
   'operaciones: constraints exactas (FK compuesta al actor, UNIQUE de idempotencia sin tipo, CHECK de tipo y huella)');
 
 select is(
@@ -159,15 +178,18 @@ select is(
         'movimientos_stock_empresa_id_unico:UNIQUE (empresa_id, id)',
         'movimientos_stock_extremo_requerido:CHECK (((ubicacion_origen_id IS NOT NULL) OR (ubicacion_destino_id IS NOT NULL)))',
         'movimientos_stock_extremos_distintos:CHECK ((ubicacion_origen_id IS DISTINCT FROM ubicacion_destino_id))',
-        'movimientos_stock_forma_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (ubicacion_origen_id IS NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NULL))))',
+        'movimientos_stock_forma_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (ubicacion_origen_id IS NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NULL)) OR ((tipo_movimiento = ANY (ARRAY[''carga''::text, ''descarga''::text])) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NOT NULL))))',
+        'movimientos_stock_jornada_fk:FOREIGN KEY (empresa_id, jornada_id) REFERENCES jornadas(empresa_id, id) ON DELETE RESTRICT',
+        'movimientos_stock_jornada_por_tipo:CHECK ((((tipo_movimiento = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text])) AND (jornada_id IS NULL)) OR ((tipo_movimiento = ANY (ARRAY[''carga''::text, ''descarga''::text])) AND (jornada_id IS NOT NULL))))',
         'movimientos_stock_motivo_codigo_valido:CHECK (((motivo_codigo IS NULL) OR (motivo_codigo = ANY (ARRAY[''vencido''::text, ''roto_danado''::text, ''mal_estado''::text, ''error_pedido''::text, ''cambio''::text, ''otro''::text]))))',
         'movimientos_stock_motivo_normalizado:CHECK (((motivo IS NULL) OR ((motivo = btrim(motivo)) AND (length(motivo) > 0))))',
-        'movimientos_stock_motivo_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (motivo_codigo IS NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (motivo_codigo IS NULL) AND (motivo IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (motivo_codigo IS NOT NULL) AND ((motivo_codigo <> ''otro''::text) OR (motivo IS NOT NULL)))))',
+        'movimientos_stock_motivo_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (motivo_codigo IS NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (motivo_codigo IS NULL) AND (motivo IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (motivo_codigo IS NOT NULL) AND ((motivo_codigo <> ''otro''::text) OR (motivo IS NOT NULL))) OR ((tipo_movimiento = ''carga''::text) AND (motivo_codigo IS NULL) AND (motivo IS NULL)) OR ((tipo_movimiento = ''descarga''::text) AND (motivo_codigo IS NULL) AND (motivo IS NOT NULL))))',
         'movimientos_stock_operacion_fk:FOREIGN KEY (empresa_id, operacion_id) REFERENCES operaciones(empresa_id, id) ON DELETE RESTRICT',
+        'movimientos_stock_operacion_referencia_fk:FOREIGN KEY (empresa_id, operacion_id, tipo_movimiento, actor_id, jornada_id) REFERENCES operaciones(empresa_id, id, tipo, actor_id, jornada_id) ON DELETE RESTRICT',
         'movimientos_stock_origen_fk:FOREIGN KEY (empresa_id, ubicacion_origen_id) REFERENCES ubicaciones(empresa_id, id) ON DELETE RESTRICT',
         'movimientos_stock_pkey:PRIMARY KEY (id)',
         'movimientos_stock_producto_fk:FOREIGN KEY (empresa_id, producto_id) REFERENCES productos(empresa_id, id) ON DELETE RESTRICT',
-        'movimientos_stock_tipo_valido:CHECK ((tipo_movimiento = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text])))'],
+        'movimientos_stock_tipo_valido:CHECK ((tipo_movimiento = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text, ''carga''::text, ''descarga''::text])))'],
   'movimientos_stock: constraints exactas (FK compuestas a operación, producto, ubicaciones y actor; CHECK de cantidad, extremos, tipo, forma y motivo)');
 
 select is(
@@ -175,8 +197,9 @@ select is(
          where i.indrelid = 'public.movimientos_stock'::regclass and not i.indisunique
          order by 1),
   array['CREATE INDEX movimientos_stock_destino_idx ON public.movimientos_stock USING btree (empresa_id, ubicacion_destino_id, producto_id)',
+        'CREATE INDEX movimientos_stock_jornada_idx ON public.movimientos_stock USING btree (empresa_id, jornada_id) WHERE (jornada_id IS NOT NULL)',
         'CREATE INDEX movimientos_stock_origen_idx ON public.movimientos_stock USING btree (empresa_id, ubicacion_origen_id, producto_id)'],
-  'movimientos_stock: índices por destino y por origen');
+  'movimientos_stock: índices por destino, por origen y por jornada (D-1)');
 
 select is(
   (select string_agg(c.relname || ':' || c.relowner::regrole::text, ',' order by c.relname)
@@ -233,7 +256,7 @@ select is(
          where a.attrelid = 'public.operaciones'::regclass and a.attnum > 0 and not a.attisdropped
            and has_column_privilege('propietario_rpc', 'public.operaciones', a.attname, 'INSERT')
          order by 1),
-  array['actor_id', 'empresa_id', 'huella', 'idempotency_key', 'tipo'],
+  array['actor_id', 'empresa_id', 'huella', 'idempotency_key', 'jornada_id', 'tipo'],
   'propietario_rpc inserta en operaciones sólo las columnas del alta');
 
 select is(
@@ -241,7 +264,7 @@ select is(
          where a.attrelid = 'public.movimientos_stock'::regclass and a.attnum > 0 and not a.attisdropped
            and has_column_privilege('propietario_rpc', 'public.movimientos_stock', a.attname, 'INSERT')
          order by 1),
-  array['actor_id', 'cantidad', 'empresa_id', 'motivo', 'motivo_codigo', 'operacion_id', 'producto_id',
+  array['actor_id', 'cantidad', 'empresa_id', 'jornada_id', 'motivo', 'motivo_codigo', 'operacion_id', 'producto_id',
         'tipo_movimiento', 'ubicacion_destino_id', 'ubicacion_origen_id'],
   'propietario_rpc inserta en movimientos_stock sólo las columnas del alta');
 
@@ -698,9 +721,9 @@ select throws_ok(
   '23514', null, 'la tabla rechaza un motivo sin normalizar');
 select throws_ok(
   $$insert into public.operaciones (empresa_id, actor_id, tipo, idempotency_key, huella)
-    values ('aaaaaaaa-0000-4000-8000-000000000000', 'aaaaaaaa-0000-4000-8000-000000000001', 'carga',
+    values ('aaaaaaaa-0000-4000-8000-000000000000', 'aaaaaaaa-0000-4000-8000-000000000001', 'venta',
             gen_random_uuid(), repeat('a', 64))$$,
-  '23514', null, 'operaciones rechaza tipos no aprobados (carga)');
+  '23514', null, 'operaciones rechaza tipos no aprobados (venta)');
 select throws_ok(
   $$insert into public.operaciones (empresa_id, actor_id, tipo, idempotency_key, huella)
     values ('aaaaaaaa-0000-4000-8000-000000000000', 'aaaaaaaa-0000-4000-8000-000000000001', 'ingreso',

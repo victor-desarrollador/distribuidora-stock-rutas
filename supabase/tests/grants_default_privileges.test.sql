@@ -32,7 +32,9 @@ select t.tabla, r.rol, p.privilegio,
   end
 from (values ('public.empresas'), ('public.perfiles'), ('public.productos'),
              ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
-             ('public.operaciones'), ('public.movimientos_stock')) t(tabla),
+             ('public.operaciones'), ('public.movimientos_stock'),
+             ('public.jornadas'), ('public.reasignaciones_vendedor'),
+             ('public.correcciones_jornada')) t(tabla),
      (values ('anon'), ('authenticated'), ('service_role')) r(rol),
      (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
              ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(privilegio);
@@ -96,7 +98,8 @@ select ok(
                      'public.productos'::regclass, 'public.camiones'::regclass,
                      'public.clientes'::regclass, 'public.ubicaciones'::regclass,
                      'public.operaciones'::regclass, 'public.movimientos_stock'::regclass,
-                     'public.stock_actual'::regclass)
+                     'public.jornadas'::regclass, 'public.reasignaciones_vendedor'::regclass,
+                     'public.correcciones_jornada'::regclass, 'public.stock_actual'::regclass)
        and a.grantee = 0),
   'PUBLIC no tiene privilegios sobre las tablas de negocio ni sobre stock_actual');
 

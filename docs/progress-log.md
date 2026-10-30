@@ -1,4 +1,73 @@
 ---
+## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (implementación local, sin commit)
+
+**Rama:** `feat/d1-esquema-jornadas`, en un worktree independiente (`../distribuidora-d1`), desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Implementación **local y sin commit**, con las decisiones D-1 a D-9 aprobadas por el usuario (preámbulo corregido de D-1). No incluye RPC, arnés de concurrencia, frontend ni cambios en D-2. **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `movimientos_stock`, aislamiento por `empresa_id`, roles) y auditoría independiente de Codex **y** OpenCode sobre el mismo hash (ADR-001 §18.4.13 punto 7, §18.4.14 punto 4); la excepción de D-2 no se extiende (§18.4.15).
+
+### Qué se hizo
+- **Una migración atómica** (`20261030120000_jornadas_esquema.sql`) con el contrato de ADR-001 §18.4.1–§18.4.2 y §18.4.8:
+  - `public.jornadas`, `public.reasignaciones_vendedor` y `public.correcciones_jornada`, todas las columnas `NOT NULL`, FK compuestas con `empresa_id` y `ON DELETE RESTRICT`;
+  - `operaciones` y `movimientos_stock`: columna `jornada_id` nullable, tipos nuevos, `…_jornada_por_tipo`, FK de referencia de 4 y 5 columnas, los dos `UNIQUE` de referencia de `operaciones`, índice único parcial `movimientos_stock_operacion_producto_unica` e índice `movimientos_stock_jornada_idx`;
+  - grants por columna y policies de D6/D8 ampliadas conservando las condiciones de Stock;
+  - verificación final fail-closed dentro de la migración.
+- **Orden** (dependencias reales de PostgreSQL; sin `DEFERRABLE`): precheck → `operaciones.jornada_id` → dos `UNIQUE` de referencia → `jornadas` → FK y CHECK de `operaciones` → `movimientos_stock` → historiales → grants → policies → verificación.
+- **`jornadas` NO es append-only:** admite `UPDATE (estado, vendedor_id, fecha, camion_id)` sólo de `propietario_rpc`, sin `DELETE`. **Sólo los dos historiales** son append-only por grants y RLS, sin triggers.
+- **D7 sin cambios:** el predicado de `movimientos_stock_operacion_unitaria_unica` excluye `carga` y `descarga`, así que las cargas multiproducto no necesitan modificarlo.
+- **Fuera de D-1 (decisiones aprobadas):** sin el índice único parcial de jornadas sin cerrar (D-4; lo controlan las RPC con el advisory del camión, ADR-001 §18.4.5), sin las columnas futuras de Blueprint §8, sin RPC ni arnés (D-7).
+- **Rollback manual** (`supabase/rollback/20261030120000_jornadas_esquema.rollback.sql`), fuera de `migrations/`, en una transacción, sin `CASCADE` y sin borrar filas. Prechecks bloqueantes: datos, dependencias (vistas, FK de otras tablas, policies, triggers, funciones y las seis RPC de ADR-007, índices), deriva de restricciones/índices/policies y ACL exacta. Limitación conocida: no puede detectar referencias dinámicas dentro de funciones plpgsql (hay un barrido conservador por nombre).
+- **Tests:** archivo nuevo `supabase/tests/jornadas_esquema.test.sql` (123 aserciones: N1–N9, S sin RPC, catálogo exacto, policies directas, lectura por rol, multiproducto/D7, rechazos de `anon`/`service_role`/`authenticated`) y cuatro actualizaciones de K.1 sin relajar ninguna aserción.
+
+### Archivos
+| Archivo | Cambio |
+|---|---|
+| `supabase/migrations/20261030120000_jornadas_esquema.sql` | nuevo |
+| `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql` | nuevo |
+| `supabase/tests/jornadas_esquema.test.sql` | nuevo |
+| `supabase/tests/stock_ingreso.test.sql` | columnas, constraints, índices y columnas insertables ampliados; negativa `carga` → `venta`; **E13** (ver abajo); plan 119 → 120 |
+| `supabase/tests/stock_cuarentena_merma.test.sql` | definiciones ampliadas con `carga` y `descarga`; aserción hermana de la policy del ledger; plan 150 → 151 |
+| `supabase/tests/hardening_adr001.test.sql` | `tablas_negocio` 8 → 11 |
+| `supabase/tests/grants_default_privileges.test.sql` | matriz y chequeo de PUBLIC con las 3 tablas nuevas |
+| `docs/progress-log.md` | esta entrada |
+
+### Omisión de E13 en el inventario de ADR-001 §18.4.10 (D-9)
+`stock_ingreso.test.sql:125-130` fijaba `count = 0` para `jornada_id`, `saldo_actual`, `resultado` e `importe`, y **§18.4.10 no lo lista** en su inventario de aserciones a ampliar (detectado por Claude Local). Como D-1 agrega esa columna, se actualizó sin perder cobertura negativa: (1) la prohibición se conserva para `saldo_actual`, `resultado` (E8) e `importe`; (2) se agrega una aserción positiva (`jornada_id` existe en las dos tablas como `uuid`, nullable y sin default). La semántica «los tipos de Stock no llevan jornada» queda cubierta por `…_jornada_por_tipo`, probada con casos `23514` en `jornadas_esquema.test.sql`. No se edita el texto de ADR-001 (D-9): la omisión queda registrada acá.
+
+### Diferencia `carga_camion` (PRD) frente a `carga` (Blueprint y §18.4.1)
+El PRD nombra el tipo `carga_camion`; el Blueprint §7.4 y ADR-001 §18.4.1 usan `carga` (y `descarga`). Rige el Blueprint (`AGENTS.md` §1.1); la migración usa `carga`. El PRD no se modifica en esta tarea (D-9). Queda como corrección documental aparte.
+
+### Cómo se verificó
+**Laboratorio PG16 con pgTAP real 1.3.2 (ORIENTATIVO: no es Supabase ni PostgreSQL 17).** Emula roles, `auth.uid()` y `postgres` no superusuario; la copia de laboratorio quita el privilegio `MAINTAIN` (inexistente en PG16) de los tests. No sustituye a `supabase db reset`, `supabase test db` ni `supabase db lint`.
+
+| Verificación (PG16, orientativa) | Resultado |
+|---|---|
+| Las 12 migraciones de `main` + D-1 | aplican sin error |
+| `jornadas_esquema.test.sql` | 123/123 |
+| `stock_ingreso.test.sql` | 120/120 (antes 119) |
+| `stock_cuarentena_merma.test.sql` | 151/151 (antes 150) |
+| `grants_default_privileges.test.sql` | 32/32 |
+| `hardening_adr001.test.sql` | 55/55 hasta la sección O-4; las 3 aserciones finales (event trigger) **no son ejecutables en el laboratorio** (exigen superusuario), igual que en la línea base sin D-1 |
+| Resto de los archivos pgTAP | sin cambios (auth_base 57, camiones 114, clientes 183, lector 52, productos 147, aislamiento RR 16 y serializable 16, peso 33, ubicaciones 82) |
+| Ciclo migrar → revertir → migrar | `pg_dump -s` de `public` y `privado`: tras el rollback es **idéntico** a la base previa a D-1 (ACL, policies y constraints incluidas); la migración reaplicada reproduce el mismo volcado |
+| Rollback, 19 casos negativos | abortan **sin cambios** (volcado idéntico): con datos (2), vista (2), FK de otra tabla, función plpgsql, función SQL, RPC de ADR-007 ya creada, policy de otra tabla, trigger, índice posterior, deriva de tipo y de policy, restricción extra, tres variantes de ACL y RLS deshabilitada |
+| Rollback como no `postgres` y segunda ejecución | ambos fallan y no cambian nada |
+| Mutantes de la migración (14) | los 14 detectados; los 6 que la verificación final de la migración frena se repitieron sin esa verificación y también los detectan los tests |
+| `git diff --check` | PASS |
+| `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` (Node del entorno, tras `npm ci`) | exit 0; Vitest 31 archivos, 1.168/1.168. Sin cambios en `apps/web/`: es regresión, no cobertura nueva |
+| `npx playwright test` | **no ejecutable en este entorno**: el setup inicia sesión real contra un Supabase local con seed (no hay Docker ni Supabase CLI) y la versión de Playwright pide un Chromium que no está instalado. Lo ejecuta Claude Local |
+
+**Esperado en Supabase local** (inferencia, a confirmar por Claude Local): `supabase test db` pasa de 1.059 a 1.184 aserciones (+123 del archivo nuevo, +1 por E13, +1 hermana del ledger), con `db reset` de 13 migraciones y `db lint` sin errores.
+
+### Riesgos pendientes
+1. **Evidencia real pendiente:** `supabase db reset --local`, `supabase test db`, `supabase db lint --local --fail-on error`, Playwright y el rollback en local (vacío, y con datos para comprobar el aborto) los ejecuta Claude Local; mi evidencia es orientativa.
+2. **Diferencias PG16/PG17:** las definiciones literales de `pg_get_constraintdef`/`pg_get_indexdef` que fijan los tests y el precheck del rollback salieron de PG16. Si PG17 las imprime distinto, fallarán cerrado (los tests se corrigen; el rollback aborta sin cambios).
+3. **Orden de `ORDER BY conname`:** las aserciones de las tablas nuevas usan `collate "C"`; las ampliaciones de los tests existentes mantienen el orden vigente y sus posiciones no dependen de la colación.
+4. **`propietario_rpc` sin `SELECT` sobre los historiales:** las futuras RPC no podrán usar `INSERT … RETURNING` sobre ellos.
+5. **Una jornada cerrada no está protegida declarativamente:** el `UPDATE` de `jornadas` queda acotado por columnas y RLS, pero que una jornada cerrada no se modifique lo garantizan las RPC (no hay trigger, por diseño).
+6. **Con datos, D-1 no es reversible por este camino:** cualquier cambio posterior sería una migración hacia adelante.
+7. **Sin aplicar en ningún Supabase:** local, staging ni remoto. No se tocó producción. Supabase remoto sigue sin verificar.
+8. **Pendiente de autorización humana:** commit, security review, auditoría de Codex y de OpenCode del hash, y todo push, PR, merge y deploy.
+9. **Siguen diferidos a la etapa de las RPC:** las 24 pruebas normativas de ADR-007 §7, I1–I14, K1–K12, P11/P12, los ítems de S «por cada una de las seis RPC», el arnés de concurrencia y los conteos de funciones (`productos_catalogo`, `camiones_catalogo`, `hardening_adr001` y `grants_default_privileges` por firma).
+
+---
 ## 30/10/2026 — Incidente de Vercel Production: verificación posterior al merge del PR #35 y resolución (documental, sin commit)
 
 **Rama:** `docs/vercel-incidente-post-merge`, desde `origin/main` = `03d41db9268b8ea9f666ea1444f123960a66fa45`. Tarea **sólo documental**: actualiza `docs/incidents/2026-10-30-vercel-production-automatico.md`, `docs/incidents/README.md` y esta bitácora. Sin cambios de código, SQL, migraciones, RPC, RLS ni grants. Claude Code no modificó Vercel, GitHub ni Supabase, ni hizo pushes o deployments de prueba. No incluye D-1.

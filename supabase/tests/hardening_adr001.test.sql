@@ -49,7 +49,9 @@ create temp table tablas_negocio (tabla regclass);
 insert into tablas_negocio values
   ('public.empresas'), ('public.perfiles'), ('public.productos'),
   ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
-  ('public.operaciones'), ('public.movimientos_stock');
+  ('public.operaciones'), ('public.movimientos_stock'),
+  ('public.jornadas'), ('public.reasignaciones_vendedor'),
+  ('public.correcciones_jornada');
 grant select on tablas_negocio to public;
 
 -- Las 20 firmas de negocio (fachadas + implementaciones).
