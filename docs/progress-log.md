@@ -1,4 +1,36 @@
 ---
+## 30/10/2026 — Incidente de Vercel Production: medidas preventivas aplicadas y verificaciones pendientes (documental, sin commit)
+
+**Rama:** `docs/vercel-incidente-remediacion`, desde `main` = `964496dace6a09f4ff719c21ca11b61e70cd0b0d`. Tarea **sólo documental**: actualiza `docs/incidents/2026-10-30-vercel-production-automatico.md`, `docs/incidents/README.md` y esta bitácora. Sin cambios de código, SQL, migraciones, RPC, RLS ni grants. Claude Code no modificó Vercel, GitHub ni Supabase, ni hizo pushes o deployments de prueba.
+
+### Qué se registró
+- **Ocurrencias:** los merges de los PR #32 (`5e64f27`), #33 (`4654a95`) y #34 (`964496d`) generaron los deployments de Production `7426643059`, `7428037655` y `7428783658` (`vercel[bot]`). Ninguno tuvo una autorización humana independiente de deploy, y no se registra ninguna autorización retroactiva.
+- **Configuración aplicada por el usuario el 30/10/2026:**
+  - rama `production` creada desde `main` y separada de ella;
+  - Branch Tracking de Production en `production`;
+  - ruleset `proteger-production` (`26177269`), sólo sobre `production`: PR obligatorio, checks `Lint` y `Tipos, pruebas y build`, sin eliminación ni force push, 0 aprobaciones;
+  - Vercel Authentication en «All Deployments» con «Require Log In».
+- **Evidencia:**
+  - API de GitHub, sólo lectura: `production` = `main` = `964496d`; el ruleset activo coincide con lo informado; `main` sin protección; `ci.yml` corre en todos los PR.
+  - Prueba del usuario en incógnito: el dominio productivo redirige al inicio de sesión de Vercel.
+
+### Verificaciones
+- `git diff --check`: PASS.
+- Alcance: exactamente los tres archivos indicados.
+- Sin secretos en el diff.
+- No aplican typecheck, lint, Vitest, build, pgTAP ni Playwright: el cambio es sólo documental.
+
+### Pendiente
+Criterio de cierre del incidente, sin exigir un despliegue nuevo a Production:
+- primer cambio normal en `main` con deployments sólo `Preview`;
+- Preview protegido;
+- evidencia o aceptación expresa de la configuración del panel;
+- Supabase remoto verificado por el humano o excluido por decisión expresa;
+- decisión sobre los riesgos residuales (0 aprobaciones y `main` sin protección).
+
+Supabase remoto sigue **no verificado**. El incidente sigue **abierto**.
+
+---
 ## 29/10/2026 — D-2: rol técnico `lector_perfiles_rpc` y lectura acotada de perfiles (implementación local, cierre documental)
 
 **Rama:** `feat/d2-lector-perfiles-rpc`, desde `87469abe9f356f5ce6d80adb7d4c51c7988ee202`. La implementación se hizo en un entorno de Claude Code sin Docker ni Supabase CLI y se transfirió como parche (SHA-256 `8dc691a5f216815ba1676484d30d943efe1852a86bc2a5bd789b770c9b69dd45`). El usuario lo aplicó sobre esa base en el worktree `distribuidora-d2-prueba` (HEAD desacoplado), donde después se creó la rama local. **Alcance:** exclusivamente D-2 (ADR-001 §18.4.2.1, aprobado el 29/10/2026 para validación controlada, acotado a jornadas y carga). Sin commit, push ni PR. D-2 se aplicó sólo en el Supabase local del usuario (ver «Verificaciones»); nada en staging ni producción. Sin D-1, jornadas, las seis RPC ni arnés de concurrencia. Las RPC existentes y el comportamiento de Stock no cambian.
