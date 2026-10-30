@@ -1,5 +1,5 @@
 ---
-## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commit `019294c` publicado; corrección de H-1 pendiente)
+## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commits `019294c` y `30c19f3` publicados; H-3 en corrección local, sin commit)
 
 **Rama:** `feat/d1-esquema-jornadas`, en un worktree independiente (`../distribuidora-d1`), desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Commit único `019294cca9555541549a278618fbe4d74c5af766` (padre `fc906cc`), **publicado** en `origin/feat/d1-esquema-jornadas` el 30/10/2026 (Preview de Vercel `7441626017`, `success`; sin deployments de Production). Implementación con las decisiones D-1 a D-9 aprobadas por el usuario (preámbulo corregido de D-1). No incluye RPC, arnés de concurrencia, frontend ni cambios en D-2. **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `movimientos_stock`, aislamiento por `empresa_id`, roles) y auditoría independiente de Codex **y** OpenCode sobre el mismo hash (ADR-001 §18.4.13 punto 7, §18.4.14 punto 4); la excepción de D-2 no se extiende (§18.4.15).
 
@@ -47,7 +47,7 @@ El PRD nombra el tipo `carga_camion`; el Blueprint §7.4 y ADR-001 §18.4.1 usan
 | `hardening_adr001.test.sql` | 55/55 hasta la sección O-4; las 3 aserciones finales (event trigger) **no son ejecutables en el laboratorio** (exigen superusuario), igual que en la línea base sin D-1 |
 | Resto de los archivos pgTAP | sin cambios (auth_base 57, camiones 114, clientes 183, lector 52, productos 147, aislamiento RR 16 y serializable 16, peso 33, ubicaciones 82) |
 | Ciclo migrar → revertir → migrar | `pg_dump -s` de `public` y `privado`: tras el rollback es **idéntico** a la base previa a D-1 (ACL, policies y constraints incluidas); la migración reaplicada reproduce el mismo volcado |
-| Rollback, 19 casos negativos | abortan **sin cambios** (volcado idéntico): con datos (2), vista (2), FK de otra tabla, función plpgsql, función SQL, RPC de ADR-007 ya creada, policy de otra tabla, trigger, índice posterior, deriva de tipo y de policy, restricción extra, tres variantes de ACL y RLS deshabilitada |
+| Rollback, 18 casos negativos | abortan **sin cambios** (volcado idéntico): con datos (2), vista (2), FK de otra tabla, función plpgsql, función SQL, RPC de ADR-007 ya creada, policy de otra tabla, trigger, índice posterior, deriva de tipo y de policy, restricción extra, tres variantes de ACL y RLS deshabilitada |
 | Rollback como no `postgres` y segunda ejecución | ambos fallan y no cambian nada |
 | Mutantes de la migración (14) | los 14 detectados; los 6 que la verificación final de la migración frena se repitieron sin esa verificación y también los detectan los tests |
 | `git diff --check` | PASS |
@@ -72,6 +72,88 @@ Claude Local ejecutó la verificación independiente en Supabase local real sobr
 - **H-4:** los 50 nombres de restricciones, índices y policies de D-1 coinciden exactamente con la lista L.2 aprobada; no se cambió ninguno.
 - **Estado:** el resultado definitivo **sigue pendiente**. Requiere un commit correctivo (con autorización humana) y una nueva verificación de Claude Local sobre ese hash, además de la security review y la auditoría de Codex y OpenCode.
 
+### Security review independiente de Claude Local sobre `30c19f3`: BLOQUEADO por H-3 (MEDIO)
+Dictamen de Claude Local: 0 críticos, 0 altos, **1 medio (H-3)** y 3 informativos. Esta entrada sólo registra H-3 y su refuerzo; los informativos no se tratan acá. **H-3 NO está cerrado**: la corrección está sin commit y sin verificación independiente.
+
+- **H-3 (MEDIO):** la migración D-1 y su rollback sólo comprobaban que existieran los objetos de D-2. Una base con D-2 degradada (por ejemplo, el helper con `EXECUTE` para `authenticated`, la vista con otro owner, la política con `USING (true)` o una membresía con `INHERIT`) las pasaba. D-1 depende de las invariantes de ADR-001 §18.4.2.1 y no debía asumirlas.
+- **Reproducción (laboratorio PG16, orientativo):** con el código de `30c19f3`, la migración y el rollback **aceptaron los 39 mutantes** de D-2 (helper 8, vista 6, política 6, privilegios y propiedad del rol 9, atributos del rol 4, membresías 6).
+
+**Corrección local, sin commit.** Sólo `supabase/migrations/20261030120000_jornadas_esquema.sql`, `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql` y esta entrada. Todo es fail-closed, en la misma transacción, sin `CASCADE`, sin funciones (ni persistentes ni `pg_temp`) y sin tocar D-2:
+
+| Bloque | Dónde (migración / rollback) | Qué verifica | Fuente |
+|---|---|---|---|
+| **A** | sección 1b y 11 / sección 1b y 4 | verificación 7 de D-2 (atributos del rol, esquemas, vista, helper, membresías, propiedad, políticas por nombre/comando/rol, RLS, Data API) | copia literal de `20261029233000_lector_perfiles_rpc.sql:155-281` |
+| **B** | ídem | privilegios por columna del rol, ningún privilegio sobre otras relaciones, propiedad de esquemas, lenguaje y EXECUTE del helper, columnas de la vista, regex de P5 | traducción literal de las pruebas P2–P5 de `lector_perfiles_rpc.test.sql` |
+| **C** | ídem | **definiciones completas**: cuerpo del helper, consulta de la vista, y política (condición completa, comando, PERMISSIVE/RESTRICTIVE, roles, sin WITH CHECK) | SQL aprobado extraído del texto de D-2 (helper `:87`, vista `:120`, política `:144`) y ADR-001 §18.4.2.1 |
+| **D** | ídem | ACL por defecto (`ALTER DEFAULT PRIVILEGES`) a favor del lector o de PUBLIC | lectura de ADR-001 §18.4.2.1: «su único privilegio es `SELECT (…)` sobre `public.perfiles`» |
+| **E** | ídem | **condición completa de las dos políticas previas de `perfiles`** (`perfiles_select_propio` y `perfiles_select_propio_propietario_rpc`): USING, comando, PERMISSIVE/RESTRICTIVE, roles y ausencia de WITH CHECK | `20261022120000_auth_base_empresas_perfiles.sql:96-100` y `20261023140000_catalogo_productos.sql:241-245`; ambas sin modificar desde su creación, coherentes con ADR-001 caso P9 («sólo la fila propia») y la aclaración C-2 |
+
+Cada bloque (A–E) está copiado en los cuatro puntos de control (precheck y postcheck de la migración, precheck y postcheck del rollback) y se comprobó por igualdad de texto que las cuatro copias de cada uno son idénticas (A: 4 copias literales de D-2; B, C, D y E: un único texto).
+
+**Bloque C: método.** El cuerpo del helper se compara con `prosrc` (que PostgreSQL guarda sin deparsear) normalizando sólo espacios en blanco. La consulta de la vista y la política se comparan contra una **vista temporal y una tabla temporal con su política de referencia**, creadas dentro del mismo bloque con el SQL aprobado, comparadas con `pg_get_viewdef` y `pg_get_expr`/`polcmd`/`polpermissive`/`polwithcheck`/roles y eliminadas al terminar (si algo aborta, la transacción las revierte). Ambos lados se deparsean con el mismo servidor y el mismo `search_path`, por lo que la comparación no depende de la versión ni del `search_path` (medido: `pg_get_viewdef` imprime `FROM perfiles p` o `FROM public.perfiles p` según el `search_path`, así que una cadena literal habría dado falsos abortos). Autorizado expresamente: objetos temporales sí, funciones `pg_temp` no.
+
+**Bloque D (X6): regla y límites.** Aborta si existe una fila de `pg_default_acl` que (a) otorgue algo al lector y haya sido creada por otro rol, en cualquier esquema o globalmente, o (b) otorgue algo a PUBLIC sobre tablas, secuencias o esquemas (PUBLIC incluye al lector). Quedan fuera a propósito: el `EXECUTE` de PUBLIC sobre funciones y el `USAGE` sobre tipos (valores base de PostgreSQL; el de funciones lo gobierna el hardening de grants), las ACL por defecto de otros roles (Data API) y las filas creadas por el propio lector. El lector no es miembro de ningún rol (bloque A), así que no hereda ACL por defecto de terceros. La base legítima de laboratorio no tiene ninguna fila para el lector ni para PUBLIC. **Es una lectura estricta del texto de ADR-001, no una regla literal del ADR:** el ADR habla de los privilegios del rol, no de los futuros. **Aprobada por el usuario exactamente en el alcance implementado y verificado por Claude Local; no se amplía.**
+
+**Hallazgo y corrección de `search_path` (rollback).** Probando el rollback con `search_path = ''`, `pg_catalog` y `extensions` apareció un falso aborto fail-closed, presente en `30c19f3`: (1) `i.indexrelid::regclass::text` se comparaba con nombres sin esquema; (2) el agregado de privilegios por columna usaba `regclass::text`; (3) el postcheck comparaba `pg_get_constraintdef`, que califica o no el esquema de la tabla referenciada según el `search_path`. Corrección: los índices, restricciones y policies compartidos de D-1 se resuelven una vez **por identidad (oid)**, acotados a su tabla, y se comparan por oid (esto también cierra una ambigüedad por nombre homónimo entre tablas); el agregado por columna usa el nombre del catálogo (`pg_class.relname`); y el rollback fija `set local search_path = pg_catalog, public` para que los textos deparseados sean comparables (el efecto termina con el `COMMIT`/`ROLLBACK`). La migración no tenía la dependencia.
+
+**Bloque E: método y fuente.** Se comprobó antes de escribir que las definiciones son inequívocas: cada política se crea una sola vez y no se altera en ninguna migración posterior (`perfiles_select_propio`: `for select to authenticated using (usuario_id = (select auth.uid()))`; `perfiles_select_propio_propietario_rpc`: `for select to propietario_rpc using (usuario_id = (select privado.usuario_actual()))`). El ADR no transcribe esas dos cláusulas: las refiere por nombre («las dos políticas previas») y describe su efecto (caso P9, aclaración C-2); no hay contradicción entre ambos. Las cláusulas se extrajeron del texto de las migraciones con un script. El método es el del bloque C (política de referencia sobre una tabla temporal con RLS, comparada con `pg_get_expr`, `polcmd`, `polpermissive`, `polwithcheck` y roles), así que tampoco depende del `search_path`. No se creó ninguna política nueva.
+
+**X1–X7: qué queda cubierto y qué no.**
+
+| # | Alteración de D-2 | Cubierta | Detector |
+|---|---|---|---|
+| X1 | cuerpo del helper distinto | **sí** | bloque C (`prosrc`) |
+| X2 | definición de la vista distinta con las mismas columnas | **sí** | bloque C (`pg_get_viewdef`) |
+| X3 | condición de la política con `OR true`/`AND true` u otra | **sí** | bloque C (`pg_get_expr` completo) |
+| X4 | `ALTER ROLE lector SET …` (configuración a nivel de rol) | **no** | fuera de ADR-001 §18.4.2.1; el rol no ejecuta funciones ni tiene `USAGE` sobre `privado`. Observación |
+| X5 | atributos del helper no fijados por el ADR (`PARALLEL`, `LEAKPROOF`…) | **no** | fuera de ADR-001; sin efecto sobre el aislamiento. Observación |
+| X6 | ACL por defecto a favor del lector o de PUBLIC | **sí, con la lectura estricta de arriba** | bloque D |
+| X7 | política `RESTRICTIVE` con la misma condición | **sí** | bloque C (`polpermissive`) |
+
+**No es una cobertura exhaustiva.** Siguen sin verificarse, entre otras cosas: las ACL por defecto cuyo creador es el propio lector, el `EXECUTE` de PUBLIC sobre funciones nuevas, cualquier atributo de las funciones o la vista que el ADR no fije, la configuración a nivel de base o de rol, y las reescrituras semánticamente equivalentes pero distintas del texto aprobado (que **abortan**: por ejemplo, la política sin el subselect).
+
+**Evidencia propia (laboratorio PG16, ORIENTATIVA; no sustituye a Supabase CLI ni a PostgreSQL 17):**
+
+| Caso | Migración | Rollback |
+|---|---|---|
+| Base limpia | acepta; esquema, datos y roles idénticos a los de `30c19f3` | acepta; vuelve a un volcado idéntico al previo a D-1 |
+| 39 mutantes originales con el código de `30c19f3` | 39 aceptados (H-3 reproducido) | 39 aceptados |
+| 39 mutantes originales con el código corregido | 39 abortados por «D-2 …» | 39 abortados por «D-2 …» |
+| X1–X3 y X7 con el código previo al refuerzo | aceptados | aceptados |
+| X1–X3, X7 y variantes (14 casos) con el refuerzo | 14 abortados | 14 abortados |
+| X6: 10 variantes (tablas, secuencias, esquemas, funciones y tipos hacia el lector; tablas, secuencias y esquemas hacia PUBLIC; creadores `postgres`, `supabase_admin` y `propietario_rpc`; con y sin esquema) | 10 abortadas | 10 abortadas |
+| **Bloque E:** 11 degradaciones de las dos políticas previas (`USING (true)`, `OR true`, otra columna, RESTRICTIVE, sin subselect, función cruzada) con el código validado por Claude Local | 11 aceptadas (hallazgo reproducido) | 11 aceptadas |
+| **Bloque E:** las mismas 11 con el código nuevo | 11 abortadas por «D-2 (definición)», sin cambios | 11 abortadas, sin cambios |
+| **Bloque E:** controles (las dos políticas recreadas idénticas) | 2 aceptados | 2 aceptados |
+| Controles que deben aceptarse (política/vista recreadas idénticas, helper sólo con espacios, ACL por defecto legítima, `EXECUTE` de PUBLIC sobre funciones, ACL por defecto del propio lector, X4, X5) | 8 aceptados | 8 aceptados |
+| Alteraciones introducidas *durante* D-1 o el rollback, detectadas en la sección 11 o 4 | 4 abortadas (+2 del bloque E) | 3 abortadas (+2 del bloque E) |
+| `search_path` de sesión: `"$user", public`, `''`, `pg_catalog`, `public, extensions`, `privado, public`, `pg_temp, public`, `extensions`, `privado`, `"$user"` y rutas con esquemas homónimos | acepta en todos | acepta en todos (antes fallaba con `''`, `pg_catalog` y `extensions`) |
+| Objetos homónimos de otra tabla/esquema (FK y policy con el nombre de las compartidas de D-1) | — | abortan en el precheck con mensaje específico (antes sólo los frenaba el `DROP` sin `CASCADE`) |
+
+«Sin cambios» en cada aborto se verificó por igualdad del volcado completo (`pg_dump` de `public` y `privado` con ACL, políticas y filas, más `pg_dumpall -r` de roles y membresías) antes y después del intento. Tras ejecutar, no quedan objetos temporales (`d2_ref_*`) en la sesión. La suite pgTAP completa del laboratorio da lo mismo que antes del refuerzo (sin regresiones en Stock, D-2 ni jornadas), el ciclo migrar → revertir → migrar sigue idéntico y los 18 casos negativos previos del rollback siguen abortando sin cambios.
+
+**Verificación independiente de Claude Local en PostgreSQL 17 / Supabase real, sobre `D1-refuerzo-H3.patch`** (SHA-256 `ae1efd2e…17c1`, aplicado sobre `30c19f3`, **sin** el bloque E). Resultados informados por Claude Local:
+
+| Verificación | Resultado |
+|---|---|
+| `supabase db reset` | PASS |
+| `supabase test db` | 1.184/1.184, PASS |
+| `supabase db lint` | PASS |
+| Banco independiente de Claude Local | 59/59 casos con el resultado esperado, en migración y en rollback |
+| Postchecks | 6/6 casos por operación |
+| Stock, D-2 y jornadas | sin regresiones |
+| Rollback con distintos `search_path` | PASS |
+
+Dictamen de Claude Local: **APTO PARA COMMIT LOCAL**, condicionado a tres decisiones. Decisiones del usuario: (1) X6 aprobada exactamente en el alcance implementado; (2) reforzar las condiciones de `perfiles_select_propio` y `perfiles_select_propio_propietario_rpc` con las definiciones del contrato aprobado (bloque E); (3) registrar esta evidencia. **Esta evidencia de PG17 no incluye el bloque E**, que se agregó después y todavía no tiene verificación independiente. Las cifras de PG16 de esta entrada son propias y orientativas; las de PG17 son de Claude Local y no se mezclan.
+
+**Corrección de cifra: 18 casos negativos del rollback, no 19.** La fila «Rollback, 18 casos negativos» de la tabla «Cómo se verificó» decía 19 en el commit publicado. La enumeración de esa misma fila (datos 2, vista 2, FK de otra tabla, función plpgsql, función SQL, RPC de ADR-007, policy de otra tabla, trigger, índice posterior, deriva de tipo y de policy, restricción extra, tres variantes de ACL y RLS deshabilitada) suma 18, y el script que los ejecuta imprime 18 líneas «OK» (en cada corrida de esta tarea). El «19» fue un error de recuento: no corresponde a ninguna ejecución. Una hipótesis no verificada es que se haya contado también la ejecución de la base limpia, que acepta y no es un caso negativo. No se modificó ninguna otra cifra.
+
+**Pendiente (no se afirma que H-3 esté cerrado):**
+- **Verificación independiente del bloque E** en PostgreSQL 17 / Supabase real, y de la versión final consolidada (hay que repetir `db reset`, `test db`, `db lint` y el banco). Los supuestos de PG17 de los bloques C y D (objetos temporales; configuración base sin ACL por defecto para el lector ni PUBLIC) quedaron cubiertos por la verificación de Claude Local; el bloque E repite el supuesto de los objetos temporales.
+- **Nueva security review** del conjunto final (con el bloque E), y auditoría de Codex y de OpenCode del hash final.
+- **Autorización del commit** correctivo; sigue sin commit y sin push.
+- El banco de mutantes es una herramienta de laboratorio y no está versionado.
+
 ### Riesgos pendientes
 1. **Evidencia real parcial:** `019294c` falló `supabase test db` por H-1 (ver arriba). Hasta que Claude Local repita la verificación completa sobre el commit correctivo, el resultado definitivo está pendiente; mi evidencia de laboratorio es orientativa.
 2. **Diferencias PG16/PG17:** las definiciones literales de `pg_get_constraintdef`/`pg_get_indexdef` que fijan los tests y el precheck del rollback salieron de PG16. Si PG17 las imprime distinto, fallarán cerrado (los tests se corrigen; el rollback aborta sin cambios).
@@ -80,7 +162,7 @@ Claude Local ejecutó la verificación independiente en Supabase local real sobr
 5. **Una jornada cerrada no está protegida declarativamente:** el `UPDATE` de `jornadas` queda acotado por columnas y RLS, pero que una jornada cerrada no se modifique lo garantizan las RPC (no hay trigger, por diseño).
 6. **Con datos, D-1 no es reversible por este camino:** cualquier cambio posterior sería una migración hacia adelante.
 7. **Sin aplicar en staging ni remoto:** sólo se aplicó en el Supabase local de Claude Local. No se tocó producción. Supabase remoto sigue sin verificar.
-8. **Pendiente de autorización humana:** commit correctivo de H-1, nueva verificación de Claude Local, security review, auditoría de Codex y de OpenCode del hash corregido, y todo push, PR, merge y deploy posteriores.
+8. **Pendiente de autorización humana:** commit correctivo de H-3, nueva verificación de Claude Local sobre ese hash, cierre de la security review, auditoría de Codex y de OpenCode del hash final, y todo push, PR, merge y deploy posteriores.
 9. **Siguen diferidos a la etapa de las RPC:** las 24 pruebas normativas de ADR-007 §7, I1–I14, K1–K12, P11/P12, los ítems de S «por cada una de las seis RPC», el arnés de concurrencia y los conteos de funciones (`productos_catalogo`, `camiones_catalogo`, `hardening_adr001` y `grants_default_privileges` por firma).
 
 ---

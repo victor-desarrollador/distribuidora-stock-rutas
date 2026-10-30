@@ -42,6 +42,14 @@ begin;
 
 set local lock_timeout = '5s';
 
+-- Los textos que se comparan más abajo (pg_get_constraintdef, pg_get_indexdef)
+-- califican o no el esquema de las tablas referenciadas según el search_path de
+-- la sesión. Se fija uno conocido para esta transacción, de modo que el
+-- resultado no dependa del que traiga quien ejecuta el procedimiento. Todos los
+-- objetos de este script están calificados con su esquema, y el efecto termina
+-- con el COMMIT o el ROLLBACK.
+set local search_path = pg_catalog, public;
+
 -- ---------------------------------------------------------------------------
 -- 0. Entorno y bloqueo
 -- ---------------------------------------------------------------------------
@@ -72,16 +80,12 @@ declare
   v_mov oid := 'public.movimientos_stock'::regclass::oid;
   v_att_op smallint;
   v_att_mov smallint;
-  v_constraints_compartidas text[] := array[
-    'operaciones_referencia_apertura', 'operaciones_referencia_unica',
-    'operaciones_jornada_fk', 'operaciones_jornada_por_tipo',
-    'movimientos_stock_jornada_fk', 'movimientos_stock_jornada_por_tipo',
-    'movimientos_stock_operacion_referencia_fk'];
-  v_indices_d1 text[] := array[
-    'operaciones_referencia_apertura', 'operaciones_referencia_unica',
-    'movimientos_stock_operacion_producto_unica', 'movimientos_stock_jornada_idx'];
-  v_policies_compartidas text[] := array[
-    'operaciones_insert_propietario_rpc', 'movimientos_stock_insert_propietario_rpc'];
+  -- Objetos compartidos de D-1 por IDENTIDAD (oid), no por nombre: así un objeto
+  -- homónimo de otra tabla o de otro esquema no se confunde con los de D-1. Se
+  -- resuelven al comienzo de la ejecución, con el nombre acotado a su tabla.
+  v_constr_d1 oid[];
+  v_idx_d1 oid[];
+  v_pol_d1 oid[];
   v_n bigint;
   v_txt text;
   r record;
@@ -92,6 +96,30 @@ begin
    where attrelid = v_mov and attname = 'jornada_id' and not attisdropped;
   if v_att_op is null or v_att_mov is null then
     raise exception 'reversión D-1: falta la columna jornada_id en operaciones o movimientos_stock';
+  end if;
+
+  select array_agg(c.oid) into v_constr_d1
+    from pg_constraint c
+   where (c.conrelid = v_op and c.conname in (
+            'operaciones_referencia_apertura', 'operaciones_referencia_unica',
+            'operaciones_jornada_fk', 'operaciones_jornada_por_tipo'))
+      or (c.conrelid = v_mov and c.conname in (
+            'movimientos_stock_jornada_fk', 'movimientos_stock_jornada_por_tipo',
+            'movimientos_stock_operacion_referencia_fk'));
+  select array_agg(i.indexrelid) into v_idx_d1
+    from pg_index i join pg_class c on c.oid = i.indexrelid
+   where (i.indrelid = v_op and c.relname in (
+            'operaciones_referencia_apertura', 'operaciones_referencia_unica'))
+      or (i.indrelid = v_mov and c.relname in (
+            'movimientos_stock_operacion_producto_unica', 'movimientos_stock_jornada_idx'));
+  select array_agg(p.oid) into v_pol_d1
+    from pg_policy p
+   where (p.polrelid = v_op and p.polname = 'operaciones_insert_propietario_rpc')
+      or (p.polrelid = v_mov and p.polname = 'movimientos_stock_insert_propietario_rpc');
+  if coalesce(array_length(v_constr_d1, 1), 0) <> 7
+     or coalesce(array_length(v_idx_d1, 1), 0) <> 4
+     or coalesce(array_length(v_pol_d1, 1), 0) <> 2 then
+    raise exception 'reversión D-1: faltan restricciones, índices o policies compartidos de D-1';
   end if;
 
   -- (a) DATOS: nada se borra, así que cualquier fila aborta.
@@ -122,11 +150,11 @@ begin
          (d.classid = 'pg_constraint'::regclass and exists (
             select 1 from pg_constraint c
              where c.oid = d.objid
-               and (c.conrelid = any (v_tablas_d1) or c.conname = any (v_constraints_compartidas))))
+               and (c.conrelid = any (v_tablas_d1) or c.oid = any (v_constr_d1))))
          or (d.classid = 'pg_class'::regclass and exists (
             select 1 from pg_class c
              where c.oid = d.objid
-               and (c.relname = any (v_indices_d1)
+               and (c.oid = any (v_idx_d1)
                     or exists (select 1 from pg_index i
                                 where i.indexrelid = c.oid and i.indrelid = any (v_tablas_d1))
                     or exists (select 1 from pg_class t
@@ -138,7 +166,7 @@ begin
          or (d.classid = 'pg_policy'::regclass and exists (
             select 1 from pg_policy p
              where p.oid = d.objid
-               and (p.polrelid = any (v_tablas_d1) or p.polname = any (v_policies_compartidas))))
+               and (p.polrelid = any (v_tablas_d1) or p.oid = any (v_pol_d1))))
        )
   loop
     raise exception 'reversión D-1: hay una dependencia posterior que impide revertir sin pérdida: %', r.objeto;
@@ -153,7 +181,7 @@ begin
        and c.conindid in (select conindid from pg_constraint
                            where conrelid = v_op
                              and conname in ('operaciones_referencia_apertura', 'operaciones_referencia_unica'))
-       and not (c.conrelid = any (v_tablas_d1) or c.conname = any (v_constraints_compartidas))
+       and not (c.conrelid = any (v_tablas_d1) or c.oid = any (v_constr_d1))
   loop
     raise exception 'reversión D-1: una FK posterior depende de los UNIQUE de referencia de operaciones: %', r.objeto;
   end loop;
@@ -163,7 +191,7 @@ begin
     select c.conrelid::regclass::text || '.' || c.conname as objeto
       from pg_constraint c
      where c.contype = 'f' and c.confrelid = any (v_tablas_d1)
-       and not (c.conrelid = any (v_tablas_d1) or c.conname = any (v_constraints_compartidas))
+       and not (c.conrelid = any (v_tablas_d1) or c.oid = any (v_constr_d1))
   loop
     raise exception 'reversión D-1: una FK posterior apunta a las tablas de jornadas: %', r.objeto;
   end loop;
@@ -222,7 +250,7 @@ begin
       from pg_index i
      where ((i.indrelid = v_op and v_att_op = any (i.indkey::smallint[]))
             or (i.indrelid = v_mov and v_att_mov = any (i.indkey::smallint[])))
-       and i.indexrelid::regclass::text <> all (v_indices_d1)
+       and i.indexrelid <> all (v_idx_d1)
   loop
     raise exception 'reversión D-1: hay un índice posterior sobre jornada_id: %', r.objeto;
   end loop;
@@ -350,9 +378,9 @@ begin
      || 'jornadas:propietario_rpc:SELECT,reasignaciones_vendedor:authenticated:SELECT' then
     raise exception 'reversión D-1: la ACL de las tablas de jornadas no es la que dejó D-1: %', v_txt;
   end if;
-  select string_agg(t.attrelid::regclass::text || '.' || t.attname::text || ':' || p.p, ','
-                    order by t.attrelid::regclass::text, t.attname::text, p.p) into v_txt
-    from pg_attribute t,
+  select string_agg(ct.relname::text || '.' || t.attname::text || ':' || p.p, ','
+                    order by ct.relname::text, t.attname::text, p.p) into v_txt
+    from pg_attribute t join pg_class ct on ct.oid = t.attrelid,
          (values ('INSERT'), ('UPDATE'), ('SELECT'), ('REFERENCES')) p (p)
    where t.attrelid = any (v_tablas_d1) and t.attnum > 0 and not t.attisdropped
      and has_column_privilege('propietario_rpc', t.attrelid, t.attname, p.p)
@@ -373,14 +401,340 @@ begin
     raise exception 'reversión D-1: los privilegios por columna de propietario_rpc no son los que dejó D-1: %', v_txt;
   end if;
 
-  -- D-2 debe seguir presente y no se toca.
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'perfiles'
-                  and policyname = 'perfiles_select_empresa_lector')
-     or to_regclass('privado.perfiles_empresa_gestion') is null
-     or to_regprocedure('privado.empresa_gestion_actual()') is null then
-    raise exception 'reversión D-1: faltan objetos de D-2; estado inesperado';
+  -- D-2 debe seguir presente y no se toca: ver el contrato completo de la
+  -- sección 1b.
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 1b. Contrato aprobado de D-2 (precheck, antes de cualquier cambio)
+-- ---------------------------------------------------------------------------
+-- Si D-2 perdió alguna invariante aprobada (ADR-001 §18.4.2.1), la reversión
+-- aborta sin cambios: D-1 no se revierte sobre una base cuya seguridad ya está
+-- degradada. Copia literal de «7. Verificación fail-closed» de
+-- supabase/migrations/20261029233000_lector_perfiles_rpc.sql (líneas 155-281).
+do $$
+declare
+  v_vista regclass := 'privado.perfiles_empresa_gestion'::regclass;
+  v_helper regprocedure := 'privado.empresa_gestion_actual()'::regprocedure;
+  v_rol text;
+begin
+  -- Sin privilegios de esquema residuales.
+  if has_schema_privilege('lector_perfiles_rpc', 'privado', 'CREATE')
+     or has_schema_privilege('lector_perfiles_rpc', 'privado', 'USAGE')
+     or has_schema_privilege('lector_perfiles_rpc', 'public', 'CREATE')
+     or has_schema_privilege('propietario_rpc', 'privado', 'CREATE')
+     or has_schema_privilege('propietario_rpc', 'public', 'CREATE')
+     or exists (select 1 from pg_namespace n, aclexplode(n.nspacl) a
+                 where a.grantee = 'lector_perfiles_rpc'::regrole) then
+    raise exception 'D-2: privilegios de esquema residuales o no aprobados';
+  end if;
+
+  -- Atributos del rol.
+  if not exists (
+       select 1 from pg_roles
+        where rolname = 'lector_perfiles_rpc'
+          and not (rolcanlogin or rolsuper or rolcreatedb or rolcreaterole
+                   or rolreplication or rolbypassrls)) then
+    raise exception 'D-2: atributos de lector_perfiles_rpc fuera de lo aprobado';
+  end if;
+
+  -- Vista: owner, opciones y ACL exactos (owner + SELECT de propietario_rpc).
+  if not exists (
+       select 1 from pg_class c
+        where c.oid = v_vista and c.relkind = 'v'
+          and c.relowner = 'lector_perfiles_rpc'::regrole
+          and c.reloptions @> array['security_barrier=true', 'security_invoker=false'])
+     or coalesce((select array_agg(a.grantee::regrole::text || ':' || a.privilege_type
+                                   order by a.grantee::regrole::text, a.privilege_type)
+                    from pg_class c, aclexplode(c.relacl) a
+                   where c.oid = v_vista and a.grantee <> c.relowner),
+                 array[]::text[])
+        <> array['propietario_rpc:SELECT'] then
+    raise exception 'D-2: la vista no quedó con el owner, las opciones o la ACL aprobados';
+  end if;
+
+  -- Helper: SECURITY DEFINER, STABLE, search_path vacío, sin parámetros,
+  -- owner propietario_rpc, ACL exacta y sin sobrecargas.
+  if not exists (
+       select 1 from pg_proc p
+        where p.oid = v_helper
+          and p.prosecdef and p.provolatile = 's' and p.pronargs = 0
+          and p.proowner = 'propietario_rpc'::regrole
+          and p.prorettype = 'uuid'::regtype
+          and p.proconfig @> array['search_path=""']
+          and p.proacl is not null)
+     or (select array_agg(distinct a.grantee::regrole::text)
+           from pg_proc p, aclexplode(p.proacl) a where p.oid = v_helper)
+        <> array['propietario_rpc']
+     or (select count(*) from pg_proc
+          where pronamespace = 'privado'::regnamespace
+            and proname = 'empresa_gestion_actual') <> 1 then
+    raise exception 'D-2: el helper no quedó con los atributos o la ACL aprobados';
+  end if;
+
+  -- Membresía: exactamente dos filas (ADMIN automática del superusuario de
+  -- arranque; postgres con SET sin INHERIT) y el rol no es miembro de nadie.
+  if (select count(*) from pg_auth_members
+       where roleid = 'lector_perfiles_rpc'::regrole) <> 2
+     or not exists (
+       select 1 from pg_auth_members
+        where roleid = 'lector_perfiles_rpc'::regrole
+          and member = 'postgres'::regrole and grantor = 'postgres'::regrole
+          and not admin_option and not inherit_option and set_option)
+     or not exists (
+       select 1 from pg_auth_members am join pg_roles g on g.oid = am.grantor
+        where am.roleid = 'lector_perfiles_rpc'::regrole
+          and am.member = 'postgres'::regrole and g.rolsuper
+          and am.admin_option and not am.inherit_option and not am.set_option)
+     or exists (
+       select 1 from pg_auth_members
+        where roleid = 'lector_perfiles_rpc'::regrole and inherit_option)
+     or exists (
+       select 1 from pg_auth_members
+        where member = 'lector_perfiles_rpc'::regrole)
+     or not pg_has_role('postgres', 'lector_perfiles_rpc', 'SET')
+     or pg_has_role('postgres', 'lector_perfiles_rpc', 'USAGE') then
+    raise exception 'D-2: la membresía de lector_perfiles_rpc no quedó en SET true / INHERIT false';
+  end if;
+
+  foreach v_rol in array array['anon', 'authenticated', 'authenticator', 'service_role', 'propietario_rpc'] loop
+    if exists (select 1 from pg_roles where rolname = v_rol)
+       and (pg_has_role(v_rol, 'lector_perfiles_rpc', 'SET')
+            or pg_has_role(v_rol, 'lector_perfiles_rpc', 'USAGE')) then
+      raise exception 'D-2: % puede hacer SET ROLE o heredar lector_perfiles_rpc', v_rol;
+    end if;
+  end loop;
+
+  -- Propiedad: una sola relación (la vista) y ninguna función.
+  if (select count(*) from pg_class where relowner = 'lector_perfiles_rpc'::regrole) <> 1
+     or exists (select 1 from pg_proc where proowner = 'lector_perfiles_rpc'::regrole) then
+    raise exception 'D-2: lector_perfiles_rpc debe ser dueño sólo de la vista';
+  end if;
+
+  -- Políticas de perfiles: las dos previas sin cambio y una sola nueva; ninguna
+  -- de escritura; sin FORCE.
+  if array(select policyname || ':' || cmd || ':' || roles::text
+             from pg_policies
+            where schemaname = 'public' and tablename = 'perfiles'
+            order by policyname)
+     <> array['perfiles_select_empresa_lector:SELECT:{lector_perfiles_rpc}',
+              'perfiles_select_propio:SELECT:{authenticated}',
+              'perfiles_select_propio_propietario_rpc:SELECT:{propietario_rpc}'] then
+    raise exception 'D-2: las políticas de perfiles no coinciden con las aprobadas';
+  end if;
+
+  if not exists (select 1 from pg_class
+                  where oid = 'public.perfiles'::regclass
+                    and relrowsecurity and not relforcerowsecurity) then
+    raise exception 'D-2: perfiles debe tener RLS habilitada y sin FORCE';
+  end if;
+
+  -- Sin acceso nuevo para los roles de la Data API sobre la vista y el helper.
+  if has_table_privilege('anon', v_vista, 'SELECT, INSERT, UPDATE, DELETE')
+     or has_table_privilege('authenticated', v_vista, 'SELECT, INSERT, UPDATE, DELETE')
+     or has_table_privilege('service_role', v_vista, 'SELECT, INSERT, UPDATE, DELETE')
+     or has_function_privilege('anon', v_helper, 'EXECUTE')
+     or has_function_privilege('authenticated', v_helper, 'EXECUTE')
+     or has_function_privilege('service_role', v_helper, 'EXECUTE') then
+    raise exception 'D-2: anon, authenticated o service_role tienen acceso a la vista o al helper';
   end if;
 end $$;
+
+-- Complemento: invariantes de D-2 que fijan las pruebas P2–P5 de
+-- supabase/tests/lector_perfiles_rpc.test.sql y que el bloque anterior no
+-- verifica (privilegios por columna del rol, ningún privilegio sobre otras
+-- relaciones, propiedad de esquemas, lenguaje y EXECUTE exacto del helper,
+-- columnas de la vista y condición de la política). Traducción literal de esas
+-- aserciones.
+do $$
+begin
+  -- P2: privilegios efectivos del rol sobre perfiles: SELECT por columna en las
+  -- cuatro columnas aprobadas y nada más.
+  if not coalesce((select bool_and(has_column_privilege('lector_perfiles_rpc', 'public.perfiles', c, 'SELECT'))
+                     from unnest(array['usuario_id', 'empresa_id', 'rol', 'activo']) c), false)
+     or exists (select 1 from unnest(array['usuario', 'nombre', 'creado_en']) c
+                 where has_column_privilege('lector_perfiles_rpc', 'public.perfiles', c, 'SELECT'))
+     or has_table_privilege('lector_perfiles_rpc', 'public.perfiles',
+          'select, insert, update, delete, truncate, references, trigger')
+     or has_any_column_privilege('lector_perfiles_rpc', 'public.perfiles',
+          'insert, update, references') then
+    raise exception 'D-2 (P2): los privilegios de lector_perfiles_rpc sobre perfiles no son sólo SELECT en sus cuatro columnas';
+  end if;
+
+  -- P2: ningún privilegio sobre otras tablas o vistas de public ni privado.
+  if exists (
+       select 1 from pg_class c
+        where c.relnamespace in ('public'::regnamespace, 'privado'::regnamespace)
+          and c.relkind in ('r', 'p', 'v', 'm', 'f')
+          and c.oid not in ('public.perfiles'::regclass, 'privado.perfiles_empresa_gestion'::regclass)
+          and has_any_column_privilege('lector_perfiles_rpc', c.oid,
+                'select, insert, update, references')) then
+    raise exception 'D-2 (P2): lector_perfiles_rpc tiene privilegios sobre otras tablas o vistas';
+  end if;
+
+  -- P2: no es dueño de ningún esquema.
+  if exists (select 1 from pg_namespace where nspowner = 'lector_perfiles_rpc'::regrole) then
+    raise exception 'D-2 (P2): lector_perfiles_rpc es dueño de un esquema';
+  end if;
+
+  -- P3: helper en lenguaje sql, ACL con únicamente EXECUTE de propietario_rpc y
+  -- sin EXECUTE para el lector, authenticated, anon, service_role ni postgres.
+  if not coalesce((select l.lanname = 'sql'
+                     from pg_proc p join pg_language l on l.oid = p.prolang
+                    where p.oid = 'privado.empresa_gestion_actual()'::regprocedure), false)
+     or array(select a.grantee::regrole::text || ':' || a.privilege_type
+                from pg_proc p, aclexplode(p.proacl) a
+               where p.oid = 'privado.empresa_gestion_actual()'::regprocedure
+               order by 1) <> array['propietario_rpc:EXECUTE']
+     or exists (
+          select 1 from unnest(array['lector_perfiles_rpc', 'authenticated', 'anon', 'service_role', 'postgres']) r
+           where has_function_privilege(r, 'privado.empresa_gestion_actual()', 'EXECUTE')) then
+    raise exception 'D-2 (P3): el helper no es SQL, o su ACL/EXECUTE no es el aprobado';
+  end if;
+
+  -- P4: la vista expone exactamente usuario_id, empresa_id, rol y activo.
+  if array(select attname::text from pg_attribute
+            where attrelid = 'privado.perfiles_empresa_gestion'::regclass
+              and attnum > 0 and not attisdropped
+            order by attnum) <> array['usuario_id', 'empresa_id', 'rol', 'activo'] then
+    raise exception 'D-2 (P4): la vista no expone exactamente usuario_id, empresa_id, rol y activo';
+  end if;
+
+  -- P5: la política del lector filtra empresa_id con privado.empresa_gestion_actual().
+  if not coalesce((select qual ~ 'empresa_gestion_actual' and qual ~ 'empresa_id'
+                     from pg_policies
+                    where schemaname = 'public' and tablename = 'perfiles'
+                      and policyname = 'perfiles_select_empresa_lector'), false) then
+    raise exception 'D-2 (P5): la política del lector no filtra empresa_id con privado.empresa_gestion_actual()';
+  end if;
+end $$;
+
+-- Definiciones completas del helper, la vista y la política contra la migración de D-2
+-- (ADR-001 §18.4.2.1): comparación exacta, no por fragmentos.
+do $$
+begin
+  -- Helper: cuerpo exacto de la definición aprobada (20261029233000_lector_perfiles_rpc.sql,
+  -- creación del helper; ADR-001 §18.4.2.1, Capa 1). prosrc se guarda tal cual se
+  -- escribió (no se deparsea): se normalizan sólo los espacios en blanco, así que la
+  -- comparación no depende de la versión de PostgreSQL ni de search_path.
+  if btrim(regexp_replace(
+       (select prosrc from pg_proc where oid = 'privado.empresa_gestion_actual()'::regprocedure),
+       '\s+', ' ', 'g'))
+     is distinct from
+     'select p.empresa_id from public.perfiles p where p.usuario_id = privado.usuario_actual() and p.activo and p.rol in (''dueno'', ''encargado'')' then
+    raise exception 'D-2 (definición): el cuerpo del helper no es el aprobado';
+  end if;
+
+  -- Vista: la consulta completa se compara contra una vista de referencia
+  -- temporal creada en esta transacción con el SELECT aprobado (Capa 2). Ambas se
+  -- deparsean con el mismo servidor y el mismo search_path de la sesión, así que
+  -- la igualdad no depende de ninguno de los dos. Se elimina al terminar.
+  create temp view d2_ref_vista with (security_invoker = false, security_barrier = true) as
+    select p.usuario_id, p.empresa_id, p.rol, p.activo from public.perfiles p;
+  if pg_get_viewdef('privado.perfiles_empresa_gestion'::regclass)
+     is distinct from pg_get_viewdef('pg_temp.d2_ref_vista'::regclass) then
+    raise exception 'D-2 (definición): la consulta de la vista no es la aprobada';
+  end if;
+  drop view pg_temp.d2_ref_vista;
+
+  -- Política: comando, tipo (PERMISSIVE/RESTRICTIVE), roles, ausencia de WITH
+  -- CHECK y condición completa contra una política de referencia temporal con la
+  -- cláusula aprobada, sobre una tabla temporal con RLS. Se elimina al terminar.
+  create temp table d2_ref_perfiles (empresa_id uuid);
+  alter table pg_temp.d2_ref_perfiles enable row level security;
+  create policy d2_ref_politica on pg_temp.d2_ref_perfiles
+    for select to lector_perfiles_rpc
+    using (empresa_id = (select privado.empresa_gestion_actual()));
+  if (select row(pg_get_expr(a.polqual, a.polrelid), a.polcmd, a.polpermissive,
+                 a.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (a.polroles) order by 1))
+        from pg_policy a
+       where a.polrelid = 'public.perfiles'::regclass and a.polname = 'perfiles_select_empresa_lector')
+     is distinct from
+     (select row(pg_get_expr(b.polqual, b.polrelid), b.polcmd, b.polpermissive,
+                 b.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (b.polroles) order by 1))
+        from pg_policy b
+       where b.polrelid = 'pg_temp.d2_ref_perfiles'::regclass and b.polname = 'd2_ref_politica') then
+    raise exception 'D-2 (definición): la política del lector no es la aprobada (condición completa, PERMISSIVE, SELECT, rol)';
+  end if;
+  drop table pg_temp.d2_ref_perfiles;
+end $$;
+
+-- Privilegios por defecto a favor del lector (objetos futuros).
+do $$
+begin
+  -- ALTER DEFAULT PRIVILEGES que le darían al lector privilegios sobre objetos
+  -- FUTUROS. Lectura estricta de ADR-001 §18.4.2.1 («su único privilegio es
+  -- SELECT (usuario_id, empresa_id, rol, activo) sobre public.perfiles»):
+  --   - cualquier ACL por defecto cuyo destinatario sea el propio lector, creada
+  --     por cualquier otro rol, en cualquier esquema o globalmente;
+  --   - cualquier ACL por defecto a favor de PUBLIC sobre tablas ('r'),
+  --     secuencias ('S') o esquemas ('n'), porque PUBLIC incluye al lector.
+  -- Quedan fuera, a propósito: el EXECUTE de PUBLIC sobre funciones y el USAGE
+  -- sobre tipos (valores base de PostgreSQL; el de funciones lo gobierna el
+  -- hardening de grants), las ACL por defecto de otros roles (Data API, etc.) y las
+  -- filas cuyo creador es el propio lector (entrada de su propio owner). El lector
+  -- no es miembro de ningún rol (bloque anterior), así que no hereda ACL por
+  -- defecto de terceros.
+  if exists (
+       select 1
+         from pg_default_acl d, aclexplode(d.defaclacl) a
+        where (a.grantee = 'lector_perfiles_rpc'::regrole
+               and d.defaclrole <> 'lector_perfiles_rpc'::regrole)
+           or (a.grantee = 0 and d.defaclobjtype in ('r', 'S', 'n'))) then
+    raise exception 'D-2 (privilegios por defecto): una ACL por defecto otorga privilegios a lector_perfiles_rpc o a PUBLIC sobre tablas, secuencias o esquemas futuros';
+  end if;
+end $$;
+
+-- Políticas previas de perfiles (condición completa).
+do $$
+begin
+  -- Las dos políticas previas de perfiles (sin cambios desde su creación): el
+  -- bloque A sólo comprueba su nombre, comando y rol. Aquí se compara la
+  -- condición completa, el tipo (PERMISSIVE/RESTRICTIVE) y la ausencia de WITH
+  -- CHECK contra políticas de referencia temporales con el USING aprobado:
+  --   - perfiles_select_propio: 20261022120000_auth_base_empresas_perfiles.sql:96-100;
+  --   - perfiles_select_propio_propietario_rpc: 20261023140000_catalogo_productos.sql:241-245.
+  -- Ambas leen sólo la fila propia (ADR-001 §18.4.2.1, caso P9). Misma técnica que
+  -- el bloque anterior: la comparación no depende del search_path ni de la versión.
+  create temp table d2_ref_perfiles_previas (usuario_id uuid);
+  alter table pg_temp.d2_ref_perfiles_previas enable row level security;
+  create policy d2_ref_propio on pg_temp.d2_ref_perfiles_previas
+    for select to authenticated
+    using (usuario_id = (select auth.uid()));
+  create policy d2_ref_propio_rpc on pg_temp.d2_ref_perfiles_previas
+    for select to propietario_rpc
+    using (usuario_id = (select privado.usuario_actual()));
+  if (select row(pg_get_expr(a.polqual, a.polrelid), a.polcmd, a.polpermissive,
+                 a.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (a.polroles) order by 1))
+        from pg_policy a
+       where a.polrelid = 'public.perfiles'::regclass and a.polname = 'perfiles_select_propio')
+     is distinct from
+     (select row(pg_get_expr(b.polqual, b.polrelid), b.polcmd, b.polpermissive,
+                 b.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (b.polroles) order by 1))
+        from pg_policy b
+       where b.polrelid = 'pg_temp.d2_ref_perfiles_previas'::regclass and b.polname = 'd2_ref_propio') then
+    raise exception 'D-2 (definición): la política perfiles_select_propio no es la aprobada';
+  end if;
+  if (select row(pg_get_expr(a.polqual, a.polrelid), a.polcmd, a.polpermissive,
+                 a.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (a.polroles) order by 1))
+        from pg_policy a
+       where a.polrelid = 'public.perfiles'::regclass and a.polname = 'perfiles_select_propio_propietario_rpc')
+     is distinct from
+     (select row(pg_get_expr(b.polqual, b.polrelid), b.polcmd, b.polpermissive,
+                 b.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (b.polroles) order by 1))
+        from pg_policy b
+       where b.polrelid = 'pg_temp.d2_ref_perfiles_previas'::regclass and b.polname = 'd2_ref_propio_rpc') then
+    raise exception 'D-2 (definición): la política perfiles_select_propio_propietario_rpc no es la aprobada';
+  end if;
+  drop table pg_temp.d2_ref_perfiles_previas;
+end $$;
+
 
 -- ---------------------------------------------------------------------------
 -- 2. Reversión en orden inverso (sin CASCADE)
@@ -592,13 +946,335 @@ begin
     raise exception 'reversión D-1: privilegios de operaciones o movimientos_stock fuera de Stock';
   end if;
 
-  -- D-2 intacta.
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'perfiles'
-                  and policyname = 'perfiles_select_empresa_lector')
-     or to_regclass('privado.perfiles_empresa_gestion') is null
-     or to_regprocedure('privado.empresa_gestion_actual()') is null then
-    raise exception 'reversión D-1: objetos de D-2 alterados';
+  -- D-2 intacta: ver la sección 4 (contrato completo de D-2).
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. Contrato aprobado de D-2 (postcheck)
+-- ---------------------------------------------------------------------------
+-- La reversión no debe haber alterado el contrato de D-2. Mismo bloque
+-- literal de la verificación 7 de D-2.
+do $$
+declare
+  v_vista regclass := 'privado.perfiles_empresa_gestion'::regclass;
+  v_helper regprocedure := 'privado.empresa_gestion_actual()'::regprocedure;
+  v_rol text;
+begin
+  -- Sin privilegios de esquema residuales.
+  if has_schema_privilege('lector_perfiles_rpc', 'privado', 'CREATE')
+     or has_schema_privilege('lector_perfiles_rpc', 'privado', 'USAGE')
+     or has_schema_privilege('lector_perfiles_rpc', 'public', 'CREATE')
+     or has_schema_privilege('propietario_rpc', 'privado', 'CREATE')
+     or has_schema_privilege('propietario_rpc', 'public', 'CREATE')
+     or exists (select 1 from pg_namespace n, aclexplode(n.nspacl) a
+                 where a.grantee = 'lector_perfiles_rpc'::regrole) then
+    raise exception 'D-2: privilegios de esquema residuales o no aprobados';
   end if;
+
+  -- Atributos del rol.
+  if not exists (
+       select 1 from pg_roles
+        where rolname = 'lector_perfiles_rpc'
+          and not (rolcanlogin or rolsuper or rolcreatedb or rolcreaterole
+                   or rolreplication or rolbypassrls)) then
+    raise exception 'D-2: atributos de lector_perfiles_rpc fuera de lo aprobado';
+  end if;
+
+  -- Vista: owner, opciones y ACL exactos (owner + SELECT de propietario_rpc).
+  if not exists (
+       select 1 from pg_class c
+        where c.oid = v_vista and c.relkind = 'v'
+          and c.relowner = 'lector_perfiles_rpc'::regrole
+          and c.reloptions @> array['security_barrier=true', 'security_invoker=false'])
+     or coalesce((select array_agg(a.grantee::regrole::text || ':' || a.privilege_type
+                                   order by a.grantee::regrole::text, a.privilege_type)
+                    from pg_class c, aclexplode(c.relacl) a
+                   where c.oid = v_vista and a.grantee <> c.relowner),
+                 array[]::text[])
+        <> array['propietario_rpc:SELECT'] then
+    raise exception 'D-2: la vista no quedó con el owner, las opciones o la ACL aprobados';
+  end if;
+
+  -- Helper: SECURITY DEFINER, STABLE, search_path vacío, sin parámetros,
+  -- owner propietario_rpc, ACL exacta y sin sobrecargas.
+  if not exists (
+       select 1 from pg_proc p
+        where p.oid = v_helper
+          and p.prosecdef and p.provolatile = 's' and p.pronargs = 0
+          and p.proowner = 'propietario_rpc'::regrole
+          and p.prorettype = 'uuid'::regtype
+          and p.proconfig @> array['search_path=""']
+          and p.proacl is not null)
+     or (select array_agg(distinct a.grantee::regrole::text)
+           from pg_proc p, aclexplode(p.proacl) a where p.oid = v_helper)
+        <> array['propietario_rpc']
+     or (select count(*) from pg_proc
+          where pronamespace = 'privado'::regnamespace
+            and proname = 'empresa_gestion_actual') <> 1 then
+    raise exception 'D-2: el helper no quedó con los atributos o la ACL aprobados';
+  end if;
+
+  -- Membresía: exactamente dos filas (ADMIN automática del superusuario de
+  -- arranque; postgres con SET sin INHERIT) y el rol no es miembro de nadie.
+  if (select count(*) from pg_auth_members
+       where roleid = 'lector_perfiles_rpc'::regrole) <> 2
+     or not exists (
+       select 1 from pg_auth_members
+        where roleid = 'lector_perfiles_rpc'::regrole
+          and member = 'postgres'::regrole and grantor = 'postgres'::regrole
+          and not admin_option and not inherit_option and set_option)
+     or not exists (
+       select 1 from pg_auth_members am join pg_roles g on g.oid = am.grantor
+        where am.roleid = 'lector_perfiles_rpc'::regrole
+          and am.member = 'postgres'::regrole and g.rolsuper
+          and am.admin_option and not am.inherit_option and not am.set_option)
+     or exists (
+       select 1 from pg_auth_members
+        where roleid = 'lector_perfiles_rpc'::regrole and inherit_option)
+     or exists (
+       select 1 from pg_auth_members
+        where member = 'lector_perfiles_rpc'::regrole)
+     or not pg_has_role('postgres', 'lector_perfiles_rpc', 'SET')
+     or pg_has_role('postgres', 'lector_perfiles_rpc', 'USAGE') then
+    raise exception 'D-2: la membresía de lector_perfiles_rpc no quedó en SET true / INHERIT false';
+  end if;
+
+  foreach v_rol in array array['anon', 'authenticated', 'authenticator', 'service_role', 'propietario_rpc'] loop
+    if exists (select 1 from pg_roles where rolname = v_rol)
+       and (pg_has_role(v_rol, 'lector_perfiles_rpc', 'SET')
+            or pg_has_role(v_rol, 'lector_perfiles_rpc', 'USAGE')) then
+      raise exception 'D-2: % puede hacer SET ROLE o heredar lector_perfiles_rpc', v_rol;
+    end if;
+  end loop;
+
+  -- Propiedad: una sola relación (la vista) y ninguna función.
+  if (select count(*) from pg_class where relowner = 'lector_perfiles_rpc'::regrole) <> 1
+     or exists (select 1 from pg_proc where proowner = 'lector_perfiles_rpc'::regrole) then
+    raise exception 'D-2: lector_perfiles_rpc debe ser dueño sólo de la vista';
+  end if;
+
+  -- Políticas de perfiles: las dos previas sin cambio y una sola nueva; ninguna
+  -- de escritura; sin FORCE.
+  if array(select policyname || ':' || cmd || ':' || roles::text
+             from pg_policies
+            where schemaname = 'public' and tablename = 'perfiles'
+            order by policyname)
+     <> array['perfiles_select_empresa_lector:SELECT:{lector_perfiles_rpc}',
+              'perfiles_select_propio:SELECT:{authenticated}',
+              'perfiles_select_propio_propietario_rpc:SELECT:{propietario_rpc}'] then
+    raise exception 'D-2: las políticas de perfiles no coinciden con las aprobadas';
+  end if;
+
+  if not exists (select 1 from pg_class
+                  where oid = 'public.perfiles'::regclass
+                    and relrowsecurity and not relforcerowsecurity) then
+    raise exception 'D-2: perfiles debe tener RLS habilitada y sin FORCE';
+  end if;
+
+  -- Sin acceso nuevo para los roles de la Data API sobre la vista y el helper.
+  if has_table_privilege('anon', v_vista, 'SELECT, INSERT, UPDATE, DELETE')
+     or has_table_privilege('authenticated', v_vista, 'SELECT, INSERT, UPDATE, DELETE')
+     or has_table_privilege('service_role', v_vista, 'SELECT, INSERT, UPDATE, DELETE')
+     or has_function_privilege('anon', v_helper, 'EXECUTE')
+     or has_function_privilege('authenticated', v_helper, 'EXECUTE')
+     or has_function_privilege('service_role', v_helper, 'EXECUTE') then
+    raise exception 'D-2: anon, authenticated o service_role tienen acceso a la vista o al helper';
+  end if;
+end $$;
+
+-- Complemento: invariantes de D-2 que fijan las pruebas P2–P5 de
+-- supabase/tests/lector_perfiles_rpc.test.sql y que el bloque anterior no
+-- verifica (privilegios por columna del rol, ningún privilegio sobre otras
+-- relaciones, propiedad de esquemas, lenguaje y EXECUTE exacto del helper,
+-- columnas de la vista y condición de la política). Traducción literal de esas
+-- aserciones.
+do $$
+begin
+  -- P2: privilegios efectivos del rol sobre perfiles: SELECT por columna en las
+  -- cuatro columnas aprobadas y nada más.
+  if not coalesce((select bool_and(has_column_privilege('lector_perfiles_rpc', 'public.perfiles', c, 'SELECT'))
+                     from unnest(array['usuario_id', 'empresa_id', 'rol', 'activo']) c), false)
+     or exists (select 1 from unnest(array['usuario', 'nombre', 'creado_en']) c
+                 where has_column_privilege('lector_perfiles_rpc', 'public.perfiles', c, 'SELECT'))
+     or has_table_privilege('lector_perfiles_rpc', 'public.perfiles',
+          'select, insert, update, delete, truncate, references, trigger')
+     or has_any_column_privilege('lector_perfiles_rpc', 'public.perfiles',
+          'insert, update, references') then
+    raise exception 'D-2 (P2): los privilegios de lector_perfiles_rpc sobre perfiles no son sólo SELECT en sus cuatro columnas';
+  end if;
+
+  -- P2: ningún privilegio sobre otras tablas o vistas de public ni privado.
+  if exists (
+       select 1 from pg_class c
+        where c.relnamespace in ('public'::regnamespace, 'privado'::regnamespace)
+          and c.relkind in ('r', 'p', 'v', 'm', 'f')
+          and c.oid not in ('public.perfiles'::regclass, 'privado.perfiles_empresa_gestion'::regclass)
+          and has_any_column_privilege('lector_perfiles_rpc', c.oid,
+                'select, insert, update, references')) then
+    raise exception 'D-2 (P2): lector_perfiles_rpc tiene privilegios sobre otras tablas o vistas';
+  end if;
+
+  -- P2: no es dueño de ningún esquema.
+  if exists (select 1 from pg_namespace where nspowner = 'lector_perfiles_rpc'::regrole) then
+    raise exception 'D-2 (P2): lector_perfiles_rpc es dueño de un esquema';
+  end if;
+
+  -- P3: helper en lenguaje sql, ACL con únicamente EXECUTE de propietario_rpc y
+  -- sin EXECUTE para el lector, authenticated, anon, service_role ni postgres.
+  if not coalesce((select l.lanname = 'sql'
+                     from pg_proc p join pg_language l on l.oid = p.prolang
+                    where p.oid = 'privado.empresa_gestion_actual()'::regprocedure), false)
+     or array(select a.grantee::regrole::text || ':' || a.privilege_type
+                from pg_proc p, aclexplode(p.proacl) a
+               where p.oid = 'privado.empresa_gestion_actual()'::regprocedure
+               order by 1) <> array['propietario_rpc:EXECUTE']
+     or exists (
+          select 1 from unnest(array['lector_perfiles_rpc', 'authenticated', 'anon', 'service_role', 'postgres']) r
+           where has_function_privilege(r, 'privado.empresa_gestion_actual()', 'EXECUTE')) then
+    raise exception 'D-2 (P3): el helper no es SQL, o su ACL/EXECUTE no es el aprobado';
+  end if;
+
+  -- P4: la vista expone exactamente usuario_id, empresa_id, rol y activo.
+  if array(select attname::text from pg_attribute
+            where attrelid = 'privado.perfiles_empresa_gestion'::regclass
+              and attnum > 0 and not attisdropped
+            order by attnum) <> array['usuario_id', 'empresa_id', 'rol', 'activo'] then
+    raise exception 'D-2 (P4): la vista no expone exactamente usuario_id, empresa_id, rol y activo';
+  end if;
+
+  -- P5: la política del lector filtra empresa_id con privado.empresa_gestion_actual().
+  if not coalesce((select qual ~ 'empresa_gestion_actual' and qual ~ 'empresa_id'
+                     from pg_policies
+                    where schemaname = 'public' and tablename = 'perfiles'
+                      and policyname = 'perfiles_select_empresa_lector'), false) then
+    raise exception 'D-2 (P5): la política del lector no filtra empresa_id con privado.empresa_gestion_actual()';
+  end if;
+end $$;
+
+-- Definiciones completas del helper, la vista y la política contra la migración de D-2
+-- (ADR-001 §18.4.2.1): comparación exacta, no por fragmentos.
+do $$
+begin
+  -- Helper: cuerpo exacto de la definición aprobada (20261029233000_lector_perfiles_rpc.sql,
+  -- creación del helper; ADR-001 §18.4.2.1, Capa 1). prosrc se guarda tal cual se
+  -- escribió (no se deparsea): se normalizan sólo los espacios en blanco, así que la
+  -- comparación no depende de la versión de PostgreSQL ni de search_path.
+  if btrim(regexp_replace(
+       (select prosrc from pg_proc where oid = 'privado.empresa_gestion_actual()'::regprocedure),
+       '\s+', ' ', 'g'))
+     is distinct from
+     'select p.empresa_id from public.perfiles p where p.usuario_id = privado.usuario_actual() and p.activo and p.rol in (''dueno'', ''encargado'')' then
+    raise exception 'D-2 (definición): el cuerpo del helper no es el aprobado';
+  end if;
+
+  -- Vista: la consulta completa se compara contra una vista de referencia
+  -- temporal creada en esta transacción con el SELECT aprobado (Capa 2). Ambas se
+  -- deparsean con el mismo servidor y el mismo search_path de la sesión, así que
+  -- la igualdad no depende de ninguno de los dos. Se elimina al terminar.
+  create temp view d2_ref_vista with (security_invoker = false, security_barrier = true) as
+    select p.usuario_id, p.empresa_id, p.rol, p.activo from public.perfiles p;
+  if pg_get_viewdef('privado.perfiles_empresa_gestion'::regclass)
+     is distinct from pg_get_viewdef('pg_temp.d2_ref_vista'::regclass) then
+    raise exception 'D-2 (definición): la consulta de la vista no es la aprobada';
+  end if;
+  drop view pg_temp.d2_ref_vista;
+
+  -- Política: comando, tipo (PERMISSIVE/RESTRICTIVE), roles, ausencia de WITH
+  -- CHECK y condición completa contra una política de referencia temporal con la
+  -- cláusula aprobada, sobre una tabla temporal con RLS. Se elimina al terminar.
+  create temp table d2_ref_perfiles (empresa_id uuid);
+  alter table pg_temp.d2_ref_perfiles enable row level security;
+  create policy d2_ref_politica on pg_temp.d2_ref_perfiles
+    for select to lector_perfiles_rpc
+    using (empresa_id = (select privado.empresa_gestion_actual()));
+  if (select row(pg_get_expr(a.polqual, a.polrelid), a.polcmd, a.polpermissive,
+                 a.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (a.polroles) order by 1))
+        from pg_policy a
+       where a.polrelid = 'public.perfiles'::regclass and a.polname = 'perfiles_select_empresa_lector')
+     is distinct from
+     (select row(pg_get_expr(b.polqual, b.polrelid), b.polcmd, b.polpermissive,
+                 b.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (b.polroles) order by 1))
+        from pg_policy b
+       where b.polrelid = 'pg_temp.d2_ref_perfiles'::regclass and b.polname = 'd2_ref_politica') then
+    raise exception 'D-2 (definición): la política del lector no es la aprobada (condición completa, PERMISSIVE, SELECT, rol)';
+  end if;
+  drop table pg_temp.d2_ref_perfiles;
+end $$;
+
+-- Privilegios por defecto a favor del lector (objetos futuros).
+do $$
+begin
+  -- ALTER DEFAULT PRIVILEGES que le darían al lector privilegios sobre objetos
+  -- FUTUROS. Lectura estricta de ADR-001 §18.4.2.1 («su único privilegio es
+  -- SELECT (usuario_id, empresa_id, rol, activo) sobre public.perfiles»):
+  --   - cualquier ACL por defecto cuyo destinatario sea el propio lector, creada
+  --     por cualquier otro rol, en cualquier esquema o globalmente;
+  --   - cualquier ACL por defecto a favor de PUBLIC sobre tablas ('r'),
+  --     secuencias ('S') o esquemas ('n'), porque PUBLIC incluye al lector.
+  -- Quedan fuera, a propósito: el EXECUTE de PUBLIC sobre funciones y el USAGE
+  -- sobre tipos (valores base de PostgreSQL; el de funciones lo gobierna el
+  -- hardening de grants), las ACL por defecto de otros roles (Data API, etc.) y las
+  -- filas cuyo creador es el propio lector (entrada de su propio owner). El lector
+  -- no es miembro de ningún rol (bloque anterior), así que no hereda ACL por
+  -- defecto de terceros.
+  if exists (
+       select 1
+         from pg_default_acl d, aclexplode(d.defaclacl) a
+        where (a.grantee = 'lector_perfiles_rpc'::regrole
+               and d.defaclrole <> 'lector_perfiles_rpc'::regrole)
+           or (a.grantee = 0 and d.defaclobjtype in ('r', 'S', 'n'))) then
+    raise exception 'D-2 (privilegios por defecto): una ACL por defecto otorga privilegios a lector_perfiles_rpc o a PUBLIC sobre tablas, secuencias o esquemas futuros';
+  end if;
+end $$;
+
+-- Políticas previas de perfiles (condición completa).
+do $$
+begin
+  -- Las dos políticas previas de perfiles (sin cambios desde su creación): el
+  -- bloque A sólo comprueba su nombre, comando y rol. Aquí se compara la
+  -- condición completa, el tipo (PERMISSIVE/RESTRICTIVE) y la ausencia de WITH
+  -- CHECK contra políticas de referencia temporales con el USING aprobado:
+  --   - perfiles_select_propio: 20261022120000_auth_base_empresas_perfiles.sql:96-100;
+  --   - perfiles_select_propio_propietario_rpc: 20261023140000_catalogo_productos.sql:241-245.
+  -- Ambas leen sólo la fila propia (ADR-001 §18.4.2.1, caso P9). Misma técnica que
+  -- el bloque anterior: la comparación no depende del search_path ni de la versión.
+  create temp table d2_ref_perfiles_previas (usuario_id uuid);
+  alter table pg_temp.d2_ref_perfiles_previas enable row level security;
+  create policy d2_ref_propio on pg_temp.d2_ref_perfiles_previas
+    for select to authenticated
+    using (usuario_id = (select auth.uid()));
+  create policy d2_ref_propio_rpc on pg_temp.d2_ref_perfiles_previas
+    for select to propietario_rpc
+    using (usuario_id = (select privado.usuario_actual()));
+  if (select row(pg_get_expr(a.polqual, a.polrelid), a.polcmd, a.polpermissive,
+                 a.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (a.polroles) order by 1))
+        from pg_policy a
+       where a.polrelid = 'public.perfiles'::regclass and a.polname = 'perfiles_select_propio')
+     is distinct from
+     (select row(pg_get_expr(b.polqual, b.polrelid), b.polcmd, b.polpermissive,
+                 b.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (b.polroles) order by 1))
+        from pg_policy b
+       where b.polrelid = 'pg_temp.d2_ref_perfiles_previas'::regclass and b.polname = 'd2_ref_propio') then
+    raise exception 'D-2 (definición): la política perfiles_select_propio no es la aprobada';
+  end if;
+  if (select row(pg_get_expr(a.polqual, a.polrelid), a.polcmd, a.polpermissive,
+                 a.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (a.polroles) order by 1))
+        from pg_policy a
+       where a.polrelid = 'public.perfiles'::regclass and a.polname = 'perfiles_select_propio_propietario_rpc')
+     is distinct from
+     (select row(pg_get_expr(b.polqual, b.polrelid), b.polcmd, b.polpermissive,
+                 b.polwithcheck is null,
+                 array(select r.rolname::text from pg_roles r where r.oid = any (b.polroles) order by 1))
+        from pg_policy b
+       where b.polrelid = 'pg_temp.d2_ref_perfiles_previas'::regclass and b.polname = 'd2_ref_propio_rpc') then
+    raise exception 'D-2 (definición): la política perfiles_select_propio_propietario_rpc no es la aprobada';
+  end if;
+  drop table pg_temp.d2_ref_perfiles_previas;
 end $$;
 
 commit;
