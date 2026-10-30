@@ -659,6 +659,14 @@ select throws_ok(
 -- ===========================================================================
 -- S — policies directas de propietario_rpc
 -- ===========================================================================
+-- USAGE sobre `extensions` sólo para poder invocar pgTAP con ese rol (pgTAP
+-- vive en ese esquema y propietario_rpc no tiene acceso a él). Es un GRANT
+-- transaccional: se revierte con el ROLLBACK de este test y no queda ningún
+-- privilegio permanente ni se toca ninguna migración (mismo patrón que
+-- camiones_catalogo.test.sql, clientes_catalogo.test.sql y
+-- productos_catalogo.test.sql).
+grant usage on schema extensions to propietario_rpc;
+
 -- jornadas: INSERT
 select pg_temp.como_propietario('aaaaaaaa-0000-4000-8000-000000000003');
 select throws_ok(

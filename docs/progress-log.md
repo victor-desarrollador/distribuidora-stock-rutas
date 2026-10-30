@@ -1,7 +1,7 @@
 ---
-## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (implementación local, sin commit)
+## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commit `019294c` publicado; corrección de H-1 pendiente)
 
-**Rama:** `feat/d1-esquema-jornadas`, en un worktree independiente (`../distribuidora-d1`), desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Implementación **local y sin commit**, con las decisiones D-1 a D-9 aprobadas por el usuario (preámbulo corregido de D-1). No incluye RPC, arnés de concurrencia, frontend ni cambios en D-2. **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `movimientos_stock`, aislamiento por `empresa_id`, roles) y auditoría independiente de Codex **y** OpenCode sobre el mismo hash (ADR-001 §18.4.13 punto 7, §18.4.14 punto 4); la excepción de D-2 no se extiende (§18.4.15).
+**Rama:** `feat/d1-esquema-jornadas`, en un worktree independiente (`../distribuidora-d1`), desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Commit único `019294cca9555541549a278618fbe4d74c5af766` (padre `fc906cc`), **publicado** en `origin/feat/d1-esquema-jornadas` el 30/10/2026 (Preview de Vercel `7441626017`, `success`; sin deployments de Production). Implementación con las decisiones D-1 a D-9 aprobadas por el usuario (preámbulo corregido de D-1). No incluye RPC, arnés de concurrencia, frontend ni cambios en D-2. **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `movimientos_stock`, aislamiento por `empresa_id`, roles) y auditoría independiente de Codex **y** OpenCode sobre el mismo hash (ADR-001 §18.4.13 punto 7, §18.4.14 punto 4); la excepción de D-2 no se extiende (§18.4.15).
 
 ### Qué se hizo
 - **Una migración atómica** (`20261030120000_jornadas_esquema.sql`) con el contrato de ADR-001 §18.4.1–§18.4.2 y §18.4.8:
@@ -56,15 +56,31 @@ El PRD nombra el tipo `carga_camion`; el Blueprint §7.4 y ADR-001 §18.4.1 usan
 
 **Esperado en Supabase local** (inferencia, a confirmar por Claude Local): `supabase test db` pasa de 1.059 a 1.184 aserciones (+123 del archivo nuevo, +1 por E13, +1 hermana del ledger), con `db reset` de 13 migraciones y `db lint` sin errores.
 
+### Verificación real de Claude Local sobre `019294c`: dictamen BLOQUEADO por H-1 (ALTO)
+Claude Local ejecutó la verificación independiente en Supabase local real sobre el commit publicado.
+
+| Verificación (Supabase local real) | Resultado |
+|---|---|
+| `supabase db reset` | PASS |
+| `supabase test db` | **FAIL**: 67/123 aserciones del archivo nuevo; los otros 13 archivos, 1.061 aserciones PASS |
+| `supabase db lint`, rollback, Vitest, Playwright, `typecheck`, `lint`, `build` | PASS |
+| Copia de diagnóstico con `GRANT USAGE ON SCHEMA extensions TO propietario_rpc` dentro de la transacción | 123/123. **No es un PASS del commit original.** |
+
+- **H-1 (ALTO):** `supabase/tests/jornadas_esquema.test.sql:663-669`. Tras `pg_temp.como_propietario(...)`, `throws_ok` corre como `propietario_rpc`, que no tiene `USAGE` sobre el esquema `extensions` (donde Supabase instala pgTAP). Es un defecto del test, no de la migración ni del rollback.
+- **Por qué no lo vi (H-2):** mi laboratorio PG16 concedía `USAGE` sobre `extensions` a PUBLIC y ocultó el defecto. Mis resultados (123/123, mutantes, ciclo de reversión) eran **orientativos**, no una verificación del commit; la verificación real es la de Claude Local. El laboratorio se corrigió (sin `USAGE` para PUBLIC) y reproduce H-1: 67 aserciones pasan y falla la línea 669.
+- **Corrección local, sin commit:** sólo `supabase/tests/jornadas_esquema.test.sql` (+8 líneas, comentario incluido): `grant usage on schema extensions to propietario_rpc;` antes de la primera ejecución de pgTAP con ese rol. Es un `GRANT` transaccional: se revierte con el `ROLLBACK` del test, no deja ningún privilegio permanente y no toca migraciones, roles ni objetos productivos (mismo patrón que `camiones_catalogo`, `clientes_catalogo` y `productos_catalogo`).
+- **H-4:** los 50 nombres de restricciones, índices y policies de D-1 coinciden exactamente con la lista L.2 aprobada; no se cambió ninguno.
+- **Estado:** el resultado definitivo **sigue pendiente**. Requiere un commit correctivo (con autorización humana) y una nueva verificación de Claude Local sobre ese hash, además de la security review y la auditoría de Codex y OpenCode.
+
 ### Riesgos pendientes
-1. **Evidencia real pendiente:** `supabase db reset --local`, `supabase test db`, `supabase db lint --local --fail-on error`, Playwright y el rollback en local (vacío, y con datos para comprobar el aborto) los ejecuta Claude Local; mi evidencia es orientativa.
+1. **Evidencia real parcial:** `019294c` falló `supabase test db` por H-1 (ver arriba). Hasta que Claude Local repita la verificación completa sobre el commit correctivo, el resultado definitivo está pendiente; mi evidencia de laboratorio es orientativa.
 2. **Diferencias PG16/PG17:** las definiciones literales de `pg_get_constraintdef`/`pg_get_indexdef` que fijan los tests y el precheck del rollback salieron de PG16. Si PG17 las imprime distinto, fallarán cerrado (los tests se corrigen; el rollback aborta sin cambios).
 3. **Orden de `ORDER BY conname`:** las aserciones de las tablas nuevas usan `collate "C"`; las ampliaciones de los tests existentes mantienen el orden vigente y sus posiciones no dependen de la colación.
 4. **`propietario_rpc` sin `SELECT` sobre los historiales:** las futuras RPC no podrán usar `INSERT … RETURNING` sobre ellos.
 5. **Una jornada cerrada no está protegida declarativamente:** el `UPDATE` de `jornadas` queda acotado por columnas y RLS, pero que una jornada cerrada no se modifique lo garantizan las RPC (no hay trigger, por diseño).
 6. **Con datos, D-1 no es reversible por este camino:** cualquier cambio posterior sería una migración hacia adelante.
-7. **Sin aplicar en ningún Supabase:** local, staging ni remoto. No se tocó producción. Supabase remoto sigue sin verificar.
-8. **Pendiente de autorización humana:** commit, security review, auditoría de Codex y de OpenCode del hash, y todo push, PR, merge y deploy.
+7. **Sin aplicar en staging ni remoto:** sólo se aplicó en el Supabase local de Claude Local. No se tocó producción. Supabase remoto sigue sin verificar.
+8. **Pendiente de autorización humana:** commit correctivo de H-1, nueva verificación de Claude Local, security review, auditoría de Codex y de OpenCode del hash corregido, y todo push, PR, merge y deploy posteriores.
 9. **Siguen diferidos a la etapa de las RPC:** las 24 pruebas normativas de ADR-007 §7, I1–I14, K1–K12, P11/P12, los ítems de S «por cada una de las seis RPC», el arnés de concurrencia y los conteos de funciones (`productos_catalogo`, `camiones_catalogo`, `hardening_adr001` y `grants_default_privileges` por firma).
 
 ---
