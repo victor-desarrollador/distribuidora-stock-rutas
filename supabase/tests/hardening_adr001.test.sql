@@ -16,7 +16,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(51);
+select plan(58);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -233,6 +233,57 @@ select ok(
                or rolcreaterole or rolreplication)
      from pg_roles where rolname = 'propietario_rpc'),
   'O-3: propietario_rpc sigue NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION');
+
+-- ===========================================================================
+-- D-2 / P1 — postgres → lector_perfiles_rpc: SET sí, INHERIT no (ADR-001 §18.4.2.1)
+-- ===========================================================================
+-- Misma forma que O-3 para propietario_rpc: CREATE ROLE genera una fila
+-- automática (grantor: el superusuario de arranque; ADMIN OPTION, sin SET ni
+-- INHERIT) y la migración agrega la de postgres (SET true, INHERIT false).
+select results_eq(
+  $$select am.admin_option, am.inherit_option, am.set_option
+      from pg_auth_members am
+     where am.roleid = 'lector_perfiles_rpc'::regrole
+       and am.member = 'postgres'::regrole
+       and am.grantor = 'postgres'::regrole$$,
+  $$values (false, false, true)$$,
+  'D-2/P1: la membresía otorgada por postgres es SET true, INHERIT false, sin ADMIN');
+
+select results_eq(
+  $$select am.admin_option, am.inherit_option, am.set_option
+      from pg_auth_members am join pg_roles g on g.oid = am.grantor
+     where am.roleid = 'lector_perfiles_rpc'::regrole
+       and am.member = 'postgres'::regrole
+       and g.rolsuper$$,
+  $$values (true, false, false)$$,
+  'D-2/P1: la fila automática del superusuario de arranque es ADMIN sin SET ni INHERIT');
+
+select is(
+  (select count(*)::int from pg_auth_members
+    where roleid = 'lector_perfiles_rpc'::regrole and member = 'postgres'::regrole),
+  2,
+  'D-2/P1: exactamente dos filas de membresía para lector_perfiles_rpc, ambas con member = postgres');
+
+select is(
+  (select count(*)::int from pg_auth_members
+    where roleid = 'lector_perfiles_rpc'::regrole and inherit_option),
+  0,
+  'D-2/P1: ninguna fila de membresía de lector_perfiles_rpc tiene INHERIT');
+
+select ok(
+  not exists (select 1 from pg_auth_members where member = 'lector_perfiles_rpc'::regrole),
+  'D-2/P1: lector_perfiles_rpc no es miembro de ningún rol');
+
+select ok(
+  pg_has_role('postgres', 'lector_perfiles_rpc', 'SET')
+  and not pg_has_role('postgres', 'lector_perfiles_rpc', 'USAGE'),
+  'D-2/P1: postgres puede hacer SET ROLE lector_perfiles_rpc pero no hereda sus privilegios');
+
+select ok(
+  not exists (
+    select 1 from unnest(array['anon', 'authenticated', 'authenticator', 'service_role', 'propietario_rpc']) r
+     where pg_has_role(r, 'lector_perfiles_rpc', 'SET') or pg_has_role(r, 'lector_perfiles_rpc', 'USAGE')),
+  'D-2/P1: ni anon, authenticated, authenticator, service_role ni propietario_rpc pueden hacer SET ROLE lector_perfiles_rpc ni heredarlo');
 
 -- SET ROLE sigue disponible (lo usan migraciones y pruebas).
 grant usage on schema extensions to propietario_rpc;
