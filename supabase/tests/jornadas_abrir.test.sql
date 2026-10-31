@@ -12,7 +12,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(153);
+select plan(169);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como owner; se revierten al final)
@@ -326,8 +326,35 @@ select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
 select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000014', 'aaaaaaaa-1100-4000-8000-0000000000c8', pg_temp.hoy() - 1, 'aaaaaaaa-1100-4000-8000-000000000009')$q$, 'PT400', 'jornada_fecha_invalida', 'caso 3: ayer (día operativo anterior) → PT400 jornada_fecha_invalida');
 reset role;
 select ok(pg_temp.igual(), 'caso 3: ayer (día operativo anterior) → PT400 jornada_fecha_invalida: sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
-select is((select count(*)::int from public.operaciones where idempotency_key in ('11110000-1100-4000-8000-000000000010','11110000-1100-4000-8000-000000000011','11110000-1100-4000-8000-000000000012','11110000-1100-4000-8000-000000000013','11110000-1100-4000-8000-000000000014')), 0,
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
+select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000016', 'aaaaaaaa-1100-4000-8000-0000000000c8', date '0001-01-01 BC', 'aaaaaaaa-1100-4000-8000-000000000009')$q$, 'PT400', 'jornada_fecha_invalida', 'T1-SR-1: 0001-01-01 a. C. (primer día anterior al año 1 d. C.) → PT400 jornada_fecha_invalida');
+reset role;
+select ok(pg_temp.igual(), 'T1-SR-1: 0001-01-01 a. C. (primer día anterior al año 1 d. C.) → PT400 jornada_fecha_invalida: sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
+select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000017', 'aaaaaaaa-1100-4000-8000-0000000000c8', date '2030-05-01 BC', 'aaaaaaaa-1100-4000-8000-000000000009')$q$, 'PT400', 'jornada_fecha_invalida', 'T1-SR-1: 2030-05-01 a. C. (su texto to_char coincide con el de 2030-05-01 d. C.) → PT400 jornada_fecha_invalida');
+reset role;
+select ok(pg_temp.igual(), 'T1-SR-1: 2030-05-01 a. C. (su texto to_char coincide con el de 2030-05-01 d. C.) → PT400 jornada_fecha_invalida: sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
+select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000018', 'aaaaaaaa-1100-4000-8000-0000000000c8', date '4713-01-01 BC', 'aaaaaaaa-1100-4000-8000-000000000009')$q$, 'PT400', 'jornada_fecha_invalida', 'T1-SR-1: 4713-01-01 a. C. (fecha mínima de PostgreSQL) → PT400 jornada_fecha_invalida');
+reset role;
+select ok(pg_temp.igual(), 'T1-SR-1: 4713-01-01 a. C. (fecha mínima de PostgreSQL) → PT400 jornada_fecha_invalida: sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
+select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000019', 'aaaaaaaa-1100-4000-8000-0000000000c8', date '0001-01-01', 'aaaaaaaa-1100-4000-8000-000000000009')$q$, 'PT400', 'jornada_fecha_invalida', 'T1-SR-1: 0001-01-01 d. C. (mínimo del rango: se rechaza por fecha pasada, paso 10) → PT400 jornada_fecha_invalida');
+reset role;
+select ok(pg_temp.igual(), 'T1-SR-1: 0001-01-01 d. C. (mínimo del rango: se rechaza por fecha pasada, paso 10) → PT400 jornada_fecha_invalida: sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
+select is((select count(*)::int from public.operaciones where idempotency_key in ('11110000-1100-4000-8000-000000000010','11110000-1100-4000-8000-000000000011','11110000-1100-4000-8000-000000000012','11110000-1100-4000-8000-000000000013','11110000-1100-4000-8000-000000000014','11110000-1100-4000-8000-000000000016','11110000-1100-4000-8000-000000000017','11110000-1100-4000-8000-000000000018','11110000-1100-4000-8000-000000000019')), 0,
   'ningún rechazo de fecha reservó su clave de idempotencia');
+select is(
+  (select count(distinct to_char(d, 'YYYY-MM-DD'))::int from generate_series(date '0001-01-01', date '9999-12-31', interval '1 day') d),
+  (select count(*)::int from generate_series(date '0001-01-01', date '9999-12-31', interval '1 day') d),
+  'T1-SR-1: to_char(fecha, ''YYYY-MM-DD'') es inyectivo en [0001-01-01, 9999-12-31]; la huella v1 no puede colisionar dentro del rango admitido');
+select is(
+  to_char(date '2030-05-01 BC', 'YYYY-MM-DD'), to_char(date '2030-05-01', 'YYYY-MM-DD'),
+  'T1-SR-1: documenta la causa: to_char no imprime la era, y una fecha a. C. produce el mismo texto que la d. C. (por eso se rechaza antes de la huella)');
 select pg_temp.fijar();
 select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
 select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000015', null, 'infinity'::date, null)$q$, 'PT400', 'jornada_fecha_invalida', 'precedencia del paso 3: fecha infinita + vendedor y camión nulos → fecha_invalida');
@@ -520,7 +547,21 @@ select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
 select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000001', 'aaaaaaaa-1100-4000-8000-0000000000c1', pg_temp.hoy(), 'aaaaaaaa-1100-4000-8000-000000000009')$q$, 'PT409', 'jornada_conflicto_idempotencia', 'I6: misma clave y otro vendedor → PT409');
 reset role;
 select ok(pg_temp.igual(), 'I6: misma clave y otro vendedor → PT409: sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
+select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000001', 'aaaaaaaa-1100-4000-8000-0000000000c1', (to_char(pg_temp.hoy(), 'YYYY-MM-DD') || ' BC')::date, 'aaaaaaaa-1100-4000-8000-000000000003')$q$, 'PT400', 'jornada_fecha_invalida', 'T1-SR-1: replay con la fecha a. C. de igual texto que la de la apertura → PT400 (no devuelve la jornada original)');
+reset role;
+select ok(pg_temp.igual(), 'T1-SR-1: replay con la fecha a. C. de igual texto que la de la apertura → PT400 (no devuelve la jornada original): sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
+select throws_ok($q$select public.abrir_jornada('11110000-1100-4000-8000-000000000001', 'aaaaaaaa-1100-4000-8000-0000000000c1', (to_char(pg_temp.hoy() + 7, 'YYYY-MM-DD') || ' BC')::date, 'aaaaaaaa-1100-4000-8000-000000000003')$q$, 'PT400', 'jornada_fecha_invalida', 'T1-SR-1: replay con una fecha a. C. de otro día → PT400 (la estructura precede al conflicto de idempotencia)');
+reset role;
+select ok(pg_temp.igual(), 'T1-SR-1: replay con una fecha a. C. de otro día → PT400 (la estructura precede al conflicto de idempotencia): sin filas nuevas en operaciones, jornadas, movimientos ni historiales');
 select is((select o.huella from public.operaciones o where o.idempotency_key = '11110000-1100-4000-8000-000000000001' and o.actor_id = 'aaaaaaaa-1100-4000-8000-000000000001'), pg_temp.huella_apertura('aaaaaaaa-1100-4000-8000-0000000000c1', pg_temp.hoy(), 'aaaaaaaa-1100-4000-8000-000000000003'), 'I6: la operación original conserva su huella');
+select pg_temp.como_usuario('aaaaaaaa-1100-4000-8000-000000000001');
+select lives_ok($q$insert into res select 'R4', public.abrir_jornada('11110000-1100-4000-8000-000000000001', 'aaaaaaaa-1100-4000-8000-0000000000c1', pg_temp.hoy(), 'aaaaaaaa-1100-4000-8000-000000000003')$q$, 'T1-SR-1: el replay legítimo (misma fecha d. C.) sigue funcionando después de los rechazos');
+reset role;
+select is((select v from res where k = 'R4'), (select v from res where k = 'J1'), 'T1-SR-1: el replay legítimo devuelve la jornada original');
 -- I7: la clave ya usada por una operación de otro tipo
 insert into public.operaciones (empresa_id, actor_id, tipo, idempotency_key, huella, jornada_id) values ('aaaaaaaa-1100-4000-8000-000000000000', 'aaaaaaaa-1100-4000-8000-000000000001', 'ingreso', '11110000-1100-4000-8000-000000000060', repeat('0', 64), null);
 insert into public.operaciones (empresa_id, actor_id, tipo, idempotency_key, huella, jornada_id) values ('aaaaaaaa-1100-4000-8000-000000000000', 'aaaaaaaa-1100-4000-8000-000000000001', 'a_cuarentena', '11110000-1100-4000-8000-000000000061', repeat('1', 64), null);

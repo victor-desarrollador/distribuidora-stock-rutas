@@ -1,5 +1,5 @@
 ---
-## 31/10/2026 — T1: RPC `abrir_jornada` (implementación local, sin commit; rama apilada sobre D-1 congelada)
+## 31/10/2026 — T1: RPC `abrir_jornada` (commit `44b1670` publicado; primera corrección posauditoría en local, sin commit; rama apilada sobre D-1 congelada)
 
 **Rama:** `feat/rpc-jornadas-t1-abrir`, en el worktree `../distribuidora-rpc-t1`, desde el commit exacto `e225fff794b166fc88928a5101e65c859ec512ba` (D-1, congelada). **No se integra a `main`**: depende del esquema de D-1, que no está aprobada para integración (M-4 y N-1 siguen pendientes de aceptación formal). **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `SECURITY DEFINER`, `empresa_id`, roles, idempotencia y concurrencia) y auditoría independiente de Codex **y** OpenCode sobre el hash antes de cualquier merge (ADR-001 §18.4.13, punto 7).
 
@@ -20,7 +20,7 @@ Primera de las seis RPC aprobadas de jornadas (ADR-001 §18.4; ADR-007 §2.1): `
 |---|---|
 | `supabase/migrations/20261031120000_rpc_abrir_jornada.sql` | nuevo |
 | `supabase/rollback/20261031120000_rpc_abrir_jornada.rollback.sql` | nuevo |
-| `supabase/tests/jornadas_abrir.test.sql` | nuevo (153 aserciones) |
+| `supabase/tests/jornadas_abrir.test.sql` | nuevo (153 aserciones; 169 tras la corrección posauditoría) |
 | `supabase/tests/jornadas_abrir_aislamiento.test.sql` | nuevo (33 aserciones; ampliación de alcance autorizada por el usuario el 31/10/2026 para probar la guarda de aislamiento) |
 | `supabase/tests/productos_catalogo.test.sql`, `camiones_catalogo.test.sql` | la lista exacta de funciones `SECURITY DEFINER` de `privado` pasa de 14 a 15 (+ `abrir_jornada`); `productos_catalogo` excluye la nueva implementación del barrido de auxiliares |
 | `supabase/tests/hardening_adr001.test.sql` | `rpc_negocio` +2 firmas (22); implementaciones `SECURITY DEFINER` de `propietario_rpc`: 10 → 11; P11: 20 → 22 firmas |
@@ -59,6 +59,43 @@ Orden de ADR-001 §18.4.3: (1) `READ COMMITTED` o `PT500`; (2) identidad y rol d
 5. **DDL concurrente sobre funciones (M-4 de D-1):** el rollback de T1 no puede excluir un `CREATE OR REPLACE` concurrente entre su verificación y el `DROP`; se corre sin DDL concurrente. M-4 y N-1 siguen pendientes de aceptación formal.
 6. **Lectura de perfiles:** el vendedor se lee en la vista de D-2; un cambio posterior en D-2 o D-1 requeriría revalidar esta RPC. D-1 y D-2 no se modificaron.
 7. **Sin evidencia de PostgreSQL 17:** todo lo anterior es de laboratorio PG16.
+
+### Primera corrección posauditoría de `44b1670` (implementación local, sin commit)
+**Decisión humana (31/10/2026).** Tras las auditorías sobre `44b1670c2a3409dbd5cb454288f99137483b79c1`, el usuario aprobó **una única corrección acotada** a dos hallazgos reproducidos: **Codex M-1** y **Claude Local T1-SR-1**. Es la primera corrección posauditoría de T1 y entra en el límite ordinario de AGENTS.md §2.3.5 (las excepciones de D-1 no se extienden). Alcance: cuatro archivos (la migración, su rollback, `jornadas_abrir.test.sql` y esta bitácora). No se modificó D-1, D-2, Stock, frontend ni CI, y no se implementó T2. Autorizó editar en el lugar la migración de T1 (no está integrada a `main` ni aplicada fuera de local/staging) y no crear una migración adicional.
+
+**T1-SR-1: colisión de huella entre fechas a. C. y d. C. (reproducido en el laboratorio PG16).** `to_char(fecha, 'YYYY-MM-DD')`, que usa la huella v1, no imprime la era: `2030-05-01 BC` y `2030-05-01` dan el mismo texto y por lo tanto la misma huella. Sobre `[4713 a. C., 9999 d. C.]` hay 5.373.447 días y sólo 3.653.202 textos distintos; sobre `[0001-01-01, 9999-12-31]` hay 3.652.059 días y 3.652.059 textos distintos (inyectivo). Con la RPC real, una apertura con `2026-11-01` y un replay con la misma clave y `2026-11-01 BC` devolvieron **la misma jornada**, cuando debía rechazarse; con una clave nueva la fecha a. C. sí se rechazaba (fecha pasada, paso 10), porque el replay (paso 5) precede a esa validación.
+
+**Decisión A (aprobada).** La regla técnica T1-4, acotada a T1 y sin modificar ADR-007 ni `BLUEPRINT.md`, se amplía: `p_fecha` debe ser finita y estar entre `0001-01-01` y `9999-12-31`, inclusive. Fuera de ese rango (o nula) → `PT400 jornada_fecha_invalida` en el **paso 3**, antes de la huella y de cualquier consulta de replay o reserva. La fecha anterior al día operativo se sigue rechazando en el paso 10. La fórmula de la huella v1 no cambia y no hay códigos de error nuevos.
+
+**Codex M-1: el rollback no detectaba modificaciones posteriores de las funciones.** El control anterior comparaba sólo owner, `SECURITY`, `search_path`, ACL y la cantidad de funciones; un `COMMENT ON FUNCTION`, un `CREATE OR REPLACE FUNCTION` o un `ALTER FUNCTION` confirmados después de la migración pasaban el control y el `DROP` los descartaba en silencio.
+
+**Decisión B (aprobada).** El rollback compara cada función con un **manifiesto** generado desde el esquema limpio que deja la migración corregida: esquema y nombre, owner, lenguaje, tipo de función, `SECURITY DEFINER`, `LEAKPROOF`, `STRICT`, `RETSET`, volatilidad, paralelismo, cantidad de argumentos y de defaults, tipo de retorno, tipos, nombres y modos de los argumentos, costo y filas, variádico y soporte, la configuración (`proconfig`, además por igualdad exacta contra `search_path=""`), el comentario, la cantidad de etiquetas de seguridad, el SHA-256 del cuerpo (sin retornos de carro) y, como antes, la ACL exacta. No usa `pg_get_functiondef` ni árboles de nodos (de `proargdefaults`, `prosqlbody` y `protrftypes` sólo verifica que sean nulos), para no depender de representaciones que pueden variar entre PG16 y PG17. Mantiene `DROP` sin `CASCADE`, la transacción única y el aborto sin cambios ante deriva. Una única definición de la consulta sirve para generar el literal y para emitir la comprobación (el generador es una herramienta de laboratorio y no se versiona).
+
+**El manifiesto no es una garantía absoluta de integridad.** No cubre la pertenencia a extensiones, los privilegios iniciales (`pg_init_privs`) ni el contenido de las etiquetas de seguridad (sólo cuenta cuántas hay); cualquier cambio de formato del archivo de la migración (espacios, tabuladores) altera el hash del cuerpo y produce un aborto (falso positivo fail-closed); y la ventana entre la verificación y el `DROP` sigue abierta.
+
+**Concurrencia de DDL (decisión humana: riesgo pendiente, ni resuelto ni aceptado formalmente).** No se agregan mecanismos de bloqueo fuera del contrato aprobado. Evidencia que respalda no agregarlos (laboratorio PG16): un `ALTER FUNCTION` idempotente retiene un `CREATE OR REPLACE` concurrente sobre la misma función, pero **no** un `COMMENT ON FUNCTION` ni un `ALTER` sobre la otra función; no existe un `LOCK` de funciones. M-4 y N-1 de D-1 siguen pendientes de aceptación formal.
+
+**Cómo se verificó (laboratorio PG16, ORIENTATIVO; no sustituye la verificación independiente en Supabase PostgreSQL 17):**
+| Verificación | Resultado |
+|---|---|
+| `jornadas_abrir.test.sql` | **169/169** (153 previas + 16 nuevas): `0001-01-01 BC`, `2030-05-01 BC`, `4713-01-01 BC` y `0001-01-01` con clave nueva → `PT400` sin filas nuevas; la clave no queda reservada; inyectividad de `to_char` en el rango admitido; la causa documentada (`to_char` sin era); replay con la fecha a. C. de igual texto → `PT400` (no la jornada original); replay con otra fecha a. C. → `PT400`; el replay legítimo sigue devolviendo la jornada original; replay con payload distinto → `PT409` (ya cubierto) |
+| `jornadas_abrir_aislamiento.test.sql` y el resto de la suite (16 archivos) | todos en verde; `hardening_adr001` 55/55 hasta la sección O-4 (las 3 aserciones del event trigger exigen superusuario y no son ejecutables en el laboratorio) |
+| Sensibilidad de los tests de fechas | sin la cota inferior `0001-01-01`: 2 fallos (los dos replays a. C.); sin el tope `9999-12-31`: 5; fecha pasada aceptada: 7; huella distinta: 2; replay sin comparar la huella: 3. Sin la comprobación `isfinite` no falla ninguno: es redundante con las dos cotas (una fecha infinita queda fuera del rango), se conserva como defensa explícita |
+| Construcciones limpias del manifiesto | dos construcciones independientes y una tercera con la migración en CRLF dan el mismo manifiesto |
+| Rollback ante deriva (33 modificaciones: 15 por función, 2 cambios de owner y una sobrecarga) | **33/33 abortan sin cambios** (volcado completo antes y después idéntico): `COMMENT ON FUNCTION`; `CREATE OR REPLACE` con cuerpo distinto y con el mismo cuerpo pero otro costo; `ALTER FUNCTION` de volatilidad, `STRICT`, `COST`, `LEAKPROOF`, `PARALLEL`, `SET statement_timeout`, `RESET ALL`, `SET search_path`, `SECURITY`, `RENAME`; `GRANT ... WITH GRANT OPTION`; `REVOKE`; cambio de owner; sobrecarga agregada |
+| Controles positivos del rollback | aceptan: `ANALYZE`; `GRANT EXECUTE` repetido; `COMMENT ... IS NULL`; `ALTER OWNER` al mismo owner; comentario en una tabla ajena; comentario en otra función de `privado`; `CREATE OR REPLACE` con el texto idéntico (la primera versión de este control falló por mi error: había recortado el salto de línea final del cuerpo; corregido); migración con fin de línea CRLF |
+| `search_path` (11 valores, incluidos `''`, `pg_catalog`, `pg_temp` y esquemas homónimos) | la base limpia acepta y una deriva aborta sin cambios en los 11; 0 objetos temporales |
+| Rollback limpio; migrar → revertir → migrar | el estado tras el rollback coincide con el estado sin las dos funciones (esquema, ACL, roles y membresías); reaplicar reproduce el volcado original; una segunda ejecución falla (no es idempotente) |
+
+`SECURITY LABEL` no se pudo ejercitar en el laboratorio (no hay proveedor de etiquetas): la cuenta de etiquetas del manifiesto queda sin probar.
+
+**Riesgos de falsos positivos del manifiesto.** (1) Reformateo del archivo de la migración. (2) Comentarios o etiquetas agregados por herramientas de plataforma: son modificaciones posteriores y deben abortar. (3) Diferencias PG16/PG17 en las columnas de `pg_proc` usadas: se evitaron las representaciones inestables y el costo y las filas se normalizan con `::numeric`, pero **no está verificado en PG17**; es el punto central de la verificación independiente. Si el manifiesto produce un falso positivo sobre el esquema limpio de PG17, se detiene el trabajo y no se relaja el control.
+
+**T1-B1 (hallazgo bajo, documental).** Ejecutar `jornadas_abrir_aislamiento.test.sql` directamente con `psql -f` puede dejar instalada la extensión pgtap en la base. El mecanismo de ejecución aprobado para esa prueba es `supabase test db`. No se modificó el test por este hallazgo.
+
+**Discrepancias con la auditoría de OpenCode (según la decisión humana del 31/10/2026; no se aplicó ninguna recomendación sin evidencia nueva).** *ALTA-1* cita líneas inexistentes de `jornadas_abrir.test.sql` y contradice las 153 pruebas que pasaron en Supabase PG17 sobre `44b1670`. *ALTA-2* corresponde al helper preexistente `privado.usuario_actual()` (migración `20261023140000_catalogo_productos.sql`: `LANGUAGE sql STABLE`, `search_path` vacío, owner `propietario_rpc`, sin `EXECUTE` para los roles de la API), ya registrado como Codex H-3 (riesgo conocido, no bloqueante).
+
+**Pendiente.** Verificación independiente en PostgreSQL 17 (incluido el manifiesto sobre el esquema limpio y las 33 modificaciones del rollback), commit y push con sus propias autorizaciones, nueva security review y auditorías de Codex y OpenCode sobre el hash final. I10, I11 y K10 (T3), I3 con el flujo real (T7), la concurrencia de DDL y M-4/N-1 de D-1 siguen pendientes. Esta corrección no se declara aprobada hasta completar esa verificación.
 
 ---
 ## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commits `019294c`, `30c19f3`, `af4e52a` y `22cf845` publicados; Codex M-3 en corrección local, sin commit)

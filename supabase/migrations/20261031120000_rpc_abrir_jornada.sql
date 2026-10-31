@@ -18,13 +18,18 @@
 --       jornada_vendedor_ocupado.
 --   - T1-3: el día operativo es (now() at time zone 'America/Argentina/Tucuman')
 --     ::date; now() es el instante de la transacción.
---   - T1-4 (opción A, regla técnica acotada a T1): la fecha debe ser finita y
---     estar entre el día operativo actual y 9999-12-31 inclusive. Una fecha
---     nula, infinita o posterior a 9999-12-31 se rechaza en el paso 3, antes de
---     la huella y de la reserva de la clave, con PT400 jornada_fecha_invalida
---     (to_char(infinity) devuelve NULL y to_char de fechas posteriores al año
---     294276 falla; la huella v1 no puede representarlas). La fecha anterior al
---     día operativo se rechaza en el paso 10, como estaba previsto.
+--   - T1-4 (opción A, regla técnica acotada a T1; ampliada tras la auditoría de
+--     44b1670): la fecha debe ser finita y estar entre 0001-01-01 y 9999-12-31
+--     inclusive (paso 3) y no ser anterior al día operativo actual (paso 10).
+--     Una fecha nula, infinita, anterior a 0001-01-01 o posterior a 9999-12-31 se
+--     rechaza en el paso 3, antes de la huella y de cualquier consulta de replay
+--     o reserva de la clave, con PT400 jornada_fecha_invalida. Motivo: la huella
+--     v1 escribe la fecha con to_char(fecha, 'YYYY-MM-DD'); to_char(infinity)
+--     devuelve NULL, to_char de fechas posteriores al año 294276 falla, y el
+--     formato no imprime la era, de modo que una fecha a. C. produce el mismo
+--     texto (y la misma huella) que la fecha d. C. de igual año, mes y día. Dentro
+--     de [0001-01-01, 9999-12-31] el formato es inyectivo. La fórmula de la huella
+--     v1 no cambia.
 --   - T1-5: propietario_rpc ya tiene los privilegios y las policies necesarios
 --     (verificado); esta migración no cambia ningún permiso de D-1 ni de D-2.
 --
@@ -119,14 +124,16 @@ begin
   end if;
 
   -- Paso 3. Estructura, sin leer estado mutable (orden T1-2). La fecha debe ser
-  -- finita y no posterior a 9999-12-31 (T1-4): la huella v1 no representa
-  -- infinity, -infinity ni fechas posteriores al año 294276.
+  -- finita y estar entre 0001-01-01 y 9999-12-31 (T1-4): la huella v1 no
+  -- representa infinity, -infinity ni fechas posteriores al año 294276, y no
+  -- distingue una fecha a. C. de la fecha d. C. de igual texto.
   if p_idempotency_key is null then
     raise exception using errcode = 'PT400', message = 'jornada_clave_invalida';
   end if;
 
   if p_fecha is null
      or not pg_catalog.isfinite(p_fecha)
+     or p_fecha < date '0001-01-01'
      or p_fecha > date '9999-12-31' then
     raise exception using errcode = 'PT400', message = 'jornada_fecha_invalida';
   end if;

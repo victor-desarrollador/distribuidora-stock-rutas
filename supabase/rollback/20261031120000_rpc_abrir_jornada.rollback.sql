@@ -12,10 +12,32 @@
 --
 -- Qué hace: elimina las dos funciones (la fachada public.abrir_jornada y la
 -- implementación privado.abrir_jornada), sin CASCADE. NO borra filas: las
--- jornadas y operaciones creadas con la RPC quedan en sus tablas. Falla cerrado
--- si las funciones ya no son exactamente las aprobadas (owner, SECURITY,
--- search_path o ACL distintos), para no descartar en silencio un cambio
--- posterior. Si algo depende de ellas, el DROP sin CASCADE falla.
+-- jornadas y operaciones creadas con la RPC quedan en sus tablas. Si algo
+-- depende de ellas, el DROP sin CASCADE falla.
+--
+-- Falla cerrado ante deriva: antes del DROP compara cada función con un
+-- manifiesto generado desde el esquema limpio que deja la migración, para no
+-- descartar en silencio un cambio posterior confirmado (un COMMENT ON FUNCTION,
+-- un CREATE OR REPLACE FUNCTION o un ALTER FUNCTION). Por función compara:
+-- esquema y nombre; owner; lenguaje; tipo de función; SECURITY DEFINER;
+-- LEAKPROOF; STRICT; RETSET; volatilidad; paralelismo; cantidad de argumentos y
+-- de defaults; tipo de retorno; tipos, nombres y modos de los argumentos; costo
+-- y filas; variádico y soporte; la configuración (proconfig) por igualdad
+-- exacta; el comentario; la cantidad de etiquetas de seguridad; la ACL (con la
+-- opción de re-otorgar); y el SHA-256 del cuerpo (sin retornos de carro).
+-- Evita pg_get_functiondef y los árboles de nodos, cuya representación puede
+-- variar entre versiones de PostgreSQL: de proargdefaults, prosqlbody y
+-- protrftypes sólo verifica que sean nulos.
+--
+-- Límites (el manifiesto NO es una garantía absoluta de integridad):
+--   - Atributos no cubiertos: la pertenencia a extensiones, las dependencias de
+--     otros objetos (el DROP sin CASCADE las rechaza), los privilegios
+--     iniciales (pg_init_privs) y el contenido de las etiquetas de seguridad (se
+--     cuenta, no se compara).
+--   - Un cambio de formato del archivo de la migración (espacios, tabuladores)
+--     altera el SHA-256 del cuerpo y produce un aborto (falso positivo, fail-closed).
+--   - La ventana entre la verificación y el DROP sigue abierta: no hay un LOCK
+--     de funciones (ver el límite siguiente).
 --
 -- Límite conocido: PostgreSQL no permite bloquear una función como una tabla.
 -- Un CREATE OR REPLACE o un ALTER FUNCTION concurrente entre la verificación y
@@ -66,6 +88,50 @@ begin
           and array(select a::text from unnest(p.proacl) a order by 1)
               = array['authenticated=X/postgres', 'postgres=X/postgres']) then
     raise exception 'reversión T1: abrir_jornada difiere de lo que dejó la migración (owner, SECURITY, search_path, ACL o sobrecargas)';
+  end if;
+end $$;
+
+-- Manifiesto de las dos funciones (generado desde el esquema limpio que deja la
+-- migración; ver el encabezado). Un cambio posterior confirmado hace abortar.
+do $$
+declare
+  v_txt text;
+begin
+  select string_agg(
+    n.nspname || '.' || p.proname
+    || '|' || p.proowner::regrole::text
+    || '|' || l.lanname
+    || '|' || p.prokind::text || '|' || p.prosecdef::text || '|' || p.proleakproof::text || '|' || p.proisstrict::text || '|' || p.proretset::text
+    || '|' || p.provolatile::text || '|' || p.proparallel::text
+    || '|' || p.pronargs::text || '|' || p.pronargdefaults::text
+    || '|' || format_type(p.prorettype, null)
+    || '|' || (select string_agg(format_type(t, null), ',' order by o) from unnest(p.proargtypes::oid[]) with ordinality u(t, o))
+    || '|' || coalesce(array_to_string(p.proargnames, ','), '-')
+    || '|' || coalesce(p.proargmodes::text, '-')
+    || '|' || p.procost::numeric::text || '|' || p.prorows::numeric::text
+    || '|' || p.provariadic::oid::text || '|' || p.prosupport::oid::text
+    || '|' || coalesce(array_to_string(p.proconfig, ','), '-')
+    || '|' || (p.proargdefaults is null)::text || '|' || (p.prosqlbody is null)::text || '|' || (p.protrftypes is null)::text
+    || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '-')
+    || '|' || (select count(*) from pg_seclabel s where s.objoid = p.oid and s.classoid = 'pg_proc'::regclass)::text
+    || '|' || encode(sha256(convert_to(replace(p.prosrc, E'\r', ''), 'UTF8')), 'hex')
+    , E'\n' order by n.nspname collate "C")
+    into v_txt
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
+  where p.proname = 'abrir_jornada' and n.nspname in ('public', 'privado');
+
+  if v_txt is distinct from
+     $m$privado.abrir_jornada|propietario_rpc|plpgsql|f|true|false|false|false|v|u|4|0|uuid|uuid,uuid,date,uuid|p_idempotency_key,p_camion_id,p_fecha,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|-|0|463c3490fc6063abc7ecddb78264fe051dd4f6691fc9f8103f0bc2beec1cffd7
+public.abrir_jornada|postgres|sql|f|false|false|false|false|v|u|4|0|uuid|uuid,uuid,date,uuid|p_idempotency_key,p_camion_id,p_fecha,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|-|0|349c03bf2c303f757d8fa97dc55aff6f85b4b463b85c3e3b901f39f3c28e9115$m$ then
+    raise exception 'reversión T1: abrir_jornada difiere del manifiesto (cuerpo, comentario, firma, lenguaje, atributos, owner o configuración)';
+  end if;
+
+  -- proconfig por igualdad exacta (además de su texto dentro del manifiesto).
+  if exists (select 1 from pg_proc p
+              where p.proname = 'abrir_jornada'
+                and p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
+                and p.proconfig is distinct from array['search_path=""']) then
+    raise exception 'reversión T1: la configuración (proconfig) de abrir_jornada difiere de search_path=""';
   end if;
 end $$;
 
