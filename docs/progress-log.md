@@ -1,5 +1,5 @@
 ---
-## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commits `019294c` y `30c19f3` publicados; H-3 en corrección local, sin commit)
+## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commits `019294c`, `30c19f3` y `af4e52a` publicados; Codex H-1, M-1 y M-2 en corrección local, sin commit)
 
 **Rama:** `feat/d1-esquema-jornadas`, en un worktree independiente (`../distribuidora-d1`), desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Commit único `019294cca9555541549a278618fbe4d74c5af766` (padre `fc906cc`), **publicado** en `origin/feat/d1-esquema-jornadas` el 30/10/2026 (Preview de Vercel `7441626017`, `success`; sin deployments de Production). Implementación con las decisiones D-1 a D-9 aprobadas por el usuario (preámbulo corregido de D-1). No incluye RPC, arnés de concurrencia, frontend ni cambios en D-2. **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `movimientos_stock`, aislamiento por `empresa_id`, roles) y auditoría independiente de Codex **y** OpenCode sobre el mismo hash (ADR-001 §18.4.13 punto 7, §18.4.14 punto 4); la excepción de D-2 no se extiende (§18.4.15).
 
@@ -73,7 +73,7 @@ Claude Local ejecutó la verificación independiente en Supabase local real sobr
 - **Estado:** el resultado definitivo **sigue pendiente**. Requiere un commit correctivo (con autorización humana) y una nueva verificación de Claude Local sobre ese hash, además de la security review y la auditoría de Codex y OpenCode.
 
 ### Security review independiente de Claude Local sobre `30c19f3`: BLOQUEADO por H-3 (MEDIO)
-Dictamen de Claude Local: 0 críticos, 0 altos, **1 medio (H-3)** y 3 informativos. Esta entrada sólo registra H-3 y su refuerzo; los informativos no se tratan acá. **H-3 NO está cerrado**: la corrección está sin commit y sin verificación independiente.
+Dictamen de Claude Local: 0 críticos, 0 altos, **1 medio (H-3)** y 3 informativos. Esta entrada sólo registra H-3 y su refuerzo; los informativos no se tratan acá. **H-3 NO está cerrado** (estado al momento de esa corrección; ver «Auditoría general de Codex» más abajo para el estado posterior).
 
 - **H-3 (MEDIO):** la migración D-1 y su rollback sólo comprobaban que existieran los objetos de D-2. Una base con D-2 degradada (por ejemplo, el helper con `EXECUTE` para `authenticated`, la vista con otro owner, la política con `USING (true)` o una membresía con `INHERIT`) las pasaba. D-1 depende de las invariantes de ADR-001 §18.4.2.1 y no debía asumirlas.
 - **Reproducción (laboratorio PG16, orientativo):** con el código de `30c19f3`, la migración y el rollback **aceptaron los 39 mutantes** de D-2 (helper 8, vista 6, política 6, privilegios y propiedad del rol 9, atributos del rol 4, membresías 6).
@@ -153,6 +153,129 @@ Dictamen de Claude Local: **APTO PARA COMMIT LOCAL**, condicionado a tres decisi
 - **Nueva security review** del conjunto final (con el bloque E), y auditoría de Codex y de OpenCode del hash final.
 - **Autorización del commit** correctivo; sigue sin commit y sin push.
 - El banco de mutantes es una herramienta de laboratorio y no está versionado.
+
+### Auditoría general de Codex sobre `af4e52a`: BLOQUEADO por H-1 (MEDIO)
+Estado previo, registrado por separado: la corrección de H-3 de Claude Local quedó consolidada en `af4e52a` (publicado) y Claude Local la verificó de forma independiente en PostgreSQL 17 / Supabase real (`db reset` PASS; pgTAP 1.184/1.184 en 14 archivos; `db lint` PASS; banco independiente 76/76 casos por fase; postchecks 8/8; 11 valores de `search_path` sin falsos abortos; migrar → revertir → migrar PASS; dictamen APTO PARA COMMIT LOCAL). Los números de este párrafo son de Claude Local.
+
+Codex auditó `af4e52a` y emitió dictamen **BLOQUEADO**. En este registro los hallazgos se nombran «Codex H-1/H-2/H-3» para no confundirlos con los de la security review de Claude Local:
+
+| Hallazgo | Severidad | Estado |
+|---|---|---|
+| **Codex H-1:** el rollback puede eliminar deriva posterior sin detectarla | MEDIO, bloqueante | corrección local, **sin commit**, sin verificación independiente |
+| **Codex H-2:** cobertura incompleta de los privilegios del lector | BAJO | **pendiente, no bloqueante**; fuera de esta corrección |
+| **Codex H-3:** no se comprueba la integridad de `privado.usuario_actual()` | BAJO | **pendiente, no bloqueante**; fuera de esta corrección |
+
+**Codex H-1: causa** (líneas de `af4e52a`, rollback). El chequeo de dependencias (149-169) eximía todo lo que *pertenece* a las tres tablas de D-1 (restricciones, índices, policies y defaults) sin comparar su definición; D6 y D8 se comparaban sólo por los literales entre comillas (324-352) y después se sobrescribían con la versión de Stock (744-808). Un índice, una restricción o una policy agregados después, o una policy modificada conservando los literales, se perdían en silencio.
+
+**Reproducción (laboratorio PG16, ORIENTATIVO).** Sobre una base con D-1 y con el rollback de `af4e52a`, 22 alteraciones posteriores: **el rollback aceptaba 17** (índice, restricción o policy adicionales; policies de las tablas propias modificadas; D6 y D8 con `OR true` o con una condición de actor eliminada; columna, default o comentario modificados; `fillfactor`; replica identity; FK compartida modificada; comentario de la columna compartida; índice compartido recreado). Abortaban sólo 5. *Corrección de cifras:* el análisis previo hablaba de «16 de 21»; el recuento correcto es **17 de 22** (R1–R20, más R4b y R8b).
+
+**Corrección local, sin commit.** Sólo `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql` (+465 líneas, sin borrar ninguna) y esta entrada. Se agrega al precheck la sección **1c, «Manifiesto exacto de lo que el rollback elimina o sobrescribe»**, antes de cualquier cambio, sin `CASCADE`, sin borrar datos y sin objetos persistentes nuevos; los bloques A–E y la detección de dependencias no cambian.
+
+| Clase | Qué se compara | Origen del valor esperado |
+|---|---|---|
+| Propiedades de las tres tablas | tipo, persistencia, owner, RLS, `FORCE`, `reloptions`, replica identity, partición, herencia, comentario | catálogo de la base limpia |
+| Columnas | tipo, `NOT NULL`, default, identidad, generación, comentario | ídem |
+| Restricciones | `pg_get_constraintdef` completo | ídem |
+| Índices | `pg_get_indexdef` | ídem |
+| Restricciones, índices y columna `jornada_id` que D-1 agregó a `operaciones` y `movimientos_stock` | las mismas definiciones | ídem |
+| Políticas: las 8 de las tres tablas propias, D6 y D8 | USING, WITH CHECK, comando, PERMISSIVE/RESTRICTIVE y roles; una policy de más, de menos o distinta aborta | **SQL original de la migración D-1** (sección 9), recreado sobre tablas temporales |
+
+**Origen de los valores esperados.** Se generan desde el commit `af4e52a`: se aplica su migración a una base descartable y se consulta el catálogo con `search_path = pg_catalog, public` (el mismo que fija el rollback), con el esquema `public` explícito y orden `collate "C"`; el resultado es determinista (dos corridas idénticas). Las cadenas de restricciones y columnas generadas con PG16 son idénticas a las que fijan los tests pgTAP (33/33 restricciones propias, 7/7 compartidas y 31/31 columnas), que Claude Local ya validó en PG17.
+
+**D6 y D8 (decisión 1 del usuario).** No se comparan con expresiones regulares parciales: se crean políticas de referencia con el SQL aprobado de D-1 sobre tablas temporales con el mismo nombre y columnas que las reales (`LIKE public.X`), y se comparan con `pg_get_expr`, `polcmd`, `polpermissive` y roles. Ambos lados se deparsean con el mismo servidor y el mismo `search_path`, así que no hay texto literal que dependa de la versión. Las tablas temporales se eliminan en el mismo bloque.
+
+**Rigor (decisión 2 del usuario).** El rollback queda estrictamente fail-closed: cualquier diferencia respecto de D-1, incluso aparentemente benigna (comentario, `fillfactor`, replica identity, estadísticas, `CLUSTER`), lo aborta.
+
+**Evidencia propia (laboratorio PG16, ORIENTATIVA; no sustituye a Supabase CLI ni a PostgreSQL 17):**
+
+| Caso | Con el rollback de `af4e52a` | Con el rollback nuevo |
+|---|---|---|
+| Base limpia | acepta | acepta |
+| 22 alteraciones posteriores (R1–R20, R4b, R8b) | 17 aceptadas | **0 aceptadas**: 22 abortos, sin cambios |
+| 14 alteraciones adicionales (D6/D8 recreadas con otro rol, tipo o comando; policies adicionales en `operaciones`/`movimientos_stock`; objetos eliminados; objetos modificados) | 5 aceptadas | 0 aceptadas, sin cambios |
+| Banco previo (39 mutantes de D-2, bloques C, D, E y controles) | sin regresiones | sin regresiones (84 casos) |
+| Operaciones benignas (`ANALYZE`, `VACUUM`, `REINDEX`, comentario ajeno, mismo owner, `REINDEX` de índices compartidos) | acepta | acepta. *(Esta fila listaba además `CLUSTER` y `SET STATISTICS` como benignos; era un error: alteran metadatos que se pierden al revertir, y desde la corrección de M-1 abortan. Ver más abajo.)* |
+| `search_path` de sesión (10 valores, incluidos `''`, `pg_catalog`, `pg_temp` y esquemas homónimos) | — | acepta en todos |
+| Migrar → revertir → migrar | idéntico | idéntico |
+| 18 casos negativos previos del rollback; postchecks de la sección 4 (3 alteraciones durante el rollback) | abortan sin cambios | abortan sin cambios |
+
+Tras cada aborto el volcado completo (esquema con ACL, políticas y filas, más roles y membresías) es idéntico al previo, y no quedan objetos temporales en la sesión. La suite pgTAP completa del laboratorio da lo mismo que antes (la migración y los tests no cambiaron).
+
+**Riesgos de falsos abortos.** (1) Restricciones y columnas: bajo, porque son las cadenas que ya fijan los tests en PG17. (2) Los 13 `pg_get_indexdef` (9 propios y 4 compartidos): 2 de los 4 compartidos están fijados por pgTAP; el formato es estable y siempre califica el esquema, pero el resto no está verificado en PG17. (3) Propiedades, comentario y `reloptions`: si la plataforma modificara automáticamente alguna de estas tablas, el rollback abortaría (es lo decidido). (4) Una reescritura equivalente pero distinta de una policy aborta. (5) Las tablas temporales exigen que `postgres` pueda crearlas, como los bloques C y E.
+
+**Pendiente (Codex H-1 no está cerrado):** verificación independiente de Claude Local en PostgreSQL 17 / Supabase real (incluidos los 22 + 14 escenarios), autorización del commit, nueva security review y re-auditoría de Codex y OpenCode del hash final. Codex H-2 y H-3 siguen como pendientes no bloqueantes. El banco de mutantes y el generador del manifiesto son herramientas de laboratorio y no están versionados.
+
+### Verificación independiente de Claude Local del parche de Codex H-1 (PostgreSQL 17): BLOQUEADO por M-1
+Resultados informados por Claude Local sobre `D1-H1-codex-rollback-manifiesto.patch` (SHA-256 `51b2a1be…ed82`, aplicado sobre `af4e52a`): `db reset` PASS; pgTAP 1.184/1.184 PASS; `db lint` PASS; rollback limpio PASS; migrar → revertir → migrar PASS; 22/22 mutantes R y 14/14 mutantes Q abortan sin cambios; banco anterior 84/84; manifiesto 89/89 entradas compatibles con PG17; los 13 `pg_get_indexdef` coinciden exactamente; `search_path` 90/90; sin objetos temporales residuales. **Dictamen: BLOQUEADO exclusivamente por M-1.**
+
+**M-1:** el rollback todavía aceptaba modificaciones posteriores de metadatos que desaparecen al revertir: `COMMENT ON INDEX`, `CONSTRAINT` y `POLICY`; `SET STATISTICS` y `n_distinct`; `STORAGE` y `COMPRESSION`; `COLLATE`; `CLUSTER ON`.
+
+**Decisión del usuario (opción A de Claude Local):** conservar la garantía estrictamente fail-closed; **no** se reduce con una excepción documental. Se amplía el manifiesto.
+
+**Corrección local, sin commit** (sólo el rollback y esta entrada; la migración, los tests, D-2 y las RPC no cambian). El manifiesto de la sección 1c pasa a definirse con una única definición de las consultas, que sirve para generar los valores esperados desde el esquema limpio de `af4e52a` y para emitir la comprobación del rollback, de modo que ambas no pueden divergir. Se agregan:
+
+| Metadato | Dónde se compara |
+|---|---|
+| Comentario de cada índice, restricción y policy de las tres tablas propias | índices, restricciones y policies |
+| Comentario de las restricciones, índices y policies compartidos (incluidas D6 y D8, que se reemplazan) | restricciones e índices compartidos; policies |
+| Comentario de las 4 restricciones de Stock que el rollback elimina y vuelve a crear | clase nueva «restauradas» |
+| `attstattarget` (normalizado: el valor por defecto es `-1` en PG16 y `NULL` en PG17), `attoptions` (incluye `n_distinct`), `attstorage`, `attcompression`, `attcollation` | columnas propias y columna `jornada_id` compartida |
+| `indisclustered`, `indisreplident`, `indisvalid`, `indisready`, tablespace | índices propios y compartidos |
+| Método de acceso, tablespace, tipo (`reloftype`) y opciones de la tabla TOAST | propiedades de las tablas |
+| Triggers deshabilitados o con comentario (también los internos de las FK); tablas que heredan de otra | comprobaciones nuevas |
+
+**Búsqueda de otros metadatos fuera de la cobertura (laboratorio PG16).** Aparecieron tres huecos reales más y se cerraron: las opciones de la tabla TOAST, el comentario de un trigger interno de FK, y la herencia de una tabla propia (más el estado de triggers `ENABLE ALWAYS`). Sin efecto, por lo tanto no son deriva: `SET TABLESPACE pg_default`, `SET STATISTICS -1`, `SET STORAGE` al valor por defecto, `SET WITHOUT CLUSTER`, comentarios sobre objetos ajenos a D-1 (esquema `privado`, roles). **Cobertura no exhaustiva:** el manifiesto cubre las propiedades que PostgreSQL expone en estos catálogos para los objetos que el rollback elimina o sobrescribe; un metadato nuevo de una versión futura de PostgreSQL no estaría cubierto.
+
+**Evidencia propia (laboratorio PG16, ORIENTATIVA; no sustituye a PostgreSQL 17):**
+
+| Caso | Rollback validado por Claude Local | Rollback con M-1 |
+|---|---|---|
+| Base limpia | acepta | acepta |
+| 31 casos M-1 (comentarios de índice, restricción y policy propios, compartidos, restaurados y de D6/D8; estadísticas; `n_distinct`; almacenamiento; compresión; collation; `CLUSTER ON`; `CLUSTER`; triggers deshabilitados; más 3 controles que ya abortaban) | 28 aceptados | **0 aceptados**, 31 abortos sin cambios |
+| 4 huecos adicionales (TOAST, herencia, `ENABLE ALWAYS`, comentario de trigger interno) | aceptados | abortan sin cambios |
+| 22 mutantes R y 14 Q | abortan | abortan |
+| Banco previo (39 mutantes de D-2, bloques C, D, E y controles) | 84 sin regresiones | 84 sin regresiones |
+| Operaciones benignas (14: `ANALYZE`, `VACUUM`, `VACUUM FULL`, `REINDEX`, mismo owner, `ENABLE RLS` repetido, valores por defecto, comentarios ajenos, …) | aceptan | **aceptan las 14** |
+| `CLUSTER` y `SET STATISTICS 500`, que antes figuraban como benignos | aceptaban | **abortan sin cambios** |
+| `search_path` (10 valores, incluidos `''`, `pg_catalog`, `pg_temp` y esquemas homónimos), y M-1 con rutas hostiles | — | acepta la base limpia en todos y detecta M-1 en todos |
+| Migrar → revertir → migrar; 18 casos negativos previos del rollback; suite pgTAP completa | idéntico | idéntico |
+
+Tras cada aborto, esquema, ACL, comentarios, roles, membresías y datos quedan idénticos (volcado completo antes y después), y no hay objetos temporales residuales. El manifiesto pasa de 89 a 93 entradas (la clase nueva «restauradas» agrega 4). **Riesgos de falsos abortos:** (1) `attstattarget` es el único campo con representación distinta entre PG16 y PG17; se normaliza con `nullif(…, -1)`, pero no se verificó en PG17; (2) `attcompression`, `attstorage`, `attcollation` y `indisreplident` no están fijados por los tests actuales y se leen del catálogo; (3) si la plataforma agregara comentarios o estadísticas a estas tablas, el rollback abortaría (es lo decidido).
+
+**Pendiente:** verificación independiente de Claude Local en PostgreSQL 17 / Supabase real (M-1, los 22 R, los 14 Q y la base limpia), autorización del commit, nueva security review y re-auditoría de Codex y OpenCode del hash final. Codex H-2 y H-3 siguen como pendientes no bloqueantes.
+
+### Verificación de Claude Local del parche H-1 + M-1 (PostgreSQL 17): BLOQUEADO exclusivamente por M-2
+Resultados informados por Claude Local: `db reset`, `db lint`, rollback limpio y migrar → revertir → migrar PASS; pgTAP 1.184/1.184; 31/31 M, 22/22 R, 14/14 Q y 84/84 del banco previo; manifiesto 93/93 en PG17; los abortos atómicos no dejan residuos. **M-2 (bloqueante):** el rollback no detecta modificaciones posteriores de los triggers internos de las FK de D-1 que viven en `operaciones` y `movimientos_stock` (se reprodujo pérdida silenciosa de comentarios y del estado `DISABLE`/`ENABLE REPLICA`). Hallazgos menores de la misma verificación: los casos N2 y N3 del banco de laboratorio tenían SQL inválido, y la ACL con `WITH GRANT OPTION` no se distingue en la comparación actual (preexistente, BAJO).
+
+### Excepción humana puntual a AGENTS.md §2.3.5 (decisión del usuario, 31/10/2026)
+AGENTS.md §2.3.5 dice: «Máximo 3 ciclos `implementar → auditar → corregir`. Al tercer ciclo sin cierre se detiene el trabajo y se convoca intervención humana; no se encadenan ciclos indefinidos.» D-1 alcanzó o superó ese límite (verificación de Claude Local, security review H-3, auditoría de Codex H-1, M-1 y M-2). Tras detenerse y presentar una propuesta, **el usuario reconoció expresamente el límite y autorizó UNA ÚNICA EXCEPCIÓN ACOTADA para corregir M-2**. La excepción **no modifica AGENTS.md ni autoriza nuevas rondas**. Condición de cierre: si Claude Local, Codex u OpenCode encuentran un hallazgo bloqueante nuevo después de esta corrección, se detiene la implementación y se presentan diagnóstico y alternativas para una nueva decisión humana. Es un desvío reconocido, análogo al de ADR-001 §18.4.14 punto 5. No se modifica ninguna ADR.
+
+### M-2: corrección local, sin commit
+**Causa.** El chequeo de triggers de la sección 1c sólo miraba los triggers cuyo `tgrelid` era una de las tres tablas propias. Los triggers internos de una FK (dos en la tabla referenciante y dos en la referenciada, por cada FK) quedan en `operaciones`, `movimientos_stock` y en tablas preexistentes (`camiones`, `perfiles`, `empresas`, `operaciones`); el rollback los elimina con la restricción y perdía en silencio su comentario o su estado.
+
+**Corrección** (sólo `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql`, bloque `DO` de la sección 1c): se recalculan dentro del bloque, por identidad (`oid`), las tablas propias y el conjunto de restricciones que el rollback elimina (todas las de las tres tablas propias y las siete compartidas, resueltas por tabla y nombre). El control pasa a ser: `exists` en `pg_trigger` donde `tgrelid` es una tabla propia **o** `tgconstraint` está en ese conjunto, y `tgenabled <> 'O'` (deshabilitado, réplica o siempre) **o** hay comentario. Cubre ambos lados de cada FK. No alcanza a los triggers de Stock que no dependen de restricciones de D-1 (su `tgconstraint` es otro o es 0). No se agregan funciones, no hay `CASCADE`, la transacción, los controles A–E y el manifiesto de 93 entradas no cambian, y la migración, los tests, D-2 y las RPC no se tocan.
+
+**Evidencia propia (laboratorio PG16, ORIENTATIVA; no sustituye la verificación independiente en PostgreSQL 17).** Cluster y plantilla reconstruidos desde cero; la base limpia acepta con las dos variantes. Una corrida anterior quedó **invalidada** por la caída del servidor del laboratorio (errores de infraestructura, no del rollback) y se repitió completa.
+
+| Banco | Rollback anterior (H-1 + M-1) | Rollback con M-2 |
+|---|---|---|
+| M-2: 52 alteraciones de triggers internos (3 FK compartidas × 2 lados × `COMMENT`/`DISABLE`/`ENABLE REPLICA`/`ENABLE ALWAYS` = 24; segundo trigger de cada lado = 6; 4 FK propias con lado referenciado en `camiones`, `perfiles`, `empresas` y `operaciones` × 4 = 16; 6 de FK propias y de tablas propias) | 38 aceptadas (M-2 reproducido), 14 abortan | **52 abortos, sin cambios** |
+| De los 24 casos mínimos propuestos | 16 aceptadas; 8 ya abortaban (el lado referenciado de las dos FK a `jornadas` vive en una tabla propia) | 24 abortos |
+| 40 controles de Stock (8 combinaciones FK ajena a D-1 y lado × 4 modificaciones, más triggers de usuario en `operaciones` y `movimientos_stock` × 4) | aceptan | **aceptan los 40** (sin falsos abortos) |
+| 84 casos previos (39 + 24 + 8 + 11 + 2) | sin regresiones | sin regresiones, resultado idéntico |
+| 31 M, 22 R, 14 Q | abortan | abortan, resultado idéntico |
+| `search_path` (11 valores: `public`, `"$user", public`, `''`, `pg_catalog`, `pg_temp`, `pg_temp, pg_catalog, public`, `extensions, public`, `privado, public`, `pg_catalog, pg_temp, public`, `"$user"`, `public, pg_temp`) | — | base limpia acepta y M-2 aborta sin cambios en los 11; 0 objetos temporales residuales en las aceptaciones |
+| Rollback limpio; migrar → revertir → migrar | idéntico | `pg_dump -s` de `public` y `privado` **idéntico** tras revertir y tras re-aplicar |
+
+Tras cada aborto el volcado completo (esquema con ACL, políticas y datos, más roles y membresías) es idéntico al previo. Los bancos son herramientas de laboratorio **no versionadas**.
+
+**Corrección documental de N2 y N3.** En el banco de laboratorio anterior, N2 (`ALTER TABLE … NO INHERIT` sobre una tabla que no hereda de nada) y N3 (`ALTER TABLE … ENABLE ALWAYS TRIGGER ALL`; esa forma de sintaxis **no existe** en PostgreSQL y devuelve un error de sintaxis) tenían SQL inválido, por lo que **no constituyen pruebas ejecutadas correctamente y no se cuentan como tales**. Se reescribieron: N2 usa `INHERIT` de una tabla padre válida y N3 habilita `ALWAYS` un trigger interno de FK por su nombre. Con el SQL corregido, ambos abortan sin cambios con el rollback anterior y con el de M-2 (banco N de 14 casos corrido con el cluster reconstruido: 11 abortos sin cambios y 3 aceptaciones esperadas: `SET TABLESPACE pg_default` sin efecto y los dos comentarios ajenos a D-1; N3 se corrió por separado tras corregirlo). Sólo cuentan las ejecuciones con SQL válido.
+
+**Riesgos de falsos abortos de M-2.** (1) Un `DISABLE TRIGGER ALL` o un `COMMENT` sobre un trigger interno de una FK de D-1 aborta aunque sea intencional; es el comportamiento fail-closed buscado. (2) Un `DISABLE TRIGGER ALL` sobre `operaciones` o `movimientos_stock` aborta por los triggers de D-1 aunque también toque los de Stock; la deriva de Stock queda fuera del alcance. (3) Que la plataforma altere por su cuenta el estado de triggers internos no está observado; si ocurriera, el rollback fallaría cerrado.
+
+**Pendientes separados (no incluidos en este ciclo):** (a) ACL con `WITH GRANT OPTION` (BAJO, preexistente): la comparación de ACL ignora `is_grantable`; se propone tratarlo en una tarea aparte que incluya `is_grantable` en el rollback, en los bloques de contrato y, con autorización propia, en la migración y sus tests. (b) Codex H-2 (cobertura de privilegios del lector) y H-3 (integridad de `privado.usuario_actual()`), siguen como hallazgos bajos no bloqueantes.
+
+**Pendiente de autorización humana:** verificación independiente de Claude Local en PostgreSQL 17 / Supabase real, autorización del commit, push (con la verificación de Vercel), nueva security review y re-auditoría de Codex y OpenCode del hash final. Si cualquiera de ellas encuentra un hallazgo bloqueante nuevo, se detiene el trabajo (condición de cierre de la excepción).
 
 ### Riesgos pendientes
 1. **Evidencia real parcial:** `019294c` falló `supabase test db` por H-1 (ver arriba). Hasta que Claude Local repita la verificación completa sobre el commit correctivo, el resultado definitivo está pendiente; mi evidencia de laboratorio es orientativa.

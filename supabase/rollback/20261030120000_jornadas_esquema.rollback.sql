@@ -23,6 +23,14 @@
 --     ya no son exactamente los que dejó D-1 (por ejemplo, una migración
 --     posterior amplió los tipos de operación), ABORTA: restaurar los tres tipos
 --     de Stock perdería esa ampliación.
+--   - Manifiesto exacto (sección 1c): lo que este script elimina (las tres tablas
+--     de D-1 y las restricciones, índices y columnas que D-1 agregó a operaciones
+--     y movimientos_stock) o sobrescribe (las policies D6 y D8) debe ser idéntico a
+--     lo que dejó D-1, incluso en detalles que parecen benignos (comentarios,
+--     estadísticas, opciones, almacenamiento, CLUSTER, replica identity). Si no,
+--     ABORTA: no descarta en silencio
+--     un objeto posterior. Las policies se comparan contra su SQL original, no por
+--     fragmentos.
 --   - Límite conocido: PostgreSQL no registra en pg_depend las referencias dentro
 --     del texto de una función plpgsql. Para eso hay un barrido conservador por
 --     nombre sobre las funciones de public y privado (las seis RPC de ADR-007
@@ -735,6 +743,505 @@ begin
   drop table pg_temp.d2_ref_perfiles_previas;
 end $$;
 
+
+-- ---------------------------------------------------------------------------
+-- 1c. Manifiesto exacto de lo que el rollback elimina o sobrescribe
+-- ---------------------------------------------------------------------------
+-- Las tres tablas propias de D-1 (y las restricciones, índices y columnas que D-1
+-- agregó a operaciones y movimientos_stock) se eliminan; D6 y D8 se sobrescriben; y
+-- cuatro restricciones de Stock se eliminan y se vuelven a crear. Si cualquiera de
+-- esos objetos difiere de lo que dejó D-1 (un índice, una restricción o una policy
+-- de más, una definición cambiada, o un metadato que desaparecería con el DROP:
+-- comentarios de tabla, columna, índice, restricción o policy; estadísticas,
+-- opciones, almacenamiento, compresión y collation de columnas; CLUSTER, replica
+-- identity y opciones de índices y tablas), el rollback aborta: no descarta en
+-- silencio un objeto posterior. Los valores esperados se generan
+-- desde el commit de D-1 con search_path = pg_catalog, public (el que fija este
+-- script), y las policies se comparan contra su SQL original (no por fragmentos).
+do $$
+declare
+  v_txt text;
+  -- Tablas y restricciones que el rollback elimina, por IDENTIDAD (oid): las tres tablas
+  -- propias, todas sus restricciones y las siete restricciones compartidas de
+  -- operaciones y movimientos_stock (resueltas por tabla y nombre).
+  v_tablas_d1 oid[] := array['public.jornadas'::regclass::oid,
+                             'public.reasignaciones_vendedor'::regclass::oid,
+                             'public.correcciones_jornada'::regclass::oid];
+  v_constr_d1 oid[];
+begin
+  select array_agg(c.oid) into v_constr_d1
+    from pg_constraint c
+   where c.conrelid = any (v_tablas_d1)
+      or (c.conrelid = 'public.operaciones'::regclass and c.conname in (
+            'operaciones_referencia_apertura', 'operaciones_referencia_unica',
+            'operaciones_jornada_fk', 'operaciones_jornada_por_tipo'))
+      or (c.conrelid = 'public.movimientos_stock'::regclass and c.conname in (
+            'movimientos_stock_jornada_fk', 'movimientos_stock_jornada_por_tipo',
+            'movimientos_stock_operacion_referencia_fk'));
+
+  -- propiedades de las tres tablas (owner, RLS, opciones propias y de TOAST, replica identity, método de acceso, tablespace, comentario)
+  select string_agg(c.relname || '|' || c.relkind::text || '|' || c.relpersistence::text || '|' || c.relowner::regrole::text || '|' || c.relrowsecurity::text || '|' || c.relforcerowsecurity::text || '|' || coalesce(array_to_string(c.reloptions, ','), '-') || '|' || c.relreplident::text || '|' || c.relispartition::text || '|' || c.relhassubclass::text || '|' || coalesce((select amname from pg_am where oid = c.relam), '-') || '|' || case when c.reltablespace = 0 then '-' else (select spcname from pg_tablespace where oid = c.reltablespace) end || '|' || c.reloftype::text || '|' || coalesce(array_to_string((select tr.reloptions from pg_class tr where tr.oid = c.reltoastrelid), ','), '-') || '|' || coalesce(obj_description(c.oid, 'pg_class'), '-'), E'\n' order by c.relname collate "C")
+    into v_txt
+    from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname in ('correcciones_jornada', 'jornadas', 'reasignaciones_vendedor');
+  if v_txt is distinct from
+     $m$correcciones_jornada|r|p|postgres|true|false|-|d|false|false|heap|-|0|-|Historial append-only de correcciones de fecha o camión de una jornada abierta (ADR-007 §2.4). Escritura sólo por corregir_jornada; sin UPDATE ni DELETE.
+jornadas|r|p|postgres|true|false|-|d|false|false|heap|-|0|-|Jornada de un camión en una fecha operativa (Blueprint §7.5, §8; ADR-007). Escritura sólo por las RPC de jornadas; UPDATE acotado a estado, vendedor_id, fecha y camion_id. Sin DELETE.
+reasignaciones_vendedor|r|p|postgres|true|false|-|d|false|false|heap|-|0|-|Historial append-only de reasignaciones de vendedor de una jornada (ADR-007 §2.3). Escritura sólo por reasignar_vendedor; sin UPDATE ni DELETE.$m$ then
+    raise exception 'reversión D-1 (manifiesto): propiedades de las tres tablas (owner, RLS, opciones propias y de TOAST, replica identity, método de acceso, tablespace, comentario) no coincide con lo que dejó D-1';
+  end if;
+
+  -- columnas de las tres tablas (tipo, NOT NULL, default, identidad, generación, comentario, estadísticas, opciones, almacenamiento, compresión, collation)
+  select string_agg(c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull::text || ':' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-') || ':' || a.attidentity::text || ':' || a.attgenerated::text || ':' || coalesce(col_description(c.oid, a.attnum), '-') || ':' || coalesce(nullif(a.attstattarget, -1)::text, '-') || ':' || coalesce(array_to_string(a.attoptions, ','), '-') || ':' || a.attstorage::text || ':' || coalesce(nullif(a.attcompression::text, ''), '-') || ':' || coalesce((select cn.nspname || '.' || cl.collname from pg_collation cl join pg_namespace cn on cn.oid = cl.collnamespace where cl.oid = a.attcollation), '-'), E'\n' order by c.relname collate "C", a.attnum)
+    into v_txt
+    from pg_class c join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum where c.relnamespace = 'public'::regnamespace and c.relname in ('correcciones_jornada', 'jornadas', 'reasignaciones_vendedor');
+  if v_txt is distinct from
+     $m$correcciones_jornada.id:uuid:true:gen_random_uuid():::-:-:-:p:-:-
+correcciones_jornada.empresa_id:uuid:true:-:::-:-:-:p:-:-
+correcciones_jornada.jornada_id:uuid:true:-:::-:-:-:p:-:-
+correcciones_jornada.operacion_id:uuid:true:-:::-:-:-:p:-:-
+correcciones_jornada.tipo_operacion:text:true:'correccion_jornada'::text:::-:-:-:x:-:pg_catalog.default
+correcciones_jornada.fecha_anterior:date:true:-:::-:-:-:p:-:-
+correcciones_jornada.fecha_nueva:date:true:-:::-:-:-:p:-:-
+correcciones_jornada.camion_anterior_id:uuid:true:-:::-:-:-:p:-:-
+correcciones_jornada.camion_nuevo_id:uuid:true:-:::-:-:-:p:-:-
+correcciones_jornada.motivo:text:true:-:::-:-:-:x:-:pg_catalog.default
+correcciones_jornada.actor_id:uuid:true:-:::-:-:-:p:-:-
+correcciones_jornada.creado_en:timestamp with time zone:true:now():::-:-:-:p:-:-
+jornadas.id:uuid:true:gen_random_uuid():::-:-:-:p:-:-
+jornadas.empresa_id:uuid:true:-:::-:-:-:p:-:-
+jornadas.fecha:date:true:-:::-:-:-:p:-:-
+jornadas.camion_id:uuid:true:-:::-:-:-:p:-:-
+jornadas.vendedor_id:uuid:true:-:::-:-:-:p:-:-
+jornadas.estado:text:true:-:::-:-:-:x:-:pg_catalog.default
+jornadas.abierta_por:uuid:true:-:::-:-:-:p:-:-
+jornadas.operacion_apertura_id:uuid:true:-:::-:-:-:p:-:-
+jornadas.tipo_operacion_apertura:text:true:'apertura_jornada'::text:::-:-:-:x:-:pg_catalog.default
+jornadas.creado_en:timestamp with time zone:true:now():::-:-:-:p:-:-
+reasignaciones_vendedor.id:uuid:true:gen_random_uuid():::-:-:-:p:-:-
+reasignaciones_vendedor.empresa_id:uuid:true:-:::-:-:-:p:-:-
+reasignaciones_vendedor.jornada_id:uuid:true:-:::-:-:-:p:-:-
+reasignaciones_vendedor.operacion_id:uuid:true:-:::-:-:-:p:-:-
+reasignaciones_vendedor.tipo_operacion:text:true:'reasignacion_vendedor'::text:::-:-:-:x:-:pg_catalog.default
+reasignaciones_vendedor.vendedor_anterior_id:uuid:true:-:::-:-:-:p:-:-
+reasignaciones_vendedor.vendedor_nuevo_id:uuid:true:-:::-:-:-:p:-:-
+reasignaciones_vendedor.actor_id:uuid:true:-:::-:-:-:p:-:-
+reasignaciones_vendedor.creado_en:timestamp with time zone:true:now():::-:-:-:p:-:-$m$ then
+    raise exception 'reversión D-1 (manifiesto): columnas de las tres tablas (tipo, NOT NULL, default, identidad, generación, comentario, estadísticas, opciones, almacenamiento, compresión, collation) no coincide con lo que dejó D-1';
+  end if;
+
+  -- restricciones de las tres tablas (definición y comentario)
+  select string_agg(c.relname || '.' || k.conname || ':' || pg_get_constraintdef(k.oid) || '|' || coalesce(obj_description(k.oid, 'pg_constraint'), '-'), E'\n' order by c.relname collate "C", k.conname collate "C")
+    into v_txt
+    from pg_constraint k join pg_class c on c.oid = k.conrelid where c.relnamespace = 'public'::regnamespace and c.relname in ('correcciones_jornada', 'jornadas', 'reasignaciones_vendedor');
+  if v_txt is distinct from
+     $m$correcciones_jornada.correcciones_jornada_actor_fk:FOREIGN KEY (empresa_id, actor_id) REFERENCES perfiles(empresa_id, usuario_id) ON DELETE RESTRICT|-
+correcciones_jornada.correcciones_jornada_cambio_efectivo:CHECK (((fecha_anterior <> fecha_nueva) OR (camion_anterior_id <> camion_nuevo_id)))|-
+correcciones_jornada.correcciones_jornada_camion_anterior_fk:FOREIGN KEY (empresa_id, camion_anterior_id) REFERENCES camiones(empresa_id, id) ON DELETE RESTRICT|-
+correcciones_jornada.correcciones_jornada_camion_nuevo_fk:FOREIGN KEY (empresa_id, camion_nuevo_id) REFERENCES camiones(empresa_id, id) ON DELETE RESTRICT|-
+correcciones_jornada.correcciones_jornada_empresa_fk:FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE RESTRICT|-
+correcciones_jornada.correcciones_jornada_jornada_fk:FOREIGN KEY (empresa_id, jornada_id) REFERENCES jornadas(empresa_id, id) ON DELETE RESTRICT|-
+correcciones_jornada.correcciones_jornada_motivo_normalizado:CHECK (((motivo = btrim(motivo)) AND (length(motivo) > 0)))|-
+correcciones_jornada.correcciones_jornada_operacion_referencia_fk:FOREIGN KEY (empresa_id, operacion_id, tipo_operacion, actor_id, jornada_id) REFERENCES operaciones(empresa_id, id, tipo, actor_id, jornada_id) ON DELETE RESTRICT|-
+correcciones_jornada.correcciones_jornada_operacion_unica:UNIQUE (empresa_id, operacion_id)|-
+correcciones_jornada.correcciones_jornada_pkey:PRIMARY KEY (id)|-
+correcciones_jornada.correcciones_jornada_tipo_operacion_valido:CHECK ((tipo_operacion = 'correccion_jornada'::text))|-
+jornadas.jornadas_abierta_por_fk:FOREIGN KEY (empresa_id, abierta_por) REFERENCES perfiles(empresa_id, usuario_id) ON DELETE RESTRICT|-
+jornadas.jornadas_camion_fecha_unica:UNIQUE (empresa_id, camion_id, fecha)|-
+jornadas.jornadas_camion_fk:FOREIGN KEY (empresa_id, camion_id) REFERENCES camiones(empresa_id, id) ON DELETE RESTRICT|-
+jornadas.jornadas_empresa_fk:FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE RESTRICT|-
+jornadas.jornadas_empresa_id_unico:UNIQUE (empresa_id, id)|-
+jornadas.jornadas_estado_valido:CHECK ((estado = ANY (ARRAY['abierta'::text, 'cargada'::text, 'en_reparto'::text, 'ventas_finalizadas'::text, 'regreso_contado'::text, 'cerrada'::text])))|-
+jornadas.jornadas_operacion_apertura_fk:FOREIGN KEY (empresa_id, operacion_apertura_id, tipo_operacion_apertura, abierta_por) REFERENCES operaciones(empresa_id, id, tipo, actor_id) ON DELETE RESTRICT|-
+jornadas.jornadas_operacion_apertura_unica:UNIQUE (operacion_apertura_id)|-
+jornadas.jornadas_pkey:PRIMARY KEY (id)|-
+jornadas.jornadas_tipo_operacion_apertura_valido:CHECK ((tipo_operacion_apertura = 'apertura_jornada'::text))|-
+jornadas.jornadas_vendedor_fecha_unica:UNIQUE (empresa_id, vendedor_id, fecha)|-
+jornadas.jornadas_vendedor_fk:FOREIGN KEY (empresa_id, vendedor_id) REFERENCES perfiles(empresa_id, usuario_id) ON DELETE RESTRICT|-
+reasignaciones_vendedor.reasignaciones_vendedor_actor_fk:FOREIGN KEY (empresa_id, actor_id) REFERENCES perfiles(empresa_id, usuario_id) ON DELETE RESTRICT|-
+reasignaciones_vendedor.reasignaciones_vendedor_empresa_fk:FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE RESTRICT|-
+reasignaciones_vendedor.reasignaciones_vendedor_jornada_fk:FOREIGN KEY (empresa_id, jornada_id) REFERENCES jornadas(empresa_id, id) ON DELETE RESTRICT|-
+reasignaciones_vendedor.reasignaciones_vendedor_operacion_referencia_fk:FOREIGN KEY (empresa_id, operacion_id, tipo_operacion, actor_id, jornada_id) REFERENCES operaciones(empresa_id, id, tipo, actor_id, jornada_id) ON DELETE RESTRICT|-
+reasignaciones_vendedor.reasignaciones_vendedor_operacion_unica:UNIQUE (empresa_id, operacion_id)|-
+reasignaciones_vendedor.reasignaciones_vendedor_pkey:PRIMARY KEY (id)|-
+reasignaciones_vendedor.reasignaciones_vendedor_tipo_operacion_valido:CHECK ((tipo_operacion = 'reasignacion_vendedor'::text))|-
+reasignaciones_vendedor.reasignaciones_vendedor_vendedor_anterior_fk:FOREIGN KEY (empresa_id, vendedor_anterior_id) REFERENCES perfiles(empresa_id, usuario_id) ON DELETE RESTRICT|-
+reasignaciones_vendedor.reasignaciones_vendedor_vendedor_nuevo_fk:FOREIGN KEY (empresa_id, vendedor_nuevo_id) REFERENCES perfiles(empresa_id, usuario_id) ON DELETE RESTRICT|-
+reasignaciones_vendedor.reasignaciones_vendedor_vendedores_distintos:CHECK ((vendedor_anterior_id <> vendedor_nuevo_id))|-$m$ then
+    raise exception 'reversión D-1 (manifiesto): restricciones de las tres tablas (definición y comentario) no coincide con lo que dejó D-1';
+  end if;
+
+  -- índices de las tres tablas (definición, clustered, replica identity, validez, tablespace, comentario)
+  select string_agg(pg_get_indexdef(i.indexrelid) || '|' || i.indisclustered::text || '|' || i.indisreplident::text || '|' || i.indisvalid::text || '|' || i.indisready::text || '|' || case when x.reltablespace = 0 then '-' else (select spcname from pg_tablespace where oid = x.reltablespace) end || '|' || coalesce(obj_description(i.indexrelid, 'pg_class'), '-'), E'\n' order by pg_get_indexdef(i.indexrelid) collate "C")
+    into v_txt
+    from pg_index i join pg_class c on c.oid = i.indrelid join pg_class x on x.oid = i.indexrelid where c.relnamespace = 'public'::regnamespace and c.relname in ('correcciones_jornada', 'jornadas', 'reasignaciones_vendedor');
+  if v_txt is distinct from
+     $m$CREATE UNIQUE INDEX correcciones_jornada_operacion_unica ON public.correcciones_jornada USING btree (empresa_id, operacion_id)|false|false|true|true|-|-
+CREATE UNIQUE INDEX correcciones_jornada_pkey ON public.correcciones_jornada USING btree (id)|false|false|true|true|-|-
+CREATE UNIQUE INDEX jornadas_camion_fecha_unica ON public.jornadas USING btree (empresa_id, camion_id, fecha)|false|false|true|true|-|-
+CREATE UNIQUE INDEX jornadas_empresa_id_unico ON public.jornadas USING btree (empresa_id, id)|false|false|true|true|-|-
+CREATE UNIQUE INDEX jornadas_operacion_apertura_unica ON public.jornadas USING btree (operacion_apertura_id)|false|false|true|true|-|-
+CREATE UNIQUE INDEX jornadas_pkey ON public.jornadas USING btree (id)|false|false|true|true|-|-
+CREATE UNIQUE INDEX jornadas_vendedor_fecha_unica ON public.jornadas USING btree (empresa_id, vendedor_id, fecha)|false|false|true|true|-|-
+CREATE UNIQUE INDEX reasignaciones_vendedor_operacion_unica ON public.reasignaciones_vendedor USING btree (empresa_id, operacion_id)|false|false|true|true|-|-
+CREATE UNIQUE INDEX reasignaciones_vendedor_pkey ON public.reasignaciones_vendedor USING btree (id)|false|false|true|true|-|-$m$ then
+    raise exception 'reversión D-1 (manifiesto): índices de las tres tablas (definición, clustered, replica identity, validez, tablespace, comentario) no coincide con lo que dejó D-1';
+  end if;
+
+  -- restricciones que D-1 agregó a operaciones y movimientos_stock (definición y comentario)
+  select string_agg(c.relname || '.' || k.conname || ':' || pg_get_constraintdef(k.oid) || '|' || coalesce(obj_description(k.oid, 'pg_constraint'), '-'), E'\n' order by c.relname collate "C", k.conname collate "C")
+    into v_txt
+    from pg_constraint k join pg_class c on c.oid = k.conrelid where c.relnamespace = 'public'::regnamespace and ((c.relname = 'operaciones' and k.conname in ('operaciones_referencia_apertura', 'operaciones_referencia_unica', 'operaciones_jornada_fk', 'operaciones_jornada_por_tipo')) or (c.relname = 'movimientos_stock' and k.conname in ('movimientos_stock_jornada_fk', 'movimientos_stock_jornada_por_tipo', 'movimientos_stock_operacion_referencia_fk')));
+  if v_txt is distinct from
+     $m$movimientos_stock.movimientos_stock_jornada_fk:FOREIGN KEY (empresa_id, jornada_id) REFERENCES jornadas(empresa_id, id) ON DELETE RESTRICT|-
+movimientos_stock.movimientos_stock_jornada_por_tipo:CHECK ((((tipo_movimiento = ANY (ARRAY['ingreso'::text, 'a_cuarentena'::text, 'merma'::text])) AND (jornada_id IS NULL)) OR ((tipo_movimiento = ANY (ARRAY['carga'::text, 'descarga'::text])) AND (jornada_id IS NOT NULL))))|-
+movimientos_stock.movimientos_stock_operacion_referencia_fk:FOREIGN KEY (empresa_id, operacion_id, tipo_movimiento, actor_id, jornada_id) REFERENCES operaciones(empresa_id, id, tipo, actor_id, jornada_id) ON DELETE RESTRICT|-
+operaciones.operaciones_jornada_fk:FOREIGN KEY (empresa_id, jornada_id) REFERENCES jornadas(empresa_id, id) ON DELETE RESTRICT|-
+operaciones.operaciones_jornada_por_tipo:CHECK ((((tipo = ANY (ARRAY['ingreso'::text, 'a_cuarentena'::text, 'merma'::text, 'apertura_jornada'::text])) AND (jornada_id IS NULL)) OR ((tipo = ANY (ARRAY['reasignacion_vendedor'::text, 'correccion_jornada'::text, 'carga'::text, 'descarga'::text, 'salida_jornada'::text])) AND (jornada_id IS NOT NULL))))|-
+operaciones.operaciones_referencia_apertura:UNIQUE (empresa_id, id, tipo, actor_id)|-
+operaciones.operaciones_referencia_unica:UNIQUE (empresa_id, id, tipo, actor_id, jornada_id)|-$m$ then
+    raise exception 'reversión D-1 (manifiesto): restricciones que D-1 agregó a operaciones y movimientos_stock (definición y comentario) no coincide con lo que dejó D-1';
+  end if;
+
+  -- comentario de las 4 restricciones de Stock que el rollback elimina y vuelve a crear
+  select string_agg(c.relname || '.' || k.conname || '|' || coalesce(obj_description(k.oid, 'pg_constraint'), '-'), E'\n' order by c.relname collate "C", k.conname collate "C")
+    into v_txt
+    from pg_constraint k join pg_class c on c.oid = k.conrelid where c.relnamespace = 'public'::regnamespace and ((c.relname = 'operaciones' and k.conname = 'operaciones_tipo_valido') or (c.relname = 'movimientos_stock' and k.conname in ('movimientos_stock_tipo_valido', 'movimientos_stock_forma_por_tipo', 'movimientos_stock_motivo_por_tipo')));
+  if v_txt is distinct from
+     $m$movimientos_stock.movimientos_stock_forma_por_tipo|-
+movimientos_stock.movimientos_stock_motivo_por_tipo|-
+movimientos_stock.movimientos_stock_tipo_valido|-
+operaciones.operaciones_tipo_valido|-$m$ then
+    raise exception 'reversión D-1 (manifiesto): comentario de las 4 restricciones de Stock que el rollback elimina y vuelve a crear no coincide con lo que dejó D-1';
+  end if;
+
+  -- índices que D-1 agregó a operaciones y movimientos_stock (definición, clustered, replica identity, validez, tablespace, comentario)
+  select string_agg(pg_get_indexdef(i.indexrelid) || '|' || i.indisclustered::text || '|' || i.indisreplident::text || '|' || i.indisvalid::text || '|' || i.indisready::text || '|' || case when x.reltablespace = 0 then '-' else (select spcname from pg_tablespace where oid = x.reltablespace) end || '|' || coalesce(obj_description(i.indexrelid, 'pg_class'), '-'), E'\n' order by pg_get_indexdef(i.indexrelid) collate "C")
+    into v_txt
+    from pg_index i join pg_class c on c.oid = i.indrelid join pg_class x on x.oid = i.indexrelid where c.relnamespace = 'public'::regnamespace and ((c.relname = 'operaciones' and x.relname in ('operaciones_referencia_apertura', 'operaciones_referencia_unica')) or (c.relname = 'movimientos_stock' and x.relname in ('movimientos_stock_operacion_producto_unica', 'movimientos_stock_jornada_idx')));
+  if v_txt is distinct from
+     $m$CREATE INDEX movimientos_stock_jornada_idx ON public.movimientos_stock USING btree (empresa_id, jornada_id) WHERE (jornada_id IS NOT NULL)|false|false|true|true|-|-
+CREATE UNIQUE INDEX movimientos_stock_operacion_producto_unica ON public.movimientos_stock USING btree (empresa_id, operacion_id, producto_id) WHERE (tipo_movimiento = ANY (ARRAY['carga'::text, 'descarga'::text]))|false|false|true|true|-|-
+CREATE UNIQUE INDEX operaciones_referencia_apertura ON public.operaciones USING btree (empresa_id, id, tipo, actor_id)|false|false|true|true|-|-
+CREATE UNIQUE INDEX operaciones_referencia_unica ON public.operaciones USING btree (empresa_id, id, tipo, actor_id, jornada_id)|false|false|true|true|-|-$m$ then
+    raise exception 'reversión D-1 (manifiesto): índices que D-1 agregó a operaciones y movimientos_stock (definición, clustered, replica identity, validez, tablespace, comentario) no coincide con lo que dejó D-1';
+  end if;
+
+  -- columna jornada_id de operaciones y movimientos_stock (todas sus propiedades)
+  select string_agg(c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull::text || ':' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-') || ':' || a.attidentity::text || ':' || a.attgenerated::text || ':' || coalesce(col_description(c.oid, a.attnum), '-') || ':' || coalesce(nullif(a.attstattarget, -1)::text, '-') || ':' || coalesce(array_to_string(a.attoptions, ','), '-') || ':' || a.attstorage::text || ':' || coalesce(nullif(a.attcompression::text, ''), '-') || ':' || coalesce((select cn.nspname || '.' || cl.collname from pg_collation cl join pg_namespace cn on cn.oid = cl.collnamespace where cl.oid = a.attcollation), '-'), E'\n' order by c.relname collate "C")
+    into v_txt
+    from pg_class c join pg_attribute a on a.attrelid = c.oid and a.attname = 'jornada_id' and not a.attisdropped left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum where c.relnamespace = 'public'::regnamespace and c.relname in ('operaciones', 'movimientos_stock');
+  if v_txt is distinct from
+     $m$movimientos_stock.jornada_id:uuid:false:-:::Jornada del movimiento (ADR-001 §18.4.1). NULL para ingreso, a_cuarentena y merma; NOT NULL para carga y descarga.:-:-:p:-:-
+operaciones.jornada_id:uuid:false:-:::Jornada a la que pertenece la operación (ADR-001 §18.4.1). NULL para ingreso, a_cuarentena, merma y apertura_jornada; NOT NULL para los demás tipos de jornada.:-:-:p:-:-$m$ then
+    raise exception 'reversión D-1 (manifiesto): columna jornada_id de operaciones y movimientos_stock (todas sus propiedades) no coincide con lo que dejó D-1';
+  end if;
+
+  -- triggers: su estado (deshabilitado, réplica, siempre) y sus comentarios se perderían con el DROP.
+  -- Incluye los triggers internos de TODAS las restricciones que se eliminan, tanto los del lado
+  -- referenciante como los del referenciado (que viven en operaciones, movimientos_stock y en las
+  -- tablas preexistentes), y cualquier trigger de las tres tablas propias. No alcanza a los
+  -- triggers de Stock ajenos a D-1: no dependen de estas restricciones (tgconstraint distinto).
+  if exists (select 1 from pg_trigger t
+              where (t.tgrelid = any (v_tablas_d1) or t.tgconstraint = any (v_constr_d1))
+                and (t.tgenabled <> 'O' or obj_description(t.oid, 'pg_trigger') is not null)) then
+    raise exception 'reversión D-1 (manifiesto): hay triggers deshabilitados, en réplica, siempre activos o con comentario en las tablas de jornadas o en los triggers internos de las restricciones de D-1';
+  end if;
+
+  -- herencia: una tabla de D-1 no puede ser hija de otra (se perdería al eliminarla)
+  if exists (select 1 from pg_inherits h join pg_class c on c.oid = h.inhrelid
+              where c.relnamespace = 'public'::regnamespace and c.relname in ('correcciones_jornada', 'jornadas', 'reasignaciones_vendedor')) then
+    raise exception 'reversión D-1 (manifiesto): una tabla de jornadas hereda de otra tabla';
+  end if;
+end $$;
+
+do $$
+begin
+  -- Tablas de referencia temporales con el mismo nombre y columnas que las reales
+  -- (se eliminan al terminar). Cada política aprobada de D-1 se crea sobre ellas con
+  -- su SQL original; el nombre de la tabla en pg_temp coincide con el real, así que
+  -- las expresiones (que se refieren a su propia tabla por nombre) se deparsean igual.
+  create temp table jornadas (like public.jornadas);
+  create temp table reasignaciones_vendedor (like public.reasignaciones_vendedor);
+  create temp table correcciones_jornada (like public.correcciones_jornada);
+  create temp table operaciones (like public.operaciones);
+  create temp table movimientos_stock (like public.movimientos_stock);
+  create policy jornadas_select_authenticated
+    on pg_temp.jornadas
+    for select
+    to authenticated
+    using (
+      exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = jornadas.empresa_id
+          and p.usuario_id = (select auth.uid())
+          and p.activo
+          and (p.rol in ('dueno', 'encargado') or jornadas.vendedor_id = p.usuario_id)
+      )
+    );
+
+  create policy jornadas_select_propietario_rpc
+    on pg_temp.jornadas
+    for select
+    to propietario_rpc
+    using (
+      exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = jornadas.empresa_id
+          and p.usuario_id = (select privado.usuario_actual())
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+    );
+
+  create policy jornadas_insert_propietario_rpc
+    on pg_temp.jornadas
+    for insert
+    to propietario_rpc
+    with check (
+      abierta_por = (select privado.usuario_actual())
+      and exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = jornadas.empresa_id
+          and p.usuario_id = (select privado.usuario_actual())
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+    );
+
+  create policy jornadas_update_propietario_rpc
+    on pg_temp.jornadas
+    for update
+    to propietario_rpc
+    using (
+      exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = jornadas.empresa_id
+          and p.usuario_id = (select privado.usuario_actual())
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+    )
+    with check (
+      exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = jornadas.empresa_id
+          and p.usuario_id = (select privado.usuario_actual())
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+    );
+
+  create policy reasignaciones_vendedor_select_gestion
+    on pg_temp.reasignaciones_vendedor
+    for select
+    to authenticated
+    using (
+      exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = reasignaciones_vendedor.empresa_id
+          and p.usuario_id = (select auth.uid())
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+    );
+
+  create policy correcciones_jornada_select_gestion
+    on pg_temp.correcciones_jornada
+    for select
+    to authenticated
+    using (
+      exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = correcciones_jornada.empresa_id
+          and p.usuario_id = (select auth.uid())
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+    );
+
+  create policy reasignaciones_vendedor_insert_propietario_rpc
+    on pg_temp.reasignaciones_vendedor
+    for insert
+    to propietario_rpc
+    with check (
+      actor_id = (select privado.usuario_actual())
+      and exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = reasignaciones_vendedor.empresa_id
+          and p.usuario_id = reasignaciones_vendedor.actor_id
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+      and exists (
+        select 1
+        from public.jornadas j
+        where j.id = reasignaciones_vendedor.jornada_id
+          and j.empresa_id = reasignaciones_vendedor.empresa_id
+      )
+    );
+
+  create policy correcciones_jornada_insert_propietario_rpc
+    on pg_temp.correcciones_jornada
+    for insert
+    to propietario_rpc
+    with check (
+      actor_id = (select privado.usuario_actual())
+      and exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = correcciones_jornada.empresa_id
+          and p.usuario_id = correcciones_jornada.actor_id
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+      and exists (
+        select 1
+        from public.jornadas j
+        where j.id = correcciones_jornada.jornada_id
+          and j.empresa_id = correcciones_jornada.empresa_id
+      )
+    );
+
+  create policy operaciones_insert_propietario_rpc
+    on pg_temp.operaciones
+    for insert
+    to propietario_rpc
+    with check (
+      actor_id = (select privado.usuario_actual())
+      and tipo in ('ingreso', 'a_cuarentena', 'merma', 'apertura_jornada',
+                   'reasignacion_vendedor', 'correccion_jornada', 'carga',
+                   'descarga', 'salida_jornada')
+      and exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = operaciones.empresa_id
+          and p.usuario_id = operaciones.actor_id
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+      and (
+        (tipo in ('ingreso', 'a_cuarentena', 'merma', 'apertura_jornada')
+          and jornada_id is null)
+        or (tipo in ('reasignacion_vendedor', 'correccion_jornada', 'carga',
+                     'descarga', 'salida_jornada')
+          and exists (select 1 from public.jornadas j
+                       where j.id = operaciones.jornada_id
+                         and j.empresa_id = operaciones.empresa_id))
+      )
+    );
+
+  create policy movimientos_stock_insert_propietario_rpc
+    on pg_temp.movimientos_stock
+    for insert
+    to propietario_rpc
+    with check (
+      actor_id = (select privado.usuario_actual())
+      and tipo_movimiento in ('ingreso', 'a_cuarentena', 'merma', 'carga', 'descarga')
+      and exists (
+        select 1
+        from public.perfiles p
+        where p.empresa_id = movimientos_stock.empresa_id
+          and p.usuario_id = movimientos_stock.actor_id
+          and p.activo
+          and p.rol in ('dueno', 'encargado')
+      )
+      and exists (
+        select 1
+        from public.operaciones o
+        where o.id = movimientos_stock.operacion_id
+          and o.empresa_id = movimientos_stock.empresa_id
+          and o.actor_id = movimientos_stock.actor_id
+          and o.tipo = movimientos_stock.tipo_movimiento
+          and o.jornada_id is not distinct from movimientos_stock.jornada_id
+      )
+      and (
+        (tipo_movimiento = 'ingreso'
+          and ubicacion_origen_id is null
+          and exists (select 1 from public.ubicaciones d
+                       where d.id = movimientos_stock.ubicacion_destino_id
+                         and d.empresa_id = movimientos_stock.empresa_id
+                         and d.tipo = 'deposito'))
+        or (tipo_movimiento = 'a_cuarentena'
+          and exists (select 1 from public.ubicaciones o
+                       where o.id = movimientos_stock.ubicacion_origen_id
+                         and o.empresa_id = movimientos_stock.empresa_id
+                         and o.tipo = 'deposito')
+          and exists (select 1 from public.ubicaciones d
+                       where d.id = movimientos_stock.ubicacion_destino_id
+                         and d.empresa_id = movimientos_stock.empresa_id
+                         and d.tipo = 'cuarentena'))
+        or (tipo_movimiento = 'merma'
+          and ubicacion_destino_id is null
+          and exists (select 1 from public.ubicaciones o
+                       where o.id = movimientos_stock.ubicacion_origen_id
+                         and o.empresa_id = movimientos_stock.empresa_id
+                         and o.tipo = 'deposito'))
+        or (tipo_movimiento = 'carga'
+          and exists (select 1 from public.ubicaciones o
+                       where o.id = movimientos_stock.ubicacion_origen_id
+                         and o.empresa_id = movimientos_stock.empresa_id
+                         and o.tipo = 'deposito')
+          and exists (select 1
+                        from public.jornadas j
+                        join public.ubicaciones d
+                          on d.empresa_id = j.empresa_id
+                         and d.camion_id = j.camion_id
+                         and d.tipo = 'camion'
+                       where j.id = movimientos_stock.jornada_id
+                         and j.empresa_id = movimientos_stock.empresa_id
+                         and d.id = movimientos_stock.ubicacion_destino_id))
+        or (tipo_movimiento = 'descarga'
+          and exists (select 1 from public.ubicaciones d
+                       where d.id = movimientos_stock.ubicacion_destino_id
+                         and d.empresa_id = movimientos_stock.empresa_id
+                         and d.tipo = 'deposito')
+          and exists (select 1
+                        from public.jornadas j
+                        join public.ubicaciones o
+                          on o.empresa_id = j.empresa_id
+                         and o.camion_id = j.camion_id
+                         and o.tipo = 'camion'
+                       where j.id = movimientos_stock.jornada_id
+                         and j.empresa_id = movimientos_stock.empresa_id
+                         and o.id = movimientos_stock.ubicacion_origen_id))
+      )
+    );
+
+  -- Conjunto y definición completos: las 8 policies de las tres tablas propias más
+  -- D6 y D8, contra las de referencia. Una policy de más, de menos o distinta aborta.
+  if exists (
+       select 1
+         from (select c.relname::text t, p.polname::text n, pg_get_expr(p.polqual, p.polrelid) q,
+                      pg_get_expr(p.polwithcheck, p.polrelid) w, p.polcmd::text cmd, p.polpermissive pm,
+                      array(select r.rolname::text from pg_roles r where r.oid = any (p.polroles) order by 1) roles,
+                      obj_description(p.oid, 'pg_policy') cm
+                 from pg_policy p join pg_class c on c.oid = p.polrelid
+                where c.relnamespace = 'public'::regnamespace
+                  and (c.relname in ('jornadas', 'reasignaciones_vendedor', 'correcciones_jornada')
+                       or p.polname in ('operaciones_insert_propietario_rpc', 'movimientos_stock_insert_propietario_rpc'))) a
+         full join (select c.relname::text t, p.polname::text n, pg_get_expr(p.polqual, p.polrelid) q,
+                           pg_get_expr(p.polwithcheck, p.polrelid) w, p.polcmd::text cmd, p.polpermissive pm,
+                           array(select r.rolname::text from pg_roles r where r.oid = any (p.polroles) order by 1) roles,
+                      obj_description(p.oid, 'pg_policy') cm
+                      from pg_policy p join pg_class c on c.oid = p.polrelid
+                     where c.relnamespace = pg_my_temp_schema()) b
+           using (t, n)
+        where a.q is distinct from b.q or a.w is distinct from b.w or a.cmd is distinct from b.cmd
+           or a.pm is distinct from b.pm or a.roles is distinct from b.roles
+           or a.cm is distinct from b.cm) then
+    raise exception 'reversión D-1 (manifiesto): las policies de las tablas de jornadas, D6 o D8 no coinciden con las de D-1';
+  end if;
+  drop table pg_temp.jornadas, pg_temp.reasignaciones_vendedor, pg_temp.correcciones_jornada,
+             pg_temp.operaciones, pg_temp.movimientos_stock;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Reversión en orden inverso (sin CASCADE)
