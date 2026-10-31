@@ -23,17 +23,27 @@
 -- LEAKPROOF; STRICT; RETSET; volatilidad; paralelismo; cantidad de argumentos y
 -- de defaults; tipo de retorno; tipos, nombres y modos de los argumentos; costo
 -- y filas; variádico y soporte; la configuración (proconfig) por igualdad
--- exacta; el comentario; la cantidad de etiquetas de seguridad; la ACL (con la
--- opción de re-otorgar); y el SHA-256 del cuerpo (sin retornos de carro).
+-- exacta; la ausencia de comentario (comprobada contra pg_description, sin
+-- valores centinela: un comentario literal '-' no se confunde con no tener
+-- comentario); la cantidad de etiquetas de seguridad; la ACL (con la opción de
+-- re-otorgar); y el SHA-256 del cuerpo (sin retornos de carro).
+-- Además verifica en pg_depend que ninguna de las dos funciones dependa de una
+-- extensión (pg_extension): la migración no crea ninguna, y un ALTER FUNCTION ...
+-- DEPENDS ON EXTENSION o la pertenencia a una extensión posteriores abortan. Las
+-- dependencias normales de la migración (esquema y lenguaje) no apuntan a
+-- pg_extension y no se confunden con ellas.
 -- Evita pg_get_functiondef y los árboles de nodos, cuya representación puede
 -- variar entre versiones de PostgreSQL: de proargdefaults, prosqlbody y
 -- protrftypes sólo verifica que sean nulos.
 --
 -- Límites (el manifiesto NO es una garantía absoluta de integridad):
---   - Atributos no cubiertos: la pertenencia a extensiones, las dependencias de
---     otros objetos (el DROP sin CASCADE las rechaza), los privilegios
---     iniciales (pg_init_privs) y el contenido de las etiquetas de seguridad (se
---     cuenta, no se compara).
+--   - Atributos no cubiertos: las dependencias de otros objetos hacia las
+--     funciones (el DROP sin CASCADE las rechaza), los privilegios iniciales
+--     (pg_init_privs) y el contenido de las etiquetas de seguridad (se cuenta,
+--     no se compara). Los campos opcionales del manifiesto que no existen
+--     (nombres y modos de argumentos, configuración) se representan con '-'; no
+--     hay una colisión alcanzable por SQL (las firmas son fijas y proconfig se
+--     compara aparte por igualdad exacta).
 --   - Un cambio de formato del archivo de la migración (espacios, tabuladores)
 --     altera el SHA-256 del cuerpo y produce un aborto (falso positivo, fail-closed).
 --   - La ventana entre la verificación y el DROP sigue abierta: no hay un LOCK
@@ -91,6 +101,21 @@ begin
   end if;
 end $$;
 
+-- Dependencias de extensión: la migración no crea ninguna. Un ALTER FUNCTION ... DEPENDS ON
+-- EXTENSION posterior (deptype 'x') o la pertenencia a una extensión (deptype 'e') son una
+-- modificación posterior; las dependencias normales de la migración (esquema, lenguaje) no
+-- apuntan a pg_extension y no se confunden con ellas.
+do $$
+begin
+  if exists (select 1 from pg_depend d
+              where d.classid = 'pg_proc'::regclass
+                and d.refclassid = 'pg_extension'::regclass
+                and d.objid in ('public.abrir_jornada(uuid, uuid, date, uuid)'::regprocedure,
+                                'privado.abrir_jornada(uuid, uuid, date, uuid)'::regprocedure)) then
+    raise exception 'reversión T1: abrir_jornada tiene una dependencia de extensión (DEPENDS ON EXTENSION o membresía) que la migración no creó';
+  end if;
+end $$;
+
 -- Manifiesto de las dos funciones (generado desde el esquema limpio que deja la
 -- migración; ver el encabezado). Un cambio posterior confirmado hace abortar.
 do $$
@@ -112,7 +137,7 @@ begin
     || '|' || p.provariadic::oid::text || '|' || p.prosupport::oid::text
     || '|' || coalesce(array_to_string(p.proconfig, ','), '-')
     || '|' || (p.proargdefaults is null)::text || '|' || (p.prosqlbody is null)::text || '|' || (p.protrftypes is null)::text
-    || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '-')
+    || '|' || (not exists (select 1 from pg_description d where d.classoid = 'pg_proc'::regclass and d.objoid = p.oid and d.objsubid = 0))::text
     || '|' || (select count(*) from pg_seclabel s where s.objoid = p.oid and s.classoid = 'pg_proc'::regclass)::text
     || '|' || encode(sha256(convert_to(replace(p.prosrc, E'\r', ''), 'UTF8')), 'hex')
     , E'\n' order by n.nspname collate "C")
@@ -121,8 +146,8 @@ begin
   where p.proname = 'abrir_jornada' and n.nspname in ('public', 'privado');
 
   if v_txt is distinct from
-     $m$privado.abrir_jornada|propietario_rpc|plpgsql|f|true|false|false|false|v|u|4|0|uuid|uuid,uuid,date,uuid|p_idempotency_key,p_camion_id,p_fecha,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|-|0|463c3490fc6063abc7ecddb78264fe051dd4f6691fc9f8103f0bc2beec1cffd7
-public.abrir_jornada|postgres|sql|f|false|false|false|false|v|u|4|0|uuid|uuid,uuid,date,uuid|p_idempotency_key,p_camion_id,p_fecha,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|-|0|349c03bf2c303f757d8fa97dc55aff6f85b4b463b85c3e3b901f39f3c28e9115$m$ then
+     $m$privado.abrir_jornada|propietario_rpc|plpgsql|f|true|false|false|false|v|u|4|0|uuid|uuid,uuid,date,uuid|p_idempotency_key,p_camion_id,p_fecha,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|true|0|463c3490fc6063abc7ecddb78264fe051dd4f6691fc9f8103f0bc2beec1cffd7
+public.abrir_jornada|postgres|sql|f|false|false|false|false|v|u|4|0|uuid|uuid,uuid,date,uuid|p_idempotency_key,p_camion_id,p_fecha,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|true|0|349c03bf2c303f757d8fa97dc55aff6f85b4b463b85c3e3b901f39f3c28e9115$m$ then
     raise exception 'reversión T1: abrir_jornada difiere del manifiesto (cuerpo, comentario, firma, lenguaje, atributos, owner o configuración)';
   end if;
 
