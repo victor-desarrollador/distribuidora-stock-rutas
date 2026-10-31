@@ -54,7 +54,8 @@ insert into tablas_negocio values
   ('public.correcciones_jornada');
 grant select on tablas_negocio to public;
 
--- Las 20 firmas de negocio (fachadas + implementaciones).
+-- Las 22 firmas de negocio (fachadas + implementaciones): 20 de productos, camiones y
+-- clientes y 2 de abrir_jornada (T1). Stock se verifica por separado.
 create temp table rpc_negocio (firma regprocedure);
 insert into rpc_negocio values
   ('public.crear_producto(text,text,text,text,numeric,integer)'),
@@ -67,6 +68,7 @@ insert into rpc_negocio values
   ('public.actualizar_cliente(uuid,text,text,text,text)'),
   ('public.validar_cliente(uuid)'),
   ('public.cambiar_estado_cliente(uuid,boolean)'),
+  ('public.abrir_jornada(uuid,uuid,date,uuid)'),
   ('privado.crear_producto(text,text,text,text,numeric,integer)'),
   ('privado.actualizar_producto(uuid,text,text,numeric,integer)'),
   ('privado.cambiar_estado_producto(uuid,boolean)'),
@@ -76,7 +78,8 @@ insert into rpc_negocio values
   ('privado.crear_cliente(text,text,text,text)'),
   ('privado.actualizar_cliente(uuid,text,text,text,text)'),
   ('privado.validar_cliente(uuid)'),
-  ('privado.cambiar_estado_cliente(uuid,boolean)');
+  ('privado.cambiar_estado_cliente(uuid,boolean)'),
+  ('privado.abrir_jornada(uuid,uuid,date,uuid)');
 grant select on rpc_negocio to public;
 
 -- ===========================================================================
@@ -122,7 +125,7 @@ select is(
   (select count(*)::int from rpc_negocio r
     where has_function_privilege('service_role', r.firma, 'EXECUTE')),
   0,
-  'P11: service_role sin EXECUTE sobre las 20 firmas de negocio (fachadas e implementaciones)');
+  'P11: service_role sin EXECUTE sobre las 22 firmas de negocio (fachadas e implementaciones)');
 
 select is(
   (select count(*)::int from pg_proc p
@@ -215,8 +218,8 @@ select is(
   (select count(*)::int from rpc_negocio r join pg_proc p on p.oid = r.firma
     where p.pronamespace = 'privado'::regnamespace
       and p.prosecdef and p.proowner = 'propietario_rpc'::regrole),
-  10,
-  'O-3: las 10 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
+  11,
+  'O-3: las 11 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
 
 select ok(
   not exists (select 1 from pg_auth_members

@@ -1,4 +1,66 @@
 ---
+## 31/10/2026 — T1: RPC `abrir_jornada` (implementación local, sin commit; rama apilada sobre D-1 congelada)
+
+**Rama:** `feat/rpc-jornadas-t1-abrir`, en el worktree `../distribuidora-rpc-t1`, desde el commit exacto `e225fff794b166fc88928a5101e65c859ec512ba` (D-1, congelada). **No se integra a `main`**: depende del esquema de D-1, que no está aprobada para integración (M-4 y N-1 siguen pendientes de aceptación formal). **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `SECURITY DEFINER`, `empresa_id`, roles, idempotencia y concurrencia) y auditoría independiente de Codex **y** OpenCode sobre el hash antes de cualquier merge (ADR-001 §18.4.13, punto 7).
+
+### Objetivo y alcance
+Primera de las seis RPC aprobadas de jornadas (ADR-001 §18.4; ADR-007 §2.1): `abrir_jornada(p_idempotency_key uuid, p_camion_id uuid, p_fecha date, p_vendedor_id uuid) returns uuid`, sólo dueño y encargado activos. Fachada `public.abrir_jornada` (`SECURITY INVOKER`, `search_path = ''`, owner `postgres`) que delega en `privado.abrir_jornada` (`SECURITY DEFINER`, `search_path = ''`, owner `propietario_rpc`); `EXECUTE` sólo para `authenticated`, con firma exacta; sin sobrecargas, sin helpers (D-P1: contrato de 12 funciones). Sin cambios de esquema, de permisos, de D-1, de D-2 ni de Stock. Las otras cinco RPC, el arnés (T3), el frontend y el CI quedan fuera.
+
+### Decisiones humanas aplicadas (31/10/2026)
+- **D-P1 a D-P5** (planificación): contrato de 12 funciones sin helpers; precedencia determinista por tarea; parámetros `p_*` en español `snake_case`; arnés de concurrencia versionado sólo para PostgreSQL 17 local, sin CI; división T0–T8 sin autorizar T2–T8.
+- **T1-1:** fecha pasada → `PT400 jornada_fecha_invalida` (paso 10).
+- **T1-2:** precedencia, subordinada a ADR-001 §18.4.3. Paso 3: clave, fecha, vendedor, camión. Paso 10: fecha pasada; camión (inexistente o de otra empresa, luego inactivo); vendedor (inexistente o de otra empresa, luego inactivo); `jornada_duplicada`; `jornada_camion_con_jornada_abierta`; `jornada_vendedor_ocupado`. Sin códigos nuevos.
+- **T1-3:** `now()` como reloj de la transacción, convertido a `America/Argentina/Tucuman` para el día operativo.
+- **T1-4 (opción A):** *regla técnica acotada a T1, que no modifica ADR-007 ni `BLUEPRINT.md`*. La fecha debe ser finita y estar entre el día operativo actual y `9999-12-31`, inclusive. Fecha nula, infinita, anterior al día operativo o posterior a `9999-12-31` → `PT400 jornada_fecha_invalida`; las no representables (nula, `infinity`, `-infinity`, posterior a `9999-12-31`) se rechazan en el paso 3, antes de la huella v1 y de reservar la clave; la pasada, en el paso 10. Motivo (investigación del 31/10/2026, PG16): `to_char('infinity'::date, 'YYYY-MM-DD')` y `to_char('-infinity'::date, …)` devuelven NULL (la huella queda NULL y `operaciones.huella` es `NOT NULL` con CHECK sha256, así que la reserva fallaba con `PT500`), y `to_char` de fechas posteriores a `294276-12-31` lanza `date out of range for timestamp` (22008), un error de PostgreSQL fuera del catálogo estable. La fórmula de huella v1 no cambia; no se agrega ningún límite comercial (máximo de días o meses a futuro).
+- **T1-5:** verificado en el laboratorio con roles y claims reales, sin cambios de permisos: `propietario_rpc` lee `camiones` y la vista `privado.perfiles_empresa_gestion` sólo de la empresa del llamador (la vista, 0 filas para un `vendedor_piloto`), y puede insertar la operación y la jornada de apertura con las policies de D-1.
+- **T1-6:** rama y worktree aislados; el árbol principal y sus ocho archivos históricos de D-2 no se tocaron.
+
+### Archivos
+| Archivo | Cambio |
+|---|---|
+| `supabase/migrations/20261031120000_rpc_abrir_jornada.sql` | nuevo |
+| `supabase/rollback/20261031120000_rpc_abrir_jornada.rollback.sql` | nuevo |
+| `supabase/tests/jornadas_abrir.test.sql` | nuevo (153 aserciones) |
+| `supabase/tests/jornadas_abrir_aislamiento.test.sql` | nuevo (33 aserciones; ampliación de alcance autorizada por el usuario el 31/10/2026 para probar la guarda de aislamiento) |
+| `supabase/tests/productos_catalogo.test.sql`, `camiones_catalogo.test.sql` | la lista exacta de funciones `SECURITY DEFINER` de `privado` pasa de 14 a 15 (+ `abrir_jornada`); `productos_catalogo` excluye la nueva implementación del barrido de auxiliares |
+| `supabase/tests/hardening_adr001.test.sql` | `rpc_negocio` +2 firmas (22); implementaciones `SECURITY DEFINER` de `propietario_rpc`: 10 → 11; P11: 20 → 22 firmas |
+| `supabase/tests/grants_default_privileges.test.sql` | firmas aprobadas para `authenticated`: 26 → 28 |
+| `docs/progress-log.md` | esta entrada |
+
+Ninguna aserción existente se relajó: sólo se amplían listas y conteos.
+
+### Diseño
+Orden de ADR-001 §18.4.3: (1) `READ COMMITTED` o `PT500`; (2) identidad y rol desde `perfiles` (`PT401`/`PT403`); (3) estructura; (4) huella `v1|apertura_jornada|<camión>|<fecha>|<vendedor>`; (5) replay previo sin bloqueos; (7) advisory locks, nivel 1 (camión) y nivel 2 (vendedor), en ese orden; (8a) segunda consulta de la clave; (9) reserva con `ON CONFLICT`; (10) validaciones de ADR-007 §2.1 con el vendedor leído en la vista de D-2; (12) inserción de la jornada. No hay `FOR UPDATE` (la fila no existe) ni bloqueos de stock. Un rechazo en los pasos 9 a 12 revierte la reserva. Respuesta (también en replay): `jornadas.id`, ligado por `operacion_apertura_id`.
+
+### Cómo se verificó (laboratorio PG16, ORIENTATIVO; no sustituye la verificación independiente en Supabase PostgreSQL 17 con Claude Local)
+| Verificación | Resultado |
+|---|---|
+| Migración sobre las 14 migraciones previas | aplica sin error; verificación fail-closed del catálogo en la propia migración |
+| `jornadas_abrir.test.sql` | **153/153**, 0 errores |
+| Suite completa del laboratorio (15 archivos) | todos en verde; `hardening_adr001` 55/55 hasta la sección O-4 (las 3 aserciones del event trigger exigen superusuario y no son ejecutables en el laboratorio, igual que en la línea base) |
+| Sensibilidad de `jornadas_abrir.test.sql` (13 mutantes de la RPC aplicados a una copia descartable) | 11 detectados: sin `isfinite`, sin tope `9999-12-31`, fecha pasada aceptada, UTC en vez de Tucumán (sólo por inspección del código fuente), sin regla de vendedor ocupado, sin regla de camión con jornada abierta, huella distinta, rol `vendedor_piloto` permitido, sin control de camión activo, replay que ignora la huella y `search_path` distinto de vacío. **2 no detectados por este archivo:** la eliminación de la guarda de aislamiento (la cubre `jornadas_abrir_aislamiento.test.sql`, ver abajo) y un mutante neutro del paso 8a (sólo la concurrencia lo demuestra) |
+| `jornadas_abrir_aislamiento.test.sql` | **33/33**, 0 errores (1 aserción del nivel y 6 casos × 2 aserciones en cada una de las partes `REPEATABLE READ` y `SERIALIZABLE`, más 7 de `READ COMMITTED`): `READ COMMITTED` admite el pedido válido (fachada e implementación) y el replay, con exactamente una operación y una jornada nuevas y ninguna fila de movimientos ni historiales; `REPEATABLE READ` y `SERIALIZABLE` devuelven `PT500 jornada_error_interno` ante el pedido válido (fachada e implementación), la clave nula, la ausencia de `sub`, un `vendedor_piloto` y un replay legítimo, sin filas nuevas. Tras correrlo no queda ninguna fila de prueba en la base |
+| Sensibilidad del test de aislamiento (mutantes de la RPC en una copia descartable) | sin la guarda: 16 fallos; guarda colocada después de la identidad: 4; después de la estructura: 6; después del replay: 8. La suite sin mutar: 0 fallos |
+| Rollback limpio; migrar → revertir → migrar | el volcado de `public` y `privado` y los roles/membresías tras el rollback son idénticos al estado sin las dos funciones; reaplicar la migración reproduce el volcado original |
+| Rollback ante deriva (ACL ampliada a `anon`) | aborta sin cambios; una segunda ejecución falla (no es idempotente) |
+
+### Casos pendientes (no declarados aprobados)
+- **`jornadas_abrir_aislamiento.test.sql` no se declara aprobado:** pasó en el laboratorio PG16; falta su ejecución en Supabase PostgreSQL 17 real con el mecanismo de `supabase test db`.
+- **I10, I11 y K10** (concurrencia): quedan para el arnés de T3. El paso 8a no se puede demostrar con pgTAP de una sola sesión.
+- **I3 con el flujo real:** el replay tras un cambio de estado se probó con un fixture controlado (el owner lleva la jornada a `en_reparto`); se repite con la carga y la salida reales en T7.
+- **Verificación independiente en PostgreSQL 17 / Supabase real** (Claude Local): `db reset`, `supabase test db`, `db lint`, rollback limpio y migrar → revertir → migrar. Las diferencias PG16/PG17 conocidas (`MAINTAIN`) no afectan a esta migración.
+- Security review y auditoría de Codex y OpenCode del hash final.
+
+### Riesgos conocidos
+1. **Cómo se prueba el aislamiento (mecanismo y límites):** `SET TRANSACTION` sólo puede fijar el nivel antes de la primera consulta, y un archivo pgTAP corre en una sola transacción, de modo que tres niveles en un archivo exigen abrir tres transacciones (`begin isolation level …`). Stock lo resuelve con un archivo por nivel. Este archivo usa un único `plan()` y un único `finish()` con tres transacciones y dos `COMMIT` intermedios, que sólo confirman el estado interno de pgTAP (tablas temporales de la sesión). Los datos de prueba y los pedidos viven en `pg_temp.sandbox()`, que ejecuta cada pedido en una sub-transacción que se revierte siempre (verificado: con la guarda eliminada, el pedido prospera dentro del sandbox y no queda ninguna fila). Límites: depende de que el ejecutor de `supabase test db` (pg_prove) no envuelva el archivo en una transacción propia, igual que los dos archivos de aislamiento de Stock; y los dos `COMMIT` intermedios son una convención nueva respecto de los demás tests, que siempre terminan en `ROLLBACK`. Si la revisión prefiere la convención de Stock, la alternativa equivalente es un archivo por nivel (tres archivos, mismas aserciones).
+2. **Día operativo:** el cálculo en `America/Argentina/Tucuman` sólo se prueba por inspección del código y con el día calculado en el propio test; un test conductual sólo discrimina entre las 00:00 y las 03:00 UTC. Un error de zona horaria pasaría la suite el resto del día.
+3. **Duplicación (D-P1):** el bloque de replay se repite tres veces (pasos 5, 8a y la relectura del paso 9) y el contrato prohíbe helpers. Si se vuelve un problema concreto, corresponde un ADR; no se cambió la arquitectura.
+4. **Reserva antes de las validaciones:** el contrato fija la reserva de la clave (paso 9) antes de las validaciones de negocio (paso 10); un rechazo revierte la reserva con la transacción. Es el orden de ADR-001 y de las RPC de Stock.
+5. **DDL concurrente sobre funciones (M-4 de D-1):** el rollback de T1 no puede excluir un `CREATE OR REPLACE` concurrente entre su verificación y el `DROP`; se corre sin DDL concurrente. M-4 y N-1 siguen pendientes de aceptación formal.
+6. **Lectura de perfiles:** el vendedor se lee en la vista de D-2; un cambio posterior en D-2 o D-1 requeriría revalidar esta RPC. D-1 y D-2 no se modificaron.
+7. **Sin evidencia de PostgreSQL 17:** todo lo anterior es de laboratorio PG16.
+
+---
 ## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commits `019294c`, `30c19f3`, `af4e52a` y `22cf845` publicados; Codex M-3 en corrección local, sin commit)
 
 **Rama:** `feat/d1-esquema-jornadas`, en un worktree independiente (`../distribuidora-d1`), desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Commit único `019294cca9555541549a278618fbe4d74c5af766` (padre `fc906cc`), **publicado** en `origin/feat/d1-esquema-jornadas` el 30/10/2026 (Preview de Vercel `7441626017`, `success`; sin deployments de Production). Implementación con las decisiones D-1 a D-9 aprobadas por el usuario (preámbulo corregido de D-1). No incluye RPC, arnés de concurrencia, frontend ni cambios en D-2. **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `movimientos_stock`, aislamiento por `empresa_id`, roles) y auditoría independiente de Codex **y** OpenCode sobre el mismo hash (ADR-001 §18.4.13 punto 7, §18.4.14 punto 4); la excepción de D-2 no se extiende (§18.4.15).

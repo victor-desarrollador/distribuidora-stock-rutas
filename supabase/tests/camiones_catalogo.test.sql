@@ -185,7 +185,8 @@ select is(
          where p.prosecdef
            and p.pronamespace = 'privado'::regnamespace
          order by 1),
-  array['privado.actualizar_camion(uuid,text,text)',
+  array['privado.abrir_jornada(uuid,uuid,date,uuid)',
+        'privado.actualizar_camion(uuid,text,text)',
         'privado.actualizar_cliente(uuid,text,text,text,text)',
         'privado.actualizar_producto(uuid,text,text,numeric,integer)',
         'privado.cambiar_estado_camion(uuid,boolean)',
@@ -199,7 +200,7 @@ select is(
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
-  'las funciones SECURITY DEFINER de privado son exactamente las catorce: trece implementaciones de negocio (productos, camiones, clientes y stock) y el auxiliar empresa_gestion_actual (D-2)');
+  'las funciones SECURITY DEFINER de privado son exactamente las quince: trece implementaciones de negocio (productos, camiones, clientes y stock), abrir_jornada (T1) y el auxiliar empresa_gestion_actual (D-2)');
 
 select is(
   pg_temp.sd_publicas_no_autorizadas(),

@@ -170,7 +170,8 @@ select is(
          where p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
            and has_function_privilege('authenticated', p.oid, 'execute')
          order by 1),
-  array['actualizar_camion(uuid,text,text)',
+  array['abrir_jornada(uuid,uuid,date,uuid)',
+        'actualizar_camion(uuid,text,text)',
         'actualizar_cliente(uuid,text,text,text,text)',
         'actualizar_producto(uuid,text,text,numeric,integer)',
         'cambiar_estado_camion(uuid,boolean)',
@@ -180,6 +181,7 @@ select is(
         'crear_cliente(text,text,text,text)',
         'crear_producto(text,text,text,text,numeric,integer)',
         'mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
+        'privado.abrir_jornada(uuid,uuid,date,uuid)',
         'privado.actualizar_camion(uuid,text,text)',
         'privado.actualizar_cliente(uuid,text,text,text,text)',
         'privado.actualizar_producto(uuid,text,text,numeric,integer)',
@@ -196,7 +198,7 @@ select is(
         'registrar_ingreso(uuid,uuid,integer,text)',
         'registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las veintiséis firmas aprobadas: productos, camiones, clientes y stock (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las veintiocho firmas aprobadas: productos, camiones, clientes, stock y abrir_jornada (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)

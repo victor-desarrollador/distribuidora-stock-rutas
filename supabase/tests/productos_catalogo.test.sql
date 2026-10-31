@@ -218,7 +218,8 @@ select is(
          where p.prosecdef
            and p.pronamespace = 'privado'::regnamespace
          order by 1),
-  array['privado.actualizar_camion(uuid,text,text)',
+  array['privado.abrir_jornada(uuid,uuid,date,uuid)',
+        'privado.actualizar_camion(uuid,text,text)',
         'privado.actualizar_cliente(uuid,text,text,text,text)',
         'privado.actualizar_producto(uuid,text,text,numeric,integer)',
         'privado.cambiar_estado_camion(uuid,boolean)',
@@ -232,7 +233,7 @@ select is(
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
-  'las funciones SECURITY DEFINER de privado son exactamente las catorce: trece implementaciones de negocio (productos, camiones, clientes y stock) y el auxiliar empresa_gestion_actual (D-2)');
+  'las funciones SECURITY DEFINER de privado son exactamente las quince: trece implementaciones de negocio (productos, camiones, clientes y stock), abrir_jornada (T1) y el auxiliar empresa_gestion_actual (D-2)');
 
 select is(
   pg_temp.sd_publicas_no_autorizadas(),
@@ -323,13 +324,14 @@ select is(
   (select count(*)::int from pg_proc p
     where p.pronamespace = 'privado'::regnamespace
       and p.oid::regprocedure::text not in (select firma from firmas)
-      -- Las implementaciones de camiones, clientes y stock las cubren
-      -- camiones_catalogo, clientes_catalogo y stock_ingreso.
+      -- Las implementaciones de camiones, clientes, stock y jornadas las cubren
+      -- camiones_catalogo, clientes_catalogo, stock_ingreso y jornadas_abrir.
       and p.proname not in ('crear_camion', 'actualizar_camion',
                             'cambiar_estado_camion', 'crear_cliente',
                             'actualizar_cliente', 'validar_cliente',
                             'cambiar_estado_cliente', 'registrar_ingreso',
-                            'mover_a_cuarentena', 'registrar_merma')
+                            'mover_a_cuarentena', 'registrar_merma',
+                            'abrir_jornada')
       and (has_function_privilege('authenticated', p.oid, 'execute')
            or has_function_privilege('anon', p.oid, 'execute')
            or p.proacl is null
