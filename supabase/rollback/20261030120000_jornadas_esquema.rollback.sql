@@ -73,8 +73,20 @@ begin
   end if;
 end $$;
 
+-- Un solo LOCK TABLE, en un orden fijo (el de la lista) y con lock_timeout de 5 s: las
+-- tablas propias y las de Stock primero (hijas) y después, en orden alfabético, las
+-- tres tablas preexistentes que referencian las FK propias de D-1 (camiones, empresas,
+-- perfiles). Esas tres alojan los triggers internos del lado referenciado de las FK de
+-- D-1: sin este bloqueo, un COMMENT ON TRIGGER o un DISABLE concurrente podía
+-- modificarlos después del control de la sección 1c y antes del DROP, y el cambio se
+-- perdía en silencio (M-3). Los locks se mantienen hasta el COMMIT o el ROLLBACK, y
+-- se adquieren antes de cualquier control que examine esos triggers.
+-- Costo operativo: mientras dura la reversión, perfiles, camiones y empresas quedan
+-- bloqueadas para lectura y escritura (ACCESS EXCLUSIVE). Por eso se corre con la
+-- aplicación detenida o sin tráfico, en local o staging.
 lock table public.jornadas, public.reasignaciones_vendedor, public.correcciones_jornada,
-  public.operaciones, public.movimientos_stock in access exclusive mode;
+  public.operaciones, public.movimientos_stock,
+  public.camiones, public.empresas, public.perfiles in access exclusive mode;
 
 -- ---------------------------------------------------------------------------
 -- 1. Precheck bloqueante (no cambia nada)

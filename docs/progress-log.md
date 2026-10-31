@@ -1,5 +1,5 @@
 ---
-## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commits `019294c`, `30c19f3` y `af4e52a` publicados; Codex H-1, M-1 y M-2 en corrección local, sin commit)
+## 30/10/2026 — D-1: esquema de jornadas y carga de camiones (commits `019294c`, `30c19f3`, `af4e52a` y `22cf845` publicados; Codex M-3 en corrección local, sin commit)
 
 **Rama:** `feat/d1-esquema-jornadas`, en un worktree independiente (`../distribuidora-d1`), desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Commit único `019294cca9555541549a278618fbe4d74c5af766` (padre `fc906cc`), **publicado** en `origin/feat/d1-esquema-jornadas` el 30/10/2026 (Preview de Vercel `7441626017`, `success`; sin deployments de Production). Implementación con las decisiones D-1 a D-9 aprobadas por el usuario (preámbulo corregido de D-1). No incluye RPC, arnés de concurrencia, frontend ni cambios en D-2. **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `movimientos_stock`, aislamiento por `empresa_id`, roles) y auditoría independiente de Codex **y** OpenCode sobre el mismo hash (ADR-001 §18.4.13 punto 7, §18.4.14 punto 4); la excepción de D-2 no se extiende (§18.4.15).
 
@@ -276,6 +276,42 @@ Tras cada aborto el volcado completo (esquema con ACL, políticas y datos, más 
 **Pendientes separados (no incluidos en este ciclo):** (a) ACL con `WITH GRANT OPTION` (BAJO, preexistente): la comparación de ACL ignora `is_grantable`; se propone tratarlo en una tarea aparte que incluya `is_grantable` en el rollback, en los bloques de contrato y, con autorización propia, en la migración y sus tests. (b) Codex H-2 (cobertura de privilegios del lector) y H-3 (integridad de `privado.usuario_actual()`), siguen como hallazgos bajos no bloqueantes.
 
 **Pendiente de autorización humana:** verificación independiente de Claude Local en PostgreSQL 17 / Supabase real, autorización del commit, push (con la verificación de Vercel), nueva security review y re-auditoría de Codex y OpenCode del hash final. Si cualquiera de ellas encuentra un hallazgo bloqueante nuevo, se detiene el trabajo (condición de cierre de la excepción).
+
+### Auditoría de `22cf845` (Codex y OpenCode): M-3 y su corrección local, sin commit
+`22cf845af975fa33aaf3ad7f2e8584b8c4a50f02` (H-1 + M-1 + M-2) quedó publicado el 31/10/2026 (Preview `7452589683`, `success`; sin deployments de Production). **Claude Local verificó el parche en PostgreSQL 17** (pgTAP 1.184/1.184, M-2 52/52, exhaustivos 160/160 de D-1 rechazados y 148/148 ajenos aceptados, M-1 31/31, R 22/22, Q 14/14, banco previo 84/84, manifiesto 93/93, `search_path` 187/187).
+
+**M-3 (MEDIO, bloqueante; reportado por Codex y reproducido por Claude Local en PostgreSQL 17).** El rollback verifica los triggers internos de D-1 alojados en `perfiles`, `camiones` y `empresas` (lado referenciado de las FK propias) pero no bloquea esas tablas antes del precheck. Un `COMMENT ON TRIGGER` o `DISABLE TRIGGER` concurrente podía modificar sus metadatos después del control de la sección 1c y antes del `DROP`, que los descartaba en silencio. Claude Local confirmó que `SHARE ROW EXCLUSIVE` no alcanza y que `ACCESS EXCLUSIVE` impide la carrera en los escenarios ensayados.
+
+**Excepción humana puntual a AGENTS.md §2.3.5 (decisión del usuario, 31/10/2026).** El usuario reconoció que se alcanzó y superó el límite ordinario de ciclos y autorizó **UNA ÚNICA INTERVENCIÓN EXCEPCIONAL, limitada a cerrar M-3, sin habilitar nuevos ciclos automáticos**. Si aparece otro bloqueante se detiene el trabajo y se pide una nueva decisión humana. Es un segundo desvío puntual, además del de M-2; no modifica AGENTS.md ni ninguna ADR.
+
+**Corrección local, sin commit** (sólo `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql` y esta entrada; la migración, las políticas RLS, los grants, los tests, D-2 y las RPC no cambian). El `LOCK TABLE ... IN ACCESS EXCLUSIVE MODE` inicial, que ya existía para las tres tablas propias, `operaciones` y `movimientos_stock`, pasa a incluir `public.camiones`, `public.empresas` y `public.perfiles`, en ese orden (alfabético, después de las otras cinco). Es una sola sentencia, antes de cualquier control que examine esos triggers, con `lock_timeout = 5s` y dentro de la misma transacción: los locks se mantienen hasta el `COMMIT` o el `ROLLBACK`. Sin `CASCADE`, sin funciones nuevas, sin cambios en el manifiesto de 93 entradas ni en los controles A–E. Diff: +13 / −1 líneas del rollback.
+
+**Costo operativo.** Mientras dura la reversión, `perfiles`, `camiones` y `empresas` quedan bloqueadas para lectura y escritura (`ACCESS EXCLUSIVE`), igual que las demás tablas del lock. El rollback ya necesitaba ese bloqueo sobre las tres tablas al ejecutar `DROP TABLE jornadas` (eliminar una FK exige `ACCESS EXCLUSIVE` sobre la tabla referenciada): lo que cambia es que ahora se toma **antes** de los controles y se mantiene durante todo el procedimiento, en vez de adquirirse recién en el `DROP`. Se debe correr sin tráfico (local o staging).
+
+**Evidencia propia (laboratorio PG16, ORIENTATIVA; no sustituye a PostgreSQL 17).** Cluster y plantilla reconstruidos desde cero. Una corrida parcial (cinco filas del banco M-2) sufrió un parpadeo del servidor del laboratorio (error de infraestructura, no del rollback, con `ERRORMUT` en esas filas); no se contó y el banco se repitió completo. Los resultados de abajo provienen de corridas sin errores.
+
+| Prueba | Rollback `22cf845` | Rollback con M-3 |
+|---|---|---|
+| Carrera: `COMMENT ON TRIGGER` y `DISABLE` concurrentes sobre un trigger interno de FK en `perfiles`, `camiones` y `empresas` (6 casos; el rollback se detiene 6 s tras el precheck para que la segunda sesión entre en la ventana) | **6 pérdidas silenciosas** (rollback y modificación terminan OK; la segunda sesión no espera) | **6 protegidos**: la segunda sesión espera ~3,6 s al `COMMIT` y falla con «trigger … does not exist»; el rollback termina OK; nada se modifica en silencio |
+| `lock_timeout`: sesión ajena con `ACCESS SHARE` sostenido sobre `perfiles`, `camiones` o `empresas` | — | 3/3: el rollback aborta a los 5,0 s con «canceling statement due to lock timeout»; volcado completo idéntico al previo; al liberar el lock, un segundo intento termina OK (recuperación) |
+| Contraste: mismo escenario con el rollback anterior sobre `perfiles` | también aborta por timeout (al llegar al `DROP`, no al comienzo) | — |
+| Orden opuesto de locks (sesión que toma `perfiles` y luego `jornadas`) | — | **deadlock en 3/3**: PostgreSQL lo detecta (≈1 s) y aborta el rollback con «deadlock detected»; la otra sesión termina; estado final sin cambios |
+| Orden natural (hijas antes que padres: `jornadas` y luego `perfiles`) | — | sin deadlock en 3/3: ambas sesiones terminan OK y D-1 queda revertida |
+| M-2: 53 casos (base limpia + 52 alteraciones de triggers internos) | 52 abortan | 52 abortan, resultado idéntico |
+| 40 controles de Stock | aceptan | aceptan las 40 |
+| Banco previo (39 + 24 + 8 + 11 + 2 = 84), M-1 31, R 22, Q 14, N 14 (N2 y N3 con SQL válido) | sin regresiones | resultado idéntico en los 6 bancos; ningún `ERRORMUT` |
+| `search_path` (11 valores, incluidos `''`, `pg_catalog`, `pg_temp` y esquemas homónimos) | — | base limpia acepta y alteración aborta sin cambios en los 11; 0 objetos temporales residuales |
+| Rollback limpio; migrar → revertir → migrar | — | `pg_dump` de `public` y `privado` idéntico tras revertir y tras re-aplicar |
+
+Tras cada aborto (timeout, deadlock, alteraciones) el volcado completo (esquema con ACL, políticas y datos, más roles y membresías) es idéntico al previo y no quedan objetos temporales ni modificaciones persistentes. Los bancos y las herramientas de concurrencia son de laboratorio y **no se versionan**.
+
+**Sobre los deadlocks (condición 6).** No se puede afirmar que no existan deadlocks para *cualquier* orden de locks de otras sesiones: cualquier orden fijo tiene un orden opuesto que se bloquea. Lo comprobado es que (1) el orden elegido, hijas antes que padres (el mismo sentido que siguen las FK: se bloquea la tabla que referencia antes que la referenciada), no produce deadlock con una sesión que lo respete, y (2) con un orden opuesto el deadlock se produce, lo detecta PostgreSQL en ~1 s y el rollback aborta de forma atómica sin cambios. Es un fallo cerrado, coherente con la política del procedimiento; se ejecuta sin tráfico, donde no se espera.
+
+**Riesgos de falsos abortos / limitaciones.** (1) Con tráfico concurrente sobre cualquiera de las ocho tablas el rollback puede abortar por `lock_timeout` o por deadlock; reintentar en una ventana sin tráfico. (2) Bloquear `perfiles` impide leerla mientras dura el procedimiento (segundos). (3) La verificación de PostgreSQL 17 / Supabase real sigue pendiente de Claude Local.
+
+**Hallazgos bajos que siguen pendientes (no se resuelven en este cambio):** (a) ACL con `WITH GRANT OPTION` (la comparación de ACL ignora `is_grantable`); (b) Codex H-2, cobertura de los privilegios del lector; (c) Codex H-3, integridad de `privado.usuario_actual()`; (d) el cuarto hallazgo bajo informado por las auditorías de Codex y OpenCode sobre `22cf845`: **su texto no se me entregó en esta conversación y queda por transcribir desde el informe de auditoría**; no lo resumo para no inventarlo.
+
+**Pendiente de autorización humana:** verificación independiente de Claude Local en PostgreSQL 17, autorización del commit, push (con la verificación de Vercel), nueva security review y re-auditoría de Codex y OpenCode del hash final. Si cualquiera encuentra un bloqueante nuevo, se detiene el trabajo.
 
 ### Riesgos pendientes
 1. **Evidencia real parcial:** `019294c` falló `supabase test db` por H-1 (ver arriba). Hasta que Claude Local repita la verificación completa sobre el commit correctivo, el resultado definitivo está pendiente; mi evidencia de laboratorio es orientativa.
