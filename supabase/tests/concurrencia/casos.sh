@@ -108,16 +108,33 @@ mismo_uuid() {
   [[ -n $a && $a == "$b" ]]
 }
 
-# Invariantes: pares descripción/condición; imprime las que no se cumplen.
+# Invariantes: pares descripción/condición. Imprime el testigo positivo INV_OK
+# sólo si la consulta se ejecutó sin error y todas las condiciones se cumplen.
+# Si falla alguna, imprime «INV_FALLA: <descripciones>»; si la consulta no se
+# pudo ejecutar, «INV_ERROR_SQL(rc=N): <error>». Una salida vacía nunca es
+# éxito (T3-C1, H-01): cerrar() exige el testigo.
 invariantes() {
-  local sql="select concat_ws('; '" d c
+  local sql="select concat_ws('; '" d c out rc
   while (( $# >= 2 )); do
     d=$1; c=$2; shift 2
     sql+=", case when not coalesce(($c), false) then '${d//\'/\'\'}' end"
   done
   sql+=")"
-  sql_pg "$BASE" "$sql"
+  out=$(sql_pg "$BASE" "select case when f = '' then 'INV_OK' else f end from ($sql) as s(f)" 2>&1)
+  rc=$?
+  if (( rc != 0 )); then
+    printf 'INV_ERROR_SQL(rc=%s): %s' "$rc" "${out//$'\n'/ }"
+    return 1
+  fi
+  if [[ $out == INV_OK ]]; then
+    printf 'INV_OK'
+    return 0
+  fi
+  printf 'INV_FALLA: %s' "${out:-sin salida}"
+  return 1
 }
+# Uno o más testigos INV_OK concatenados, y nada más (cadena vacía = falla).
+inv_ok() { [[ $1 =~ ^(INV_OK)+$ ]]; }
 INV_IJ1="not exists (select 1 from public.jornadas group by empresa_id, camion_id, fecha having count(*) > 1)
  and not exists (select 1 from public.jornadas group by empresa_id, vendedor_id, fecha having count(*) > 1)
  and not exists (select 1 from public.jornadas where estado <> 'cerrada' group by empresa_id, camion_id having count(*) > 1)"
@@ -134,19 +151,20 @@ vend_de() { printf "(select vendedor_id from public.jornadas where id = '%s') = 
 jorn_en() { printf "(select count(*) from public.jornadas where camion_id = '%s' and fecha = current_date + %s and vendedor_id = '%s') = %s" "$1" "$2" "$3" "$4"; }
 
 # Cierra el veredicto de una repetición.
-cerrar() {  # caso orden rep ok esperado [invariantes_fallidas]
-  local c=$1 o=$2 r=$3 ok=$4 esp=$5 inv=${6:-}
+cerrar() {  # caso orden rep ok esperado resultado_de_invariantes
+  local c=$1 o=$2 r=$3 ok=$4 esp=$5 inv=${6:-} det="resultado distinto del esperado"
   local obt="T1=$(res_corto "$RES_T1") T2=$(res_corto "$RES_T2")${DELANTE:+ delante=$DELANTE}"
-  [[ -n $inv ]] && ok=1
+  if ! inv_ok "$inv"; then ok=1; det=${inv:-invariantes sin resultado}; fi
   if (( ok == 0 )); then registrar "$c" "$o" "$r" PASS "$esp" "$obt"
-  else registrar "$c" "$o" "$r" FAIL "$esp" "$obt" "${inv:-resultado distinto del esperado}"; fi
+  else registrar "$c" "$o" "$r" FAIL "$esp" "$obt" "$det"; fi
 }
 
 # Repite un caso R veces en cada orden, con una base nueva por repetición.
 repetir() {   # caso "ordenes" preparar ejecutor evaluar
-  local caso=$1 ordenes=$2 prep=$3 ejec=$4 eval=$5 o r
+  local caso=$1 ordenes=$2 prep=$3 ejec=$4 eval=$5 o r antes n
   for o in $ordenes; do
     for (( r = 1; r <= R; r++ )); do
+      antes=$TOTAL
       nueva_base
       MOTIVO=""; RES_T1=""; RES_T2=""; DELANTE=""
       if ! $prep; then
@@ -156,10 +174,49 @@ repetir() {   # caso "ordenes" preparar ejecutor evaluar
       else
         registrar "$caso" "$o" "$r" FAIL "mecanismo del caso" "T1=$(res_corto "${RES_T1:-?|}") T2=$(res_corto "${RES_T2:-?|}")" "$MOTIVO"
       fi
+      # Exactamente un veredicto por repetición (T3-C1): ninguno o varios es FAIL.
+      n=$(( TOTAL - antes ))
+      (( n == 1 )) || registrar "$caso" "$o" "$r" FAIL "un veredicto por repetición" "$n veredictos"
       borrar_base "$BASE"
       DEADLOCKS_CASOS=$(( DEADLOCKS_CASOS + DEADLOCKS_ULTIMA_BASE ))
     done
   done
+}
+
+# -----------------------------------------------------------------------------
+# ORACULO — autoverificación del oráculo de invariantes (T3-C1, H-01). Antes de
+# AUTO y de los casos: una condición verdadera debe dar el testigo; una falsa,
+# un error SQL real (división por cero, tabla y columna inexistentes), la cadena
+# vacía y una concatenación con una falla deben ser rechazados. Si no, el arnés
+# termina con exit 1 sin medir nada.
+# -----------------------------------------------------------------------------
+caso_ORACULO() {
+  local inv
+  BASE=oraculo
+  sql_admin postgres "create database oraculo template arnes owner postgres" >/dev/null \
+    || error_entorno "no se creó la base de la autoverificación del oráculo"
+  inv=$(invariantes "verdadera" "true")
+  if inv_ok "$inv"; then registrar ORACULO - verdadera PASS "INV_OK" "$inv"
+  else registrar ORACULO - verdadera FAIL "INV_OK" "$inv"; fi
+  local d c
+  for d in falsa division_por_cero tabla_inexistente columna_inexistente; do
+    case $d in
+      falsa) c="false" ;;
+      division_por_cero) c="(select 1 / 0) = 1" ;;
+      tabla_inexistente) c="(select count(*) from public.tabla_inexistente) = 0" ;;
+      columna_inexistente) c="(select count(columna_inexistente) from public.jornadas) = 0" ;;
+    esac
+    inv=$(invariantes "$d" "$c")
+    if inv_ok "$inv"; then registrar ORACULO - "$d" FAIL "rechazo" "$inv"
+    else registrar ORACULO - "$d" PASS "rechazo" "${inv:0:60}"; fi
+  done
+  if inv_ok ""; then registrar ORACULO - vacia FAIL "rechazo" "aceptada"
+  else registrar ORACULO - vacia PASS "rechazo" "rechazada"; fi
+  inv="$(invariantes "verdadera" "true")$(invariantes "falsa" "false")"
+  if inv_ok "$inv"; then registrar ORACULO - concatenada FAIL "rechazo" "$inv"
+  else registrar ORACULO - concatenada PASS "rechazo" "${inv:0:60}"; fi
+  borrar_base oraculo
+  DEADLOCKS_CASOS=$(( DEADLOCKS_CASOS + DEADLOCKS_ULTIMA_BASE ))
 }
 
 # -----------------------------------------------------------------------------

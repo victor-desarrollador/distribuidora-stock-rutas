@@ -644,6 +644,12 @@ EMPRESA=$EMPRESA_A
 LOG_DEADLOCKS_0=$(grep -c 'deadlock detected' "$LOG_SERVIDOR")
 
 DEADLOCKS_AUTO=0
+# El oráculo de invariantes debe rechazar fallas y errores SQL (T3-C1, H-01).
+caso_ORACULO
+if (( ${RESUMEN_FALLA[ORACULO]:-1} > 0 )); then
+  echo "arnés: la autoverificación del oráculo falló; el arnés no mide nada" | tee -a "$SALIDA"
+  exit 1
+fi
 caso_AUTO
 if (( ${RESUMEN_FALLA[AUTO]:-1} > 0 || ${RESUMEN_FALLA[AUTO-CONT]:-1} > 0 )); then
   echo "arnés: la autoverificación AUTO no detectó el deadlock esperado; el arnés no mide nada" | tee -a "$SALIDA"
@@ -672,7 +678,7 @@ cerrar_todas
 _res=$(mon postgres "select (select count(*) from pg_stat_activity where backend_type = 'client backend' and pid <> pg_backend_pid())
   || '|' || (select count(*) from pg_locks where pid <> pg_backend_pid())
   || '|' || (select count(*) from pg_prepared_xacts)
-  || '|' || (select count(*) from pg_database where datname like 'rep%' or datname = 'auto')")
+  || '|' || (select count(*) from pg_database where datname like 'rep%' or datname in ('auto', 'oraculo'))")
 echo "arnés: residuos (sesiones|locks|transacciones preparadas|bases de repetición) = $_res" | tee -a "$SALIDA"
 [[ $_res == "0|0|0|0" ]] || RESIDUOS=$(( RESIDUOS + 1 ))
 (( RESIDUOS == 0 )) || registrar RESIDUOS - - FAIL "0|0|0|0" "$_res"

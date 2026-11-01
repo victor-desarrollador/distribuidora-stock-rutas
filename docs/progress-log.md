@@ -1,5 +1,7 @@
 ---
-## 01/11/2026 — T3: arnés de concurrencia de jornadas (implementación local, sin commit; rama apilada sobre T2)
+## 01/11/2026 — T3: arnés de concurrencia de jornadas (commit `257efef` auditado; ciclo de corrección T3-C1 en local, sin commit; rama apilada sobre T2)
+
+**Estado actual.** El commit original de T3 es `257efef02dd9749656a0e4fed407c0a581b305c9` (padre `b9ba369…`, tree `3d8a9a88…`), local, sin push. Codex lo dictaminó **BLOQUEADO por H-01** y OpenCode **APTO con observaciones**. La corrección T3-C1 (ver al final de esta entrada) está en el worktree **sin commit**, a la espera de revisión humana antes de congelar un hash nuevo. Las secciones que siguen describen el estado auditado en `257efef`; sus cifras son las del implementador.
 
 **Rama:** `feat/rpc-jornadas-t3-arnes-concurrencia`, en el worktree `../distribuidora-rpc-t3`, desde el commit exacto `b9ba36908ecf956ce2e2d54d224e90aae3bc6ad0` (T2). **No se integra a `main`**: depende de T1, T2 y D-1, y M-4 y N-1 de D-1 siguen bloqueando la integración. **Superficie sensible:** concurrencia, idempotencia y Supabase; corresponde security review y auditoría independiente de Codex y OpenCode sobre el hash antes de cualquier merge (AGENTS.md §2.4; ADR-001 §18.4.13, punto 7).
 
@@ -50,7 +52,7 @@ No se modificaron T1, T2, migraciones, RLS, grants, RPC, `apps/web` ni CI.
 | Esperas espurias | S-ESP-RR, S-ESP-RA | 1, 2 | con la primera operación devuelta y abierta, una operación con recursos disjuntos termina sin esperarla (no es el grupo S de seguridad de §18.4.9) |
 | Observación | O-R1…R4, O-A1, O-A2 | — | O3 (vigente y nuevo en orden de uuid), O4 (camión antes que vendedor), O2′ (`backend_xid` NULL mientras espera) y O5 (al volver retiene exactamente su conjunto y tiene xid) |
 
-### Verificación (PostgreSQL 17.11 Debian, binarios `/usr/lib/postgresql/17/bin`)
+### Verificación del implementador sobre `257efef` (PostgreSQL 17.11 Debian, binarios `/usr/lib/postgresql/17/bin`)
 - **Arnés completo, R = 10:** tres corridas con el mismo resultado: `421 verificaciones, 0 fallas`, exit 0, 132–133 s. Deadlocks: AUTO = 20, fuera de AUTO = 0 y 20 líneas `deadlock detected` en el log. Residuos `0|0|0|0` (sesiones, locks, transacciones preparadas, bases). Después: 0 procesos y 0 directorios `/tmp/arnes.*`.
 - **Entradas inválidas:** argumento compuesto, caso inexistente, `ARNES_R=0` y binarios que no son PG17 → exit 2.
 - **Banco de mutantes de laboratorio (no versionado; copias descartables, `ARNES_R=2`):**
@@ -79,7 +81,45 @@ No se modificaron T1, T2, migraciones, RLS, grants, RPC, `apps/web` ni CI.
 ### Pendiente (no declarado aprobado)
 - **Diferidos a T4–T7:** K5–K7, K11, K12; I10/I11 de `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida`; el resto de K8; I3 con el flujo real.
 - **Excluidos:** 5a, 5b, 5d, O1, series L, mutantes de modo de bloqueo; ejecución en CI.
-- Revisión humana del diff, autorización del commit, security review y auditoría de Codex y OpenCode sobre el hash. Sin commit, push, PR, merge ni deploy. M-4 y N-1 de D-1 siguen bloqueando la integración a `main`.
+- Se cumplió con el commit `257efef`: revisión humana del diff y autorización del commit. Siguen pendientes la security review, la revisión de T3-C1 y la auditoría de Codex y OpenCode sobre el hash nuevo. Sin push, PR, merge ni deploy. M-4 y N-1 de D-1 siguen bloqueando la integración a `main`.
+
+### Auditorías sobre `257efef`
+- **Codex: BLOQUEADO por H-01.** Ejecución independiente de Codex (no del implementador) en PostgreSQL 17.11: reprodujo `421 verificaciones, 0 fallas` con R = 10 y reprodujo además el falso PASS del oráculo de H-01.
+- **OpenCode: APTO con observaciones** (auditoría estática de sólo lectura; no ejecuta comandos, AGENTS.md §2.3.2).
+
+### T3-C1: corrección de H-01 y control adicional — implementación local, sin commit
+**Decisión humana (01/11/2026):** corrección local limitada a H-01 (bloqueante), H-02 (esta bitácora) y el control adicional de veredictos por repetición. Sin cambios en migraciones, RPC, RLS, grants, bootstrap P1, mecanismos de sincronización, escenarios, frontend ni CI. Primer ciclo de corrección de T3 (AGENTS.md §2.3.5).
+
+**Causa raíz de H-01.** `invariantes()` (`casos.sh`) devolvía la salida de `sql_pg`. Cuando la consulta fallaba (error SQL, tabla o columna inexistente), el error iba a stderr, stdout quedaba vacío y `$(invariantes …)` capturaba una cadena vacía. `cerrar()` usaba la cadena vacía como «sin invariantes fallidas» y registraba PASS. El exit no nulo de `sql_pg` se perdía en la sustitución de comandos.
+
+**Control adicional, defecto demostrado.** `repetir()` no exigía exactamente un veredicto por repetición. Un evaluador que no llamara a `cerrar()` en una repetición, o que lo llamara dos veces, dejaba el caso con veredictos faltantes o duplicados y exit 0. Sólo se detectaba un caso sin ningún veredicto en todas sus repeticiones.
+
+**Corrección (central; los 21 evaluadores no cambian).**
+- `invariantes()` captura stdout y stderr y el código de salida. Imprime el testigo positivo `INV_OK` sólo si la consulta se ejecutó y todas las condiciones se cumplen; si falla alguna, `INV_FALLA: …`; si la consulta no se pudo ejecutar, `INV_ERROR_SQL(rc=N): …`.
+- `inv_ok()` acepta sólo uno o más testigos `INV_OK` concatenados (K9-R concatena dos llamadas). `cerrar()` exige el testigo: una cadena vacía o ausente es FAIL («invariantes sin resultado»). No depende de `set -e`.
+- `repetir()` cuenta los veredictos de cada repetición y registra FAIL si no es exactamente uno.
+- `ORACULO` es una autoverificación permanente del oráculo que corre antes de AUTO, sobre una base propia. Debe aceptar una condición verdadera y rechazar una falsa, tres errores SQL reales (división por cero, tabla inexistente y columna inexistente), la cadena vacía y una concatenación con una falla. Si no, el arnés termina con exit 1 sin medir nada.
+- La consulta final de residuos incluye la base `oraculo`.
+
+**Regresión negativa reproducible (laboratorio, no versionada; copias descartables, `ARNES_R=2`).** Inyecciones: H01 (invariante con `public.tabla_inexistente` en I10-R), V0 (la repetición 1 de K1 no registra veredicto) y V2 (cada repetición de K1 registra dos).
+
+| Inyección | Antes de C1 (`257efef`) | Después de C1 |
+|---|---|---|
+| H01 | **falso PASS**: I10-R PASS=4, `ERROR: relation "public.tabla_inexistente" does not exist`, exit 0 | I10-R FAIL=4, `INV_ERROR_SQL(rc=1)`, exit 1 |
+| V0 | **falso PASS**: K1 con 2 de 4 veredictos, exit 0 | K1 FAIL=2 («0 veredictos»), exit 1 |
+| V2 | **falso PASS**: K1 con 8 de 4 veredictos, exit 0 | K1 FAIL=4 («2 veredictos»), exit 1 |
+| `invariantes()` original reinyectado en C1 | — | `ORACULO` falla en `verdadera` y el arnés aborta con exit 1 («el arnés no mide nada») |
+
+En las tres inyecciones se mantienen el control de deadlocks (AUTO = 4, fuera de AUTO = 0, log = 4) y el de residuos (`0|0|0|0`), y la limpieza deja 0 directorios `/tmp/arnes.*`.
+
+**Verificación del implementador sobre C1 (PostgreSQL 17.11).**
+- `bash -n` de `arnes.sh` y `casos.sh`: correcto.
+- Arnés completo, R = 10: `428 verificaciones, 0 fallas` (las 421 anteriores más 7 de `ORACULO`), exit 0, 135 s. Deadlocks: AUTO = 20, fuera de AUTO = 0, log = 20. Residuos `0|0|0|0`. La corrida se hizo antes de agregar `oraculo` a la consulta de residuos; con ese cambio, los mutantes y una corrida completa final repiten el resultado.
+- Banco de mutantes sobre C1: 7/8 detectados, sin cambios; `abrir_jornada` sin 8a sigue sin detectarse, que es el límite declarado.
+- Supabase CLI 2.120.0, stack descartable: `db reset` aplicó 15 migraciones. `test db` de `supabase/tests/concurrencia` dio `NOTESTS`, exit 0, bootstrap `skipped` y catálogo idéntico (476 entradas). `test db` completo: `Files=19, Tests=1587, Result: PASS`.
+- **No ejecutado:** `lint`, `typecheck`, `test`, `build` y Playwright (no se modificó `apps/web`); `shellcheck` (no instalado).
+
+**Riesgos residuales.** Un error en otras lecturas de una sola consulta del arnés sigue sin un testigo positivo propio. El contador de deadlocks por base, si la consulta falla, suma cero; lo compensa el cruce obligatorio con las líneas `deadlock detected` del log, que hace fallar la corrida si difieren. Los límites de cobertura de la sección «Límites» y el mutante sobreviviente no cambian.
 
 ---
 ## 01/11/2026 — T2: RPC `reasignar_vendedor` (commit `49b3be7` auditado; ciclos de corrección T2-C1 y T2-C2 en local, sin commit; rama apilada sobre T1 y D-1)
