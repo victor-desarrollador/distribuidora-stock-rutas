@@ -1,11 +1,12 @@
 ---
-## 01/11/2026 — T3: arnés de concurrencia de jornadas (commits `257efef` y C1 `2580372` auditados; ciclo de corrección T3-C2 en local, sin commit; rama apilada sobre T2)
+## 01/11/2026 — T3: arnés de concurrencia de jornadas (commits `257efef`, C1 `2580372` y C2 `4391534` auditados; último ciclo de corrección T3-C3 en local, sin commit; rama apilada sobre T2)
 
 **Estado actual.** Commits locales, sin push:
 - T3 original `257efef02dd9749656a0e4fed407c0a581b305c9` (padre `b9ba369…`, tree `3d8a9a88…`): Codex **BLOQUEADO por H-01**; OpenCode **APTO con observaciones**.
 - T3-C1 `258037248e14fd184804ec5b09c087c976775e1a` (padre `257efef…`, tree `2d2a5e7f…`): Codex **BLOQUEADO por C1-H01**; OpenCode **APTO**.
+- T3-C2 `4391534157986c6a8c922456db09bd45a702756e` (padre `2580372…`, tree `a3745999…`): Codex **BLOQUEADO por C2-H01**; OpenCode **APTO**.
 
-La corrección T3-C2 (al final de esta entrada) está en el worktree **sin commit**, a la espera de revisión humana. Las secciones intermedias describen el estado auditado en `257efef` y en C1; sus cifras son las del implementador, salvo donde se indica la ejecución independiente de Codex.
+La corrección T3-C3 (al final de esta entrada) está en el worktree **sin commit**, a la espera de revisión humana. Es el tercer y último ciclo previsto por AGENTS.md §2.3.5. Las secciones intermedias describen el estado auditado en `257efef`, C1 y C2; sus cifras son las del implementador, salvo donde se indica la ejecución independiente de Codex.
 
 **Rama:** `feat/rpc-jornadas-t3-arnes-concurrencia`, en el worktree `../distribuidora-rpc-t3`, desde el commit exacto `b9ba36908ecf956ce2e2d54d224e90aae3bc6ad0` (T2). **No se integra a `main`**: depende de T1, T2 y D-1, y M-4 y N-1 de D-1 siguen bloqueando la integración. **Superficie sensible:** concurrencia, idempotencia y Supabase; corresponde security review y auditoría independiente de Codex y OpenCode sobre el hash antes de cualquier merge (AGENTS.md §2.4; ADR-001 §18.4.13, punto 7).
 
@@ -98,7 +99,7 @@ No se modificaron T1, T2, migraciones, RLS, grants, RPC, `apps/web` ni CI.
 
 **Control adicional, defecto demostrado.** `repetir()` no exigía exactamente un veredicto por repetición. Un evaluador que no llamara a `cerrar()` en una repetición, o que lo llamara dos veces, dejaba el caso con veredictos faltantes o duplicados y exit 0. Sólo se detectaba un caso sin ningún veredicto en todas sus repeticiones.
 
-**Corrección (central; los 21 evaluadores no cambian).**
+**Corrección (central; los 18 evaluadores `eval_*` no cambian).**
 - `invariantes()` captura stdout y stderr y el código de salida. Imprime el testigo positivo `INV_OK` sólo si la consulta se ejecutó y todas las condiciones se cumplen; si falla alguna, `INV_FALLA: …`; si la consulta no se pudo ejecutar, `INV_ERROR_SQL(rc=N): …`.
 - `inv_ok()` acepta sólo uno o más testigos `INV_OK` concatenados (K9-R concatena dos llamadas). `cerrar()` exige el testigo: una cadena vacía o ausente es FAIL («invariantes sin resultado»). No depende de `set -e`.
 - `repetir()` cuenta los veredictos de cada repetición y registra FAIL si no es exactamente uno.
@@ -129,12 +130,12 @@ En las tres inyecciones se mantienen el control de deadlocks (AUTO = 4, fuera de
 - **Codex: BLOQUEADO por C1-H01.** En su ejecución independiente (PostgreSQL 17.11, R = 10) el camino normal dio `428 verificaciones, 0 fallas`. Además reprodujo un falso PASS agregando `return 1` después de `cerrar()` en el evaluador de K1.
 - **OpenCode: APTO** (auditoría estática de sólo lectura).
 
-### T3-C2: retorno del evaluador — implementación local, sin commit
+### T3-C2: retorno del evaluador (commit `4391534`)
 **Decisión humana (01/11/2026):** corrección local limitada a `repetir()` en `casos.sh` y a esta bitácora. Sin cambios en `arnes.sh`, el bootstrap P1, migraciones, RPC, RLS, grants, evaluadores, oráculos, frontend ni CI. Es el segundo ciclo de corrección de T3 (AGENTS.md §2.3.5; el tercero es el límite).
 
 **Causa raíz de C1-H01.** En `repetir()`, el evaluador se invocaba como una sentencia más. Su código de salida se descartaba y sólo se contaban los veredictos (`TOTAL - antes`). Un evaluador que registraba un PASS y luego devolvía un código distinto de cero (un error posterior a `cerrar()`) dejaba la repetición en PASS y la corrida en exit 0.
 
-**Corrección.** En la rama del evaluador, `repetir()` mide justo después de invocarlo su código de salida (`rc=$?`) y la cantidad de veredictos que registró él mismo. Si no registró exactamente uno, FAIL «un veredicto del evaluador». Si `rc ≠ 0`, FAIL «retorno 0 del evaluador», aunque haya registrado un PASS. Esos FAIL los registra el orquestador **después** de medir. Por eso no se cuentan como veredictos del evaluador ni producen un «2 veredictos» espurio, y no ocultan el veredicto original, que queda en el registro. Las ramas de preparación y de mecanismo registran exactamente un FAIL por construcción, así que el control de cardinalidad queda en la rama del evaluador. No depende de `set -e`. Se conservan `INV_OK`, `inv_ok()`, `cerrar()`, `ORACULO` y la limpieza. Los 21 evaluadores no cambian.
+**Corrección.** En la rama del evaluador, `repetir()` mide justo después de invocarlo su código de salida (`rc=$?`) y la cantidad de veredictos que registró él mismo. Si no registró exactamente uno, FAIL «un veredicto del evaluador». Si `rc ≠ 0`, FAIL «retorno 0 del evaluador», aunque haya registrado un PASS. Esos FAIL los registra el orquestador **después** de medir. Por eso no se cuentan como veredictos del evaluador ni producen un «2 veredictos» espurio, y no ocultan el veredicto original, que queda en el registro. Las ramas de preparación y de mecanismo registran exactamente un FAIL por construcción, así que el control de cardinalidad queda en la rama del evaluador. No depende de `set -e`. Se conservan `INV_OK`, `inv_ok()`, `cerrar()`, `ORACULO` y la limpieza. Los 18 evaluadores `eval_*` no cambian.
 
 **Regresiones negativas (laboratorio, no versionadas; copias descartables, `ARNES_R=2`, K1 salvo G).**
 
@@ -161,6 +162,81 @@ Residuos `0|0|0|0` en todas las inyecciones.
 **Evidencia propia frente a independiente.** Todas las cifras de esta sección son del implementador. La única ejecución independiente registrada es la de Codex sobre `257efef` y sobre C1 (sus dictámenes, arriba). C2 todavía no tiene auditoría independiente.
 
 **Riesgos residuales.** Los de C1 y los límites de cobertura de la sección «Límites» no cambian (O2′, I10-A/K10-d sin distinguir 8a del paso 9, K8 parcial, entorno emulado y el mutante sobreviviente). Las funciones `caso_AUTO` y `caso_ORACULO` no pasan por `repetir()`: registran cada veredicto con una estructura `if/else` fija y su exigencia propia (si fallan, el arnés termina con exit 1).
+
+### Auditorías sobre C2 (`4391534`)
+- **Codex: BLOQUEADO por C2-H01.** En K9-R, los errores instrumentales podían perderse y dar falsos PASS. Codex reprodujo dos: (A) `false` después de `ses_fin "$OTRO"` daba K9-R PASS y exit 0; (B) un `cerrar()` que registraba un veredicto y luego devolvía 1 daba K9-R PASS y exit 0.
+- **OpenCode: APTO** (auditoría estática de sólo lectura); no detectó el defecto.
+
+### T3-C3: errores instrumentales ocultos — implementación local, sin commit
+**Decisión humana (01/11/2026):** último ciclo correctivo (AGENTS.md §2.3.5). Corrección local limitada a la propagación de fallos instrumentales reproducibles, en `casos.sh` y esta bitácora. Sin cambios en el bootstrap P1, migraciones, RPC, RLS, grants, sondas, dependencias, escenarios, mecanismos de ADR-001, frontend ni CI.
+
+**Intervención humana excepcional (01/11/2026, AGENTS.md §2.3.5).** El primer diagnóstico de C3 dejó D5 abierto. El humano no lo aceptó como riesgo residual y autorizó **ampliar C3 sólo para corregir D5** en `arnes.sh` (`correr_observado()`, llamada a `ses_revertir T1`). **No es un cuarto ciclo.** El alcance total de C3 queda en `casos.sh` (D1–D4), `arnes.sh` (sólo D5) y esta bitácora. Si una nueva auditoría encuentra otro bloqueo, no se inicia C4 automáticamente: se pide una nueva decisión humana y se evalúa si hace falta una corrección arquitectónica.
+
+**Diagnóstico previo (solo lectura, sobre `4391534`).** Se revisaron los 18 evaluadores `eval_*`, sus auxiliares, `caso_AUTO`, `caso_ORACULO`, el ejecutor propio de `casos.sh` (`correr_baja_en_espera`) y los ejecutores de `arnes.sh`.
+
+| # | Ubicación (`4391534`) | Patrón | ¿Falso PASS? | Alcance |
+|---|---|---|---|---|
+| D1 | `casos.sh:450–451`, `eval_K9_R` | no se comprobaban los retornos de `ses_lanzar`, `ses_resultado` ni `ses_fin` del reintento | sí (Codex A) | C3 |
+| D2 | `casos.sh:453–456`, `eval_K9_R` | el comando que seguía a `cerrar()` (`[[ $ok == 0 ]] \|\| echo … \| tee`) reemplazaba su retorno; era el único evaluador con un comando después de `cerrar()` | sí (Codex B) | C3 |
+| D3 | `casos.sh:260–264`, `caso_AUTO` | no se comprobaban los retornos de `ses_lanzar` (×2), `ses_resultado` (×2) ni `ses_fin` (×2) | sí: AUTO PASS y el arnés sigue | C3 |
+| D4 | `casos.sh:562–571`, `correr_baja_en_espera` | no se comprobaban `ses_lanzar` (×2), `ses_fin T2` ni `control_liberar` | sí: K8-BAJA-a PASS | C3 |
+| D5 | `arnes.sh:609`, `correr_observado` | no se comprueba `ses_revertir T1`; el retorno es el de `[[ -z $m ]]` | sí: los seis casos O PASS | C3 ampliado por decisión humana (`arnes.sh`) |
+| D6 | `arnes.sh:467/470/522/525/571/576/594`, ejecutores | `ses_lanzar` sin comprobar | no en un fallo real: si no se envía la sentencia, la espera siguiente (`foto_estable` o `ses_resultado`) falla y el caso da FAIL | fuera de C3; documentado |
+| D7 | `arnes.sh:542`, `correr_independientes` | `rd=$(ses_resultado …)` sin comprobar, después de verificar que el marcador ya llegó | no: sin línea `RES\|` el resultado queda vacío y el oráculo da FAIL | fuera de C3; documentado |
+| D8 | `repetir()` y `caso_ORACULO` | `nueva_base` y `borrar_base` sin comprobar | no: sin la base fallan la preparación o la apertura de sesiones; una base no borrada aparece en los residuos | sin cambio |
+
+**Causa raíz.** Las funciones instrumentales de `arnes.sh` informan los fallos sólo por el código de salida. En `casos.sh`, ese código se descartaba en tres lugares: cuando la llamada era una sentencia suelta (D1, D3, D4), cuando era una asignación seguida de otra sentencia en la misma línea (`reint=$(…); ses_fin …`) y cuando a `cerrar()` le seguía otro comando que pasaba a ser el retorno del evaluador (D2). C2 mide el retorno del evaluador, pero el evaluador ya devolvía 0.
+
+**Corrección (`casos.sh`; no depende de `set -e`).**
+- `eval_K9_R`: el reintento comprueba por separado `ses_lanzar`, `ses_resultado` y `ses_fin`. Cualquier fallo fuerza `ok=1` y se informa como `fallo=[…]` en la línea de diagnóstico. Esa línea se imprime **antes** de `cerrar()`, que pasa a ser el último comando, así que su retorno es el del evaluador.
+- `caso_AUTO`: los lanzamientos, los dos resultados y los dos cierres se comprueban. Si alguno falla, la repetición es FAIL («falló la lectura del resultado o el cierre de una sesión» o «no se lanzaron las sesiones») y el arnés aborta con exit 1 antes de medir.
+- `correr_baja_en_espera`: cada `ses_lanzar`, `ses_fin` y `control_liberar` termina el ejecutor con `MOTIVO` y retorno 1. Eso da FAIL «mecanismo del caso».
+- `correr_observado` (`arnes.sh`, D5): `ses_revertir T1 || { MOTIVO="no se revirtió T1${m:+; $m}"; return 1; }`. El único consumidor es `repetir()` (casos O-R1…O-A2), mediante `elif $ejec "$o"`. Un retorno 1 entra en la rama que registra exactamente un FAIL «mecanismo del caso» con ese `MOTIVO`; no se llama al evaluador. Se verificó en ejecución, no sólo por lectura: ver 4g.
+- Se conservan el control de C2 (un veredicto del evaluador y retorno 0), `invariantes()`, `INV_OK`, `inv_ok()`, `cerrar()` y `ORACULO` de C1, la limpieza y los 17 evaluadores restantes.
+
+**Regresiones negativas (laboratorio, no versionadas; copias descartables, `ARNES_R=2`).** Cada inyección es idéntica en el árbol de antes y en el de después. Se agrega al final de `casos.sh` un envoltorio que ejecuta la función real, cuyo efecto ocurre, y la hace devolver 1 sólo cuando la llama el sitio indicado: es un fallo instrumental con su código de salida perdido.
+
+| # | Inyección (función ← llamador) | Antes de C3 (`4391534`) | Después de C3 |
+|---|---|---|---|
+| 1a | `ses_lanzar` ← `eval_K9_R` (antes de `cerrar()`) | **falso PASS**: K9-R PASS=4, exit 0 | FAIL=4, exit 1 |
+| 1b | `ses_resultado` ← `eval_K9_R` | **falso PASS**: K9-R PASS=4, exit 0 | FAIL=4, exit 1 |
+| 1c | `ses_fin` ← `eval_K9_R` (Codex A) | **falso PASS**: K9-R PASS=4, exit 0 | FAIL=4 (`fallo=[no se cerró la transacción del reintento]`), exit 1 |
+| 2 | `cerrar()` registra PASS y devuelve 1 (Codex B) | **falso PASS**: K9-R PASS=4, exit 0 | PASS=4 visibles + FAIL=4 «retorno 1», exit 1 |
+| 3 | comando después de `cerrar()` | la ruta existía (D2) | la ruta no existe: prueba de propagación de los 18 evaluadores × 2 órdenes, con dobles sin PostgreSQL y un `cerrar()` que devuelve 7. Antes, 2/36 no propagaban (`eval_K9_R`); después, 0/36 |
+| 4a–c | `ses_lanzar` / `ses_resultado` / `ses_fin` ← `caso_AUTO` | **falso PASS**: AUTO PASS=4 y el arnés sigue, exit 0 | AUTO FAIL; el arnés aborta antes de medir, exit 1 |
+| 4d–f | `ses_lanzar T2` / `ses_fin T2` / `control_liberar` ← `correr_baja_en_espera` | **falso PASS**: K8-BAJA-a PASS=2, exit 0 | FAIL=2 «mecanismo del caso», exit 1 |
+| 4g | `ses_revertir T1` ← `correr_observado` (`arnes.sh`, D5) | **falso PASS** en los seis casos O: `24 verificaciones, 0 fallas`, exit 0 | FAIL 12/12 repeticiones («no se revirtió T1»), O-R1…O-A2 FAIL=2 cada uno, `24 verificaciones, 12 fallas`, exit 1 |
+
+Las regresiones 1–4g se repitieron completas con `arnes.sh` ya corregido y dieron lo mismo. Ningún error instrumental reproducido en el diagnóstico (D1–D5) termina en PASS.
+
+Las regresiones A–H de C2, repetidas sobre C3, dan lo mismo que después de C2 (regresiones 5–9):
+
+| Inyección | Resultado sobre C3 |
+|---|---|
+| A (PASS y retorno 1) | FAIL «retorno 1», exit 1 |
+| B (un PASS y retorno 0) | PASS, exit 0 |
+| C (un FAIL y retorno 0) | FAIL, exit 1 |
+| D (cero veredictos) | FAIL, exit 1 |
+| E (dos veredictos) | FAIL, exit 1 |
+| F1 / F2 (preparación / ejecución) | FAIL, exit 1 |
+| G (error SQL en `invariantes()`) | FAIL, exit 1 |
+| H (`invariantes()` original) | `ORACULO` aborta con 0 repeticiones de AUTO, exit 1 |
+
+AUTO se ejecutó en todas las inyecciones salvo H y 4a–c. Residuos `0|0|0|0` en todas las que llegan al final (regresión 10); las que abortan destruyen el clúster con la limpieza, y al terminar quedan 0 directorios `/tmp/arnes.*`.
+
+**Verificación del implementador sobre C3 (PostgreSQL 17.11).**
+- `bash -n` de `arnes.sh` y `casos.sh`, y `git diff --check`: correctos.
+- Con D5 corregido, arnés completo, R = 10: `428 verificaciones, 0 fallas`, exit 0, 133 s. `ORACULO` 7/7 y AUTO 20/20. Deadlocks: AUTO = 20, fuera de AUTO = 0, log = 20. Residuos `0|0|0|0`; 0 directorios `/tmp/arnes.*`. Antes de D5 se había obtenido lo mismo (134 s).
+- Banco de mutantes con D5 corregido: 7/8 detectados, con el detalle por caso idéntico al de C2. `abrir_jornada` sin 8a sigue sin detectarse: es el límite contractual declarado y no se declara cubierto.
+- Supabase CLI 2.120.0 con D5 corregido, stack descartable: `db reset` aplicó 15 migraciones. `test db` de `supabase/tests/concurrencia` dio `NOTESTS`, exit 0, bootstrap `skipped` y catálogo idéntico (476 entradas). `test db` completo: `Files=19, Tests=1587, Result: PASS`. Después: 0 contenedores y 0 volúmenes del stack. P1, migraciones, rollback, `config.toml`, `apps` y CI sin cambios respecto de C2.
+- **No ejecutado:** `lint`, `typecheck`, `test`, `build` y Playwright (no se modificó `apps/web`); `shellcheck` (no instalado).
+
+**Evidencia propia frente a independiente.** Todas las cifras de esta sección son del implementador. C3 todavía no tiene auditoría independiente.
+
+**Riesgos residuales.**
+- D5 quedó cerrado con la ampliación autorizada. D6 y D7 sólo se detectan de forma indirecta.
+- `ses_fin` comprueba que la sentencia terminó (el marcador), no que el `COMMIT` confirmó. Las invariantes posteriores se leen desde otra conexión y detectan una confirmación faltante.
+- Siguen los riesgos de C1 y C2 y los límites de cobertura de la sección «Límites».
 
 ---
 ## 01/11/2026 — T2: RPC `reasignar_vendedor` (commit `49b3be7` auditado; ciclos de corrección T2-C1 y T2-C2 en local, sin commit; rama apilada sobre T1 y D-1)

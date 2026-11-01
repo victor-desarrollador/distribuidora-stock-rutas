@@ -257,13 +257,16 @@ end \$\$;" >/dev/null || error_entorno "no se creó la función de control de AU
       CTRL_CLAVES=("$PUERTA")
       ok=1
       if ses_abrir C auto && ses_abrir T1 auto && ses_abrir T2 auto && control_tomar; then
-        ses_lanzar "$primero" "" "$(expr_de "$primero")"
-        ses_lanzar "$segundo" "" "$(expr_de "$segundo")"
-        if foto_par_estable pred_auto "${S_PID[T1]}" "" "${S_PID[T2]}" "" && control_liberar; then
-          RES_T1=$(ses_resultado T1); RES_T2=$(ses_resultado T2)
-          ses_fin T1; ses_fin T2
-          r1=${RES_T1%%|*}; r2=${RES_T2%%|*}
-          [[ "$r1 $r2" == "00000 40P01" || "$r1 $r2" == "40P01 00000" ]] && ok=0
+        # T3-C3: lanzamientos, resultados y cierres se comprueban uno por uno.
+        if ! { ses_lanzar "$primero" "" "$(expr_de "$primero")" && ses_lanzar "$segundo" "" "$(expr_de "$segundo")"; }; then
+          MOTIVO="no se lanzaron las sesiones"
+        elif foto_par_estable pred_auto "${S_PID[T1]}" "" "${S_PID[T2]}" "" && control_liberar; then
+          if RES_T1=$(ses_resultado T1) && RES_T2=$(ses_resultado T2) && ses_fin T1 && ses_fin T2; then
+            r1=${RES_T1%%|*}; r2=${RES_T2%%|*}
+            [[ "$r1 $r2" == "00000 40P01" || "$r1 $r2" == "40P01 00000" ]] && ok=0
+          else
+            MOTIVO="falló la lectura del resultado o el cierre de una sesión"
+          fi
         else
           MOTIVO="las sesiones no llegaron a la puerta: T1[$FOTO1] T2[$FOTO2]"
         fi
@@ -440,20 +443,25 @@ prep_K9_R() {
   CTRL_CLAVES=("$(kv "$V3")" "$(kv "$V6")" "$(kv "$V7")")
 }
 eval_K9_R() {
-  local ok=1 inv_rech reint dest_otro dest_del clave_otro
+  local ok=1 inv_rech reint="" fallo="" dest_otro dest_del clave_otro
   if [[ $OTRO == T1 ]]; then dest_otro=$V6; dest_del=$V7; clave_otro=$IDEM_T1
   else dest_otro=$V7; dest_del=$V6; clave_otro=$IDEM_T2; fi
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_estado_invalido && ok=0
   inv_rech=$(invariantes "el rechazo no reservó la clave" "$(n_clave "$clave_otro" 0)" \
     "un historial" "$(n_hist 1)" "J1 → destino de delante" "$(vend_de "$J1" "$dest_del")")
   # Reintento con la misma clave y el mismo payload: la RPC recalcula el vigente.
-  ses_lanzar "$OTRO" "$ACTOR" "$(expr_de "$OTRO")"
-  reint=$(ses_resultado "$OTRO"); ses_fin "$OTRO"
-  es_ok "$reint" || ok=1
+  # Cada paso instrumental se comprueba (T3-C3, C2-H01): si uno falla, la
+  # repetición es FAIL aunque los efectos observados parezcan correctos.
+  if ! ses_lanzar "$OTRO" "$ACTOR" "$(expr_de "$OTRO")"; then fallo="no se lanzó el reintento"
+  elif ! reint=$(ses_resultado "$OTRO"); then fallo="el reintento no respondió"
+  elif ! ses_fin "$OTRO"; then fallo="no se cerró la transacción del reintento"
+  fi
+  [[ -z $fallo ]] && es_ok "$reint" || ok=1
+  (( ok == 0 )) || echo "    reintento=$(res_corto "$reint")${fallo:+ fallo=[$fallo]}" | tee -a "$SALIDA"
+  # cerrar() es el último comando: su retorno es el del evaluador (T3-C3).
   cerrar "$@" $ok "delante 00000; el otro PT409 jornada_estado_invalido; reintento 00000" "${inv_rech}$(invariantes \
     "dos operaciones tras el reintento" "$(n_reas 2)" "dos historiales" "$(n_hist 2)" \
     "J1 → destino del reintento" "$(vend_de "$J1" "$dest_otro")" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
-  [[ $ok == 0 ]] || echo "    reintento=$(res_corto "$reint")" | tee -a "$SALIDA"
 }
 caso_K9_R() { repetir K9-R "1 2" prep_K9_R correr_par eval_K9_R; }
 
@@ -559,16 +567,17 @@ correr_baja_en_espera() {
   MOTIVO=""; DELANTE=""; OTRO=""; RES_T1=""; RES_T2=""
   ses_abrir C "$BASE" && ses_abrir T1 "$BASE" && ses_abrir T2 "$BASE" || { MOTIVO="no se abrieron las sesiones"; return 1; }
   control_tomar || return 1
-  ses_lanzar T1 "$ACTOR" "$EXPR_T1"
+  # T3-C3: cada operación instrumental se comprueba; ninguna queda sin verificar.
+  ses_lanzar T1 "$ACTOR" "$EXPR_T1" || { MOTIVO="no se lanzó la apertura"; return 1; }
   foto_estable pred_abcd "${S_PID[T1]}" "$IDEM_T1" || { MOTIVO="T1 no llegó a la espera: $FOTO"; return 1; }
-  ses_lanzar T2 "$ACTOR" "$EXPR_T2"
+  ses_lanzar T2 "$ACTOR" "$EXPR_T2" || { MOTIVO="no se lanzó la baja"; return 1; }
   RES_T2=$(ses_resultado T2) || { MOTIVO="la baja no terminó: espera espuria ($(foto "${S_PID[T2]}"))"; return 1; }
-  ses_fin T2
+  ses_fin T2 || { MOTIVO="no se cerró la transacción de la baja"; return 1; }
   foto_estable pred_abcd "${S_PID[T1]}" "$IDEM_T1" && [[ $(campo "$FOTO" 5) == "${S_PID[C]}" ]] \
     || { MOTIVO="T1 dejó de esperar sólo al control: $FOTO"; return 1; }
-  control_liberar
+  control_liberar || { MOTIVO="el control no liberó"; return 1; }
   RES_T1=$(ses_resultado T1) || { MOTIVO="T1 no respondió"; return 1; }
-  ses_fin T1
+  ses_fin T1 || { MOTIVO="no se cerró la transacción de la apertura"; return 1; }
 }
 eval_K8_BAJA_a() {
   local ok=1

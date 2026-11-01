@@ -606,7 +606,8 @@ correr_observado() {
   FOTO_RET=$FOTO
   [[ $(campo "$FOTO" 6) == "$OBS_RET" ]] || m+="retenidos [$(campo "$FOTO" 6)] != [$OBS_RET] (O5); "
   [[ $(campo "$FOTO" 4) == S ]] || m+="sin xid al volver; "
-  ses_revertir T1
+  # T3-C3 (D5): un rollback fallido es un fallo del mecanismo, nunca PASS.
+  ses_revertir T1 || { MOTIVO="no se revirtió T1${m:+; $m}"; return 1; }
   MOTIVO=$m
   [[ -z $m ]]
 }
