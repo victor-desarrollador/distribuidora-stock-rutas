@@ -1,4 +1,87 @@
 ---
+## 01/11/2026 — T3: arnés de concurrencia de jornadas (implementación local, sin commit; rama apilada sobre T2)
+
+**Rama:** `feat/rpc-jornadas-t3-arnes-concurrencia`, en el worktree `../distribuidora-rpc-t3`, desde el commit exacto `b9ba36908ecf956ce2e2d54d224e90aae3bc6ad0` (T2). **No se integra a `main`**: depende de T1, T2 y D-1, y M-4 y N-1 de D-1 siguen bloqueando la integración. **Superficie sensible:** concurrencia, idempotencia y Supabase; corresponde security review y auditoría independiente de Codex y OpenCode sobre el hash antes de cualquier merge (AGENTS.md §2.4; ADR-001 §18.4.13, punto 7).
+
+### Decisiones humanas aplicadas (01/11/2026)
+- Fase A de viabilidad reproducida en PostgreSQL 17.11 (V1–V8 PASS, V5 con límites) y con el Supabase CLI 2.120.0 real (V9 PASS); autorización de la implementación local.
+- **5c aprobada:** la sesión que vuelve conserva su transacción abierta; se observa y se confirma **antes** de esperar a la otra sesión.
+- **5f aprobada:** observación con `pg_blocking_pids`, `pg_stat_activity` (incluida `backend_xid`) y `pg_locks`.
+- Excluidos: 5a, 5b, 5d, O1, series L y los mutantes de modo de bloqueo no demostrables. Sin cambios al mecanismo de ADR-001 §18.4.11.
+- P1 incorporada al bootstrap. R = 10 en los dos órdenes de lanzamiento.
+
+### Archivos
+Los tres archivos normativos de ADR-001 §18.4.11, sin otros archivos del arnés. Esta entrada es documentación operativa, no un cuarto archivo del arnés.
+
+| Archivo | Contenido |
+|---|---|
+| `supabase/tests/concurrencia/arnes.sh` | Orquestador: clúster efímero (`initdb`, `pg_ctl`, `listen_addresses=''`, socket en `/tmp/arnes.XXXXXX/s`, puerto propio, `cluster_name = 'arnes_concurrencia'`, `deadlock_timeout = 200ms`, `lc_messages = 'C'`); `unset` de toda variable `PG*`; bootstrap y las 15 migraciones en orden lexicográfico con `ON_ERROR_STOP=1`; sesiones `psql` persistentes por FIFO; monitor de sólo lectura (`default_transaction_read_only = on`); cuatro ejecutores (cola compartida, colas disjuntas, secuencial con transacción abierta y sesión observada); criterio de aprobación, deadlocks por contador y por log, residuos y limpieza (`trap EXIT`). Sólo variables `ARNES_PG_BIN`, `ARNES_R`, `ARNES_PLAZO` y `ARNES_CONSERVAR`; no acepta host, puerto ni URL |
+| `supabase/tests/concurrencia/00_bootstrap_descartable.sql` | Roles y `auth` emulados (§18.4.11) más `authenticator`, que las migraciones recorren. **P1:** sin la variable `arnes_descartable` sólo emite `1..0 # SKIP`; con ella exige la base `arnes` **y** el `cluster_name` del arnés |
+| `supabase/tests/concurrencia/casos.sh` | Datos iniciales, los 25 casos, sus oráculos indexados por el orden de cola observado y sus invariantes |
+
+No se modificaron T1, T2, migraciones, RLS, grants, RPC, `apps/web` ni CI.
+
+### Mecanismo y correcciones exigidas
+- **Cola observada, no supuesta (V2):** el orden se lee de `pg_blocking_pids` sobre una foto conjunta de ambas sesiones; si ninguna está delante de la otra de forma inequívoca, el caso falla («cola ambigua»).
+- **Foto estable estricta (V2):** una observación sólo se acepta si dos lecturas consecutivas son idénticas y cumplen el predicado; si cambian, se reintenta.
+- **Condiciones (a)–(d) de §18.4.11** para ambas sesiones antes de liberar.
+- **Sin bloqueos ajenos:** cualquier bloqueante que no sea el control o el otro participante hace fallar el caso. El monitor nunca aparece como bloqueante.
+- **5c:** si la sesión de delante confirma, la otra debe quedar esperando sólo a ella. Si termina con error, PostgreSQL ya abortó su transacción y liberó sus bloqueos en ese momento, y la otra puede avanzar (observado en K1–K3; no es un defecto de la RPC).
+- **SQLSTATE (V6):** los resultados se clasifican por `:SQLSTATE` y, en los errores de negocio, por el código que la RPC pone en `message`; nunca por el texto traducido de PostgreSQL. Se usa `:ERROR`/`:SQLSTATE` por sentencia, nunca `LAST_ERROR_SQLSTATE` (V3).
+- **Plazos:** `ARNES_PLAZO` (30 s) es sólo cota de fallo; ninguna espera se usa como prueba de sincronización.
+- **O2′ (V5):** el falso fallo del banco experimental (función rotulada como mutante que en realidad tomaba el advisory primero) no se trasladó; el arnés exige `backend_xid` NULL mientras la RPC real espera cualquiera de sus advisory, y conserva los límites de O2′.
+- **Fallas del propio arnés detectadas y corregidas antes de entregar:** (1) con `casos.sh` roto el arnés terminaba con exit 0 sin ejecutar casos; (2) un argumento compuesto (`"O-R1 O-R2"`) pasaba la validación por subcadena y daba exit 0. Ahora: `bash -n` de `casos.sh`, verificación de que cada caso tiene función, pertenencia exacta y FAIL para todo caso sin verificaciones registradas.
+
+### Escenarios
+| Grupo | Casos | Orden | Esperado (indexado por la sesión observada delante) |
+|---|---|---|---|
+| Autoverificación | AUTO + AUTO-CONT | 1, 2 | `{00000, 40P01}` por repetición, con función de control `zz_arnes.reasignar_ingenua` (orden ingenuo vigente → nuevo, con una puerta compartida) creada sólo en la base `auto` del clúster efímero; si no detecta, el arnés termina con exit 1 sin medir nada |
+| Idempotencia | I10-R | 1, 2 | ambas `00000` con el mismo uuid; una operación y un historial. Prueba el paso 8a (sin él, 8b rechazaría) |
+| | I11-R | 1, 2 | delante `00000`; el otro `PT409 jornada_conflicto_idempotencia`, nunca `jornada_estado_invalido` |
+| | I10-A | 1, 2 | ambas `00000`, el mismo uuid de jornada; **no** distingue 8a del paso 9 |
+| Concurrencia | K1 | 1, 2 | ambas `PT409 jornada_vendedor_ocupado` |
+| | K2, K3 | 1, 2 | resultado del orden serial de la cola observada (las dos ramas ejercidas 10/10) |
+| | K4 | 1, 2 | una `00000` y la otra `PT409 jornada_vendedor_ocupado` |
+| | K9-R | 1, 2 | delante `00000`; el otro `PT409 jornada_estado_invalido` (8b), sin reserva ni historial; reintento con la misma clave `00000` |
+| | K10-a…e | 1, 2 | a) `jornada_duplicada` o `jornada_camion_con_jornada_abierta` (se observó siempre la primera); b) `jornada_camion_con_jornada_abierta`; c) `jornada_vendedor_ocupado`; d) mismo uuid; e) `jornada_conflicto_idempotencia`; I-J1 y una apertura |
+| K8 parcial | K8-CLAVE | 1, 2 | misma clave en dos jornadas sin bloqueos compartidos: la segunda queda esperando por `transactionid` a la primera, con su reserva en curso (paso 9), y recibe `PT409 jornada_conflicto_idempotencia` |
+| | K8-BAJA-a | — | la baja de camión durante la espera de la apertura termina sin esperar; la apertura `PT409 jornada_camion_inactivo` |
+| | K8-BAJA-b | — | la baja después de la apertura (transacción abierta) termina sin esperar: `FOR KEY SHARE` de la FK compatible con el `UPDATE` |
+| Esperas espurias | S-ESP-RR, S-ESP-RA | 1, 2 | con la primera operación devuelta y abierta, una operación con recursos disjuntos termina sin esperarla (no es el grupo S de seguridad de §18.4.9) |
+| Observación | O-R1…R4, O-A1, O-A2 | — | O3 (vigente y nuevo en orden de uuid), O4 (camión antes que vendedor), O2′ (`backend_xid` NULL mientras espera) y O5 (al volver retiene exactamente su conjunto y tiene xid) |
+
+### Verificación (PostgreSQL 17.11 Debian, binarios `/usr/lib/postgresql/17/bin`)
+- **Arnés completo, R = 10:** tres corridas con el mismo resultado: `421 verificaciones, 0 fallas`, exit 0, 132–133 s. Deadlocks: AUTO = 20, fuera de AUTO = 0 y 20 líneas `deadlock detected` en el log. Residuos `0|0|0|0` (sesiones, locks, transacciones preparadas, bases). Después: 0 procesos y 0 directorios `/tmp/arnes.*`.
+- **Entradas inválidas:** argumento compuesto, caso inexistente, `ARNES_R=0` y binarios que no son PG17 → exit 2.
+- **Banco de mutantes de laboratorio (no versionado; copias descartables, `ARNES_R=2`):**
+
+| Mutante | Casos | Resultado |
+|---|---|---|
+| sin 8a | I10-R, I11-R | **detectado** (`PT409 jornada_estado_invalido` en replay legítimo); K9-R no lo detecta, como se espera |
+| 8a sin comparar huella | I11-R | **detectado** (devuelve el uuid original en lugar de conflicto) |
+| sin 8b | K9-R | **detectado** (clave reservada y un historial de más) |
+| orden fijo vigente → nuevo | K1, O-R3, O-R4 | **detectado** (cola ambigua; conjunto concedido distinto) |
+| `FOR UPDATE` antes de los advisory | O-R1…R4 | **detectado** (O2′: `backend_xid` asignado mientras espera) |
+| `abrir_jornada`: camión después del vendedor | O-A1, O-A2 | **detectado**; K10-c no lo detecta, como se espera |
+| sin advisory del vendedor nuevo | O-R1, O-R2, K4 | **detectado** |
+| `abrir_jornada` sin 8a | I10-A, K10-d | **no detectado** (exit 0): confirma el límite declarado; el `ON CONFLICT` del paso 9 da el mismo resultado externo |
+
+- **Supabase CLI 2.120.0, stack descartable** (`project_id = "t3v9-lab"`, sólo la base, imagen `postgres:17.11.0.004`): `supabase db reset` aplicó las 15 migraciones; `supabase test db`: `Files=19, Tests=1587, Result: PASS`, exit 0; `00_bootstrap_descartable.sql ... skipped`. Con sólo `supabase/tests/concurrencia`: `Result: NOTESTS`, exit 0, catálogo (roles, esquemas, relaciones, funciones) idéntico antes y después. La suite completa agrega cuatro esquemas `pg_temp_*`/`pg_toast_temp_*` que crean las tablas temporales de los 18 tests existentes, no el bootstrap. `arnes.sh` y `casos.sh` no se descubren. CI no ejecuta `supabase/`: el arnés no corre en CI (autorización aparte, §18.4.13.6).
+- **No ejecutado:** `npm run lint`, `typecheck`, `test`, `build` y `npx playwright test`, porque no se modificó `apps/web`. `shellcheck` no está instalado (no se instaló nada); sí se ejecutó `bash -n` sobre ambos scripts.
+
+### Límites (no se declara cubierto)
+- O2′ no distingue el modo del bloqueo de fila ni detecta un `FOR UPDATE` de 0 filas o que espera otra fila. O1 y las series L siguen sin ser demostrables.
+- En `abrir_jornada`, I10-A y K10-d no distinguen 8a del paso 9 (lo confirma el mutante sin 8a).
+- K8 cubre sólo la misma clave en dos jornadas y la baja de camión contra la apertura; la baja de perfil y las regresiones con carga, `registrar_merma` y `mover_a_cuarentena` quedan para T4–T5.
+- El orden de cola de los casos de cola compartida coincidió siempre con el de lanzamiento, porque el arnés lanza la segunda sesión recién cuando la primera espera; aun así se lee, no se supone. En K8-CLAVE, sin cola compartida, la que gana varía.
+- Entorno emulado: `auth.uid()` y roles emulados; sin GoTrue, JWT ni PostgREST reales; clúster Debian, no la imagen de Supabase.
+
+### Pendiente (no declarado aprobado)
+- **Diferidos a T4–T7:** K5–K7, K11, K12; I10/I11 de `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida`; el resto de K8; I3 con el flujo real.
+- **Excluidos:** 5a, 5b, 5d, O1, series L, mutantes de modo de bloqueo; ejecución en CI.
+- Revisión humana del diff, autorización del commit, security review y auditoría de Codex y OpenCode sobre el hash. Sin commit, push, PR, merge ni deploy. M-4 y N-1 de D-1 siguen bloqueando la integración a `main`.
+
+---
 ## 01/11/2026 — T2: RPC `reasignar_vendedor` (commit `49b3be7` auditado; ciclos de corrección T2-C1 y T2-C2 en local, sin commit; rama apilada sobre T1 y D-1)
 
 **Rama:** `feat/rpc-jornadas-t2-reasignar`, en el worktree `../distribuidora-rpc-t2`, desde el commit exacto `8e4aefa13569e700491a4430c900cc5021d38624` (T1, publicado y auditado). **No se integra a `main`**: depende de T1 y del esquema de D-1, que no está aprobada para integración (M-4 y N-1 siguen pendientes de aceptación formal). **Superficie sensible:** corresponde security review obligatoria (Supabase, RLS, grants, `SECURITY DEFINER`, `empresa_id`, roles, idempotencia y concurrencia) y auditoría independiente de Codex **y** OpenCode sobre el hash antes de cualquier merge (ADR-001 §18.4.13, punto 7).
