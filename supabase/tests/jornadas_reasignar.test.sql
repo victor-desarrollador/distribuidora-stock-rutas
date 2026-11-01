@@ -13,7 +13,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(148);
+select plan(168);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como owner; se revierten al final)
@@ -38,6 +38,8 @@ insert into auth.users (id, aud, role, email, raw_user_meta_data) values
   ('aaaaaaaa-2100-4000-8000-000000000012', 'authenticated', 'authenticated', 'jr.a12@usuarios.distribuidora.invalid', '{}'),
   ('aaaaaaaa-2100-4000-8000-000000000013', 'authenticated', 'authenticated', 'jr.a13@usuarios.distribuidora.invalid', '{}'),
   ('aaaaaaaa-2100-4000-8000-000000000014', 'authenticated', 'authenticated', 'jr.a14@usuarios.distribuidora.invalid', '{}'),
+  ('aaaaaaaa-2100-4000-8000-000000000015', 'authenticated', 'authenticated', 'jr.a15@usuarios.distribuidora.invalid', '{}'),
+  ('aaaaaaaa-2100-4000-8000-000000000016', 'authenticated', 'authenticated', 'jr.a16@usuarios.distribuidora.invalid', '{}'),
   ('bbbbbbbb-2100-4000-8000-000000000001', 'authenticated', 'authenticated', 'jr.b1@usuarios.distribuidora.invalid', '{}'),
   ('bbbbbbbb-2100-4000-8000-000000000002', 'authenticated', 'authenticated', 'jr.b2@usuarios.distribuidora.invalid', '{}'),
   ('bbbbbbbb-2100-4000-8000-000000000003', 'authenticated', 'authenticated', 'jr.b3@usuarios.distribuidora.invalid', '{}'),
@@ -58,6 +60,8 @@ insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol, activ
   ('aaaaaaaa-2100-4000-8000-000000000012', 'aaaaaaaa-2100-4000-8000-000000000000', 'jr.a12', 'A12', 'vendedor_piloto', true),
   ('aaaaaaaa-2100-4000-8000-000000000013', 'aaaaaaaa-2100-4000-8000-000000000000', 'jr.a13', 'A13', 'vendedor_piloto', true),
   ('aaaaaaaa-2100-4000-8000-000000000014', 'aaaaaaaa-2100-4000-8000-000000000000', 'jr.a14', 'A14', 'vendedor_piloto', true),
+  ('aaaaaaaa-2100-4000-8000-000000000015', 'aaaaaaaa-2100-4000-8000-000000000000', 'jr.a15', 'A15', 'vendedor_piloto', true),
+  ('aaaaaaaa-2100-4000-8000-000000000016', 'aaaaaaaa-2100-4000-8000-000000000000', 'jr.a16', 'A16', 'vendedor_piloto', true),
   ('bbbbbbbb-2100-4000-8000-000000000001', 'bbbbbbbb-2100-4000-8000-000000000000', 'jr.b1', 'B1', 'dueno', true),
   ('bbbbbbbb-2100-4000-8000-000000000002', 'bbbbbbbb-2100-4000-8000-000000000000', 'jr.b2', 'B2', 'vendedor_piloto', true),
   ('bbbbbbbb-2100-4000-8000-000000000003', 'bbbbbbbb-2100-4000-8000-000000000000', 'jr.b3', 'B3', 'vendedor_piloto', true);
@@ -73,6 +77,7 @@ insert into public.camiones (id, empresa_id, patente, nombre, creado_por) values
   ('aaaaaaaa-2100-4000-8000-0000000000c8', 'aaaaaaaa-2100-4000-8000-000000000000', 'JR-08', 'Camión A8', 'aaaaaaaa-2100-4000-8000-000000000001'),
   ('aaaaaaaa-2100-4000-8000-0000000000c9', 'aaaaaaaa-2100-4000-8000-000000000000', 'JR-09', 'Camión A9', 'aaaaaaaa-2100-4000-8000-000000000001'),
   ('aaaaaaaa-2100-4000-8000-0000000000ca', 'aaaaaaaa-2100-4000-8000-000000000000', 'JR-10', 'Camión A10', 'aaaaaaaa-2100-4000-8000-000000000001'),
+  ('aaaaaaaa-2100-4000-8000-0000000000cb', 'aaaaaaaa-2100-4000-8000-000000000000', 'JR-11', 'Camión A11', 'aaaaaaaa-2100-4000-8000-000000000001'),
   ('bbbbbbbb-2100-4000-8000-0000000000c1', 'bbbbbbbb-2100-4000-8000-000000000000', 'JR-B1', 'Camión B1', 'bbbbbbbb-2100-4000-8000-000000000001');
 
 insert into public.ubicaciones (id, empresa_id, tipo, camion_id) values
@@ -145,6 +150,15 @@ grant execute on function pg_temp.fijar() to public;
 grant execute on function pg_temp.igual() to public;
 grant execute on function pg_temp.mas(text, int, int, int, int, int) to public;
 grant execute on function pg_temp.huella_reasignacion(uuid, uuid) to public;
+-- HEURÍSTICA INDICATIVA, NO CONCLUYENTE: quita comentarios SQL con expresiones regulares, que
+-- no interpretan comentarios de bloque anidados, literales ni dollar-quoting. La usa sólo la
+-- aserción informativa del conteo de advisory locks; NO sirve para probar que algo sea ejecutable
+-- (el FOR UPDATE se prueba por comportamiento en la sección 8, T2-SR-2).
+create function pg_temp.sin_comentarios(src text)
+returns text language sql as $$
+  select regexp_replace(regexp_replace(src, '/\*.*?\*/', '', 'g'), '--[^\n]*', '', 'g')
+$$;
+grant execute on function pg_temp.sin_comentarios(text) to public;
 create temp table res (k text, v uuid);
 grant select, insert on res to public;
 
@@ -180,6 +194,9 @@ select lives_ok($q$insert into res select 'J10', public.abrir_jornada('22220000-
 reset role;
 select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
 select lives_ok($q$insert into res select 'J11', public.abrir_jornada('22220000-2100-4000-8000-000000000910', 'aaaaaaaa-2100-4000-8000-0000000000ca', pg_temp.hoy() + 8, 'aaaaaaaa-2100-4000-8000-000000000014')$q$, 'fixture: J11 abierta por la RPC de T1');
+reset role;
+select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
+select lives_ok($q$insert into res select 'J12', public.abrir_jornada('22220000-2100-4000-8000-000000000912', 'aaaaaaaa-2100-4000-8000-0000000000cb', pg_temp.hoy() + 9, 'aaaaaaaa-2100-4000-8000-000000000015')$q$, 'fixture: J12 abierta por la RPC de T1');
 reset role;
 select pg_temp.como_usuario('bbbbbbbb-2100-4000-8000-000000000001');
 select lives_ok($q$insert into res select 'JB', public.abrir_jornada('22220000-2100-4000-8000-000000000911', 'bbbbbbbb-2100-4000-8000-0000000000c1', pg_temp.hoy() + 1, 'bbbbbbbb-2100-4000-8000-000000000002')$q$, 'fixture: JB de la empresa B');
@@ -220,9 +237,9 @@ select ok(not has_function_privilege('anon', 'privado.reasignar_vendedor(uuid, u
   'implementación: EXECUTE sólo para authenticated (ni PUBLIC, ni anon, ni service_role)');
 select ok(not has_schema_privilege('propietario_rpc', 'privado', 'create') and not has_schema_privilege('propietario_rpc', 'public', 'create'),
   'propietario_rpc no conserva CREATE sobre privado ni public tras transferir la propiedad');
-select ok((select p.prosrc from pg_proc p where p.oid = 'privado.reasignar_vendedor(uuid, uuid, uuid)'::regprocedure) ~ 'hashtextextended'
-  and (select p.prosrc from pg_proc p where p.oid = 'privado.reasignar_vendedor(uuid, uuid, uuid)'::regprocedure) ~* 'for update',
-  'la implementación toma advisory locks de vendedor y bloquea la jornada con FOR UPDATE');
+select ok((select (length(pg_temp.sin_comentarios(p.prosrc)) - length(replace(pg_temp.sin_comentarios(p.prosrc), 'hashtextextended', ''))) / length('hashtextextended') = 5
+    from pg_proc p where p.oid = 'privado.reasignar_vendedor(uuid, uuid, uuid)'::regprocedure),
+  'INDICATIVA (no concluyente): el texto de la función, sin comentarios según una heurística de regex, contiene cinco llamadas a hashtextextended (uno si coinciden, y dos en cada rama de orden)');
 
 -- ---------------------------------------------------------------------------
 -- 2. Seguridad: anon, service_role, sin sesión, sin perfil, inactivo, vendedor_piloto, DML directo
@@ -560,5 +577,81 @@ select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
 select lives_ok($q$insert into res select 'R11', public.reasignar_vendedor('22220000-2100-4000-8000-000000000811', (select v from res where k = 'J11'), 'aaaaaaaa-2100-4000-8000-000000000002')$q$, 'I13: la clave del rechazo por jornada nula se ejecuta como primera ejecución con el payload corregido');
 reset role;
 select is((select count(*)::int from public.reasignaciones_vendedor where jornada_id = (select v from res where k = 'J11')), 2, 'historial: J11 tiene exactamente las dos reasignaciones confirmadas');
+-- ---------------------------------------------------------------------------
+-- 7. T2-SR-1: el UPDATE de la jornada afecta cero filas (RLS) → PT500 y sin efectos
+-- ---------------------------------------------------------------------------
+-- Escenario determinista de RLS: un trigger temporal (de esta transacción, que se revierte)
+-- deshabilita al actor justo después de insertar el historial. La policy de UPDATE de jornadas
+-- exige un dueño o encargado activo, así que el UPDATE no da error: afecta cero filas.
+create function public.zz_t2_sr1() returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  update public.perfiles set activo = false where usuario_id = new.actor_id;
+  return new;
+end $$;
+create trigger zz_t2_sr1 after insert on public.reasignaciones_vendedor
+  for each row execute function public.zz_t2_sr1();
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
+select throws_ok($q$select public.reasignar_vendedor('22220000-2100-4000-8000-000000000070', (select v from res where k = 'J12'), 'aaaaaaaa-2100-4000-8000-000000000016')$q$, 'PT500', 'jornada_error_interno', 'T2-SR-1: el UPDATE afecta cero filas → PT500 jornada_error_interno (estable, sin nombre de restricción)');
+reset role;
+select ok(pg_temp.igual(), 'T2-SR-1: no queda operación ni historial confirmado; ni jornadas, movimientos ni correcciones nuevos');
+select is((select count(*)::int from public.operaciones where idempotency_key = '22220000-2100-4000-8000-000000000070'), 0, 'T2-SR-1: la clave de idempotencia no quedó reservada');
+select is((select count(*)::int from public.reasignaciones_vendedor where jornada_id = (select v from res where k = 'J12')), 0, 'T2-SR-1: no hay fila de historial de la jornada');
+select is((select vendedor_id from public.jornadas where id = (select v from res where k = 'J12')), 'aaaaaaaa-2100-4000-8000-000000000015'::uuid, 'T2-SR-1: jornadas.vendedor_id permanece sin cambios');
+select is((select activo from public.perfiles where usuario_id = 'aaaaaaaa-2100-4000-8000-000000000001'), true, 'T2-SR-1: la deshabilitación del actor hecha por el trigger también se revirtió (la RPC es atómica)');
+drop trigger zz_t2_sr1 on public.reasignaciones_vendedor;
+drop function public.zz_t2_sr1();
+select is((select count(*)::int from pg_trigger where tgname = 'zz_t2_sr1') + (select count(*)::int from pg_proc where proname = 'zz_t2_sr1'), 0,
+  'T2-SR-1: el trigger y su función se eliminaron: no queda ningún objeto residual (además la transacción se revierte al final)');
+select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
+select lives_ok($q$insert into res select 'R12', public.reasignar_vendedor('22220000-2100-4000-8000-000000000070', (select v from res where k = 'J12'), 'aaaaaaaa-2100-4000-8000-000000000016')$q$, 'T2-SR-1: sin el trigger, la misma clave se ejecuta como primera ejecución (no estaba reservada)');
+reset role;
+select is((select vendedor_id from public.jornadas where id = (select v from res where k = 'J12')), 'aaaaaaaa-2100-4000-8000-000000000016'::uuid, 'T2-SR-1: control positivo: la reasignación normal sí cambia el vendedor');
+-- ---------------------------------------------------------------------------
+-- 8. T2-SR-2: el FOR UPDATE de la jornada es ejecutable (prueba comportamental diferencial)
+-- ---------------------------------------------------------------------------
+-- Sin parsear texto: una policy RESTRICTIVE FOR UPDATE USING (false), temporal de esta
+-- transacción, hace que toda lectura con bloqueo (SELECT ... FOR UPDATE) de public.jornadas
+-- devuelva cero filas, mientras la lectura simple (paso 6) sigue viendo la fila. Con el FOR
+-- UPDATE ejecutable del paso 8 la RPC responde PT404 jornada_no_encontrada; sin él (eliminado,
+-- en un comentario simple o en un comentario de bloque anidado) llega al UPDATE del paso 12,
+-- que afecta cero filas y responde PT500 jornada_error_interno (T2-SR-1). Es una sola sesión; la
+-- exclusión mutua entre sesiones (I10, I11 y K1 a K9) sigue reservada al arnés de T3.
+create temp table zz_t2_sr2_policies_antes as
+  select polname::text as polname from pg_policy where polrelid = 'public.jornadas'::regclass;
+grant select on zz_t2_sr2_policies_antes to public;
+create policy zz_t2_sr2_sin_bloqueo on public.jornadas as restrictive for update using (false);
+create temp table zz_t2_sr2_diag (k text, n int);
+grant select, insert on zz_t2_sr2_diag to public;
+select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
+reset role;
+set local role propietario_rpc;
+insert into zz_t2_sr2_diag
+  select 'con_bloqueo', count(*)::int from (select 1 from public.jornadas j where j.id = (select v from res where k = 'J12') for update) s;
+insert into zz_t2_sr2_diag
+  select 'simple', count(*)::int from public.jornadas j where j.id = (select v from res where k = 'J12');
+reset role;
+select is((select n from zz_t2_sr2_diag where k = 'con_bloqueo'), 0,
+  'T2-SR-2 (precondición): bajo el rol efectivo propietario_rpc la policy temporal deja la lectura con bloqueo sin filas');
+select is((select n from zz_t2_sr2_diag where k = 'simple'), 1,
+  'T2-SR-2 (precondición): la lectura simple de la misma jornada, sin bloqueo, sigue viendo la fila');
+select pg_temp.fijar();
+select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
+select throws_ok($q$select public.reasignar_vendedor('22220000-2100-4000-8000-000000000071', (select v from res where k = 'J12'), 'aaaaaaaa-2100-4000-8000-000000000015')$q$, 'PT404', 'jornada_no_encontrada', 'T2-SR-2: con la lectura con bloqueo filtrada la RPC responde PT404 jornada_no_encontrada: el FOR UPDATE del paso 8 es ejecutable (un FOR UPDATE ausente, comentado o anidado en un comentario daría PT500)');
+reset role;
+select ok(pg_temp.igual(), 'T2-SR-2: no queda operación ni historial confirmado; ni jornadas, movimientos ni correcciones nuevos');
+select is((select count(*)::int from public.operaciones where idempotency_key = '22220000-2100-4000-8000-000000000071'), 0, 'T2-SR-2: la clave de idempotencia no quedó reservada');
+select is((select vendedor_id from public.jornadas where id = (select v from res where k = 'J12')), 'aaaaaaaa-2100-4000-8000-000000000016'::uuid, 'T2-SR-2: jornadas.vendedor_id permanece sin cambios');
+drop policy zz_t2_sr2_sin_bloqueo on public.jornadas;
+select is((select count(*)::int from pg_policy where polrelid = 'public.jornadas'::regclass and polname::text not in (select polname from zz_t2_sr2_policies_antes)), 0,
+  'T2-SR-2: la policy temporal se eliminó y no quedó ninguna policy nueva en jornadas');
+select is((select count(*)::int from pg_policy where polrelid = 'public.jornadas'::regclass), (select count(*)::int from zz_t2_sr2_policies_antes),
+  'T2-SR-2: las policies de D-1 sobre jornadas quedaron intactas (misma cantidad que antes)');
+drop table zz_t2_sr2_policies_antes;
+drop table zz_t2_sr2_diag;
+select pg_temp.como_usuario('aaaaaaaa-2100-4000-8000-000000000001');
+select lives_ok($q$insert into res select 'R13', public.reasignar_vendedor('22220000-2100-4000-8000-000000000071', (select v from res where k = 'J12'), 'aaaaaaaa-2100-4000-8000-000000000015')$q$, 'T2-SR-2: control positivo: sin la policy temporal la misma clave se ejecuta como primera ejecución');
+reset role;
+select is((select vendedor_id from public.jornadas where id = (select v from res where k = 'J12')), 'aaaaaaaa-2100-4000-8000-000000000015'::uuid, 'T2-SR-2: control positivo: la reasignación normal sí cambia el vendedor');
 select * from finish();
 rollback;

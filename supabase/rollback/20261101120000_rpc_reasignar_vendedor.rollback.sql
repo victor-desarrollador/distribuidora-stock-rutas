@@ -146,7 +146,7 @@ begin
   where p.proname = 'reasignar_vendedor' and n.nspname in ('public', 'privado');
 
   if v_txt is distinct from
-     $m$privado.reasignar_vendedor|propietario_rpc|plpgsql|f|true|false|false|false|v|u|3|0|uuid|uuid,uuid,uuid|p_idempotency_key,p_jornada_id,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|true|0|c418662ae983b52f6d525d561d9ccb87aad3223f1bdde2c4c61007960109a93a
+     $m$privado.reasignar_vendedor|propietario_rpc|plpgsql|f|true|false|false|false|v|u|3|0|uuid|uuid,uuid,uuid|p_idempotency_key,p_jornada_id,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|true|0|94f1177b3df789a0e9e1cb45e0d4a4f00109bb6852b6b93e4b7d571ae07e3b14
 public.reasignar_vendedor|postgres|sql|f|false|false|false|false|v|u|3|0|uuid|uuid,uuid,uuid|p_idempotency_key,p_jornada_id,p_vendedor_id|-|100|0|0|0|search_path=""|true|true|true|true|0|bb55c733a1c8e1c3506763482b05a46a40cc5602de5f49c0c9411b7da0c0b2df$m$ then
     raise exception 'reversión T2: reasignar_vendedor difiere del manifiesto (cuerpo, comentario, firma, lenguaje, atributos, owner o configuración)';
   end if;

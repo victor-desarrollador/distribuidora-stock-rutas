@@ -23,6 +23,11 @@
 --   - No se agrega ninguna restricción por fecha de la jornada: ADR-007 y
 --     ADR-001 no la definen (decisión T2-5).
 --
+-- Corrección T2-SR-1 (primer ciclo posauditoría): el UPDATE de jornadas.vendedor_id se
+-- verifica con GET DIAGNOSTICS ... ROW_COUNT inmediatamente después y debe afectar
+-- exactamente una fila; si no, PT500 jornada_error_interno y se revierten la operación y
+-- el historial (ver el paso 12).
+--
 -- Decisiones humanas de la tarea (docs/progress-log.md):
 --   - T2-1: vendedor nuevo igual al vigente → PT409 jornada_sin_cambios (código del
 --     catálogo de ADR-001 §18.4.7). Es una solicitud nueva (otra clave); el replay
@@ -103,6 +108,7 @@ declare
   v_estado text;
   v_fecha date;
   v_vendedor_activo boolean;
+  v_filas integer;
 begin
   -- Paso 1. P13-jornadas: los advisory locks sólo serializan bajo READ COMMITTED.
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
@@ -293,6 +299,13 @@ begin
 
   -- Paso 12. Escrituras: la fila append-only del historial y el único cambio de la
   -- jornada (vendedor_id). Una violación residual de restricción no revela su nombre.
+  -- T2-SR-1: el UPDATE debe afectar exactamente una fila. Una policy de RLS que filtre
+  -- la fila (por ejemplo, si el actor dejó de estar habilitado entre la autorización y
+  -- la escritura) no produce error: afecta cero filas. Sin esta comprobación la RPC
+  -- confirmaría la operación y el historial sin cambiar el vendedor de la jornada. El
+  -- conteo se lee inmediatamente después del UPDATE, sin escrituras intermedias. El
+  -- PT500 que se levanta acá no lo captura el manejador de abajo (sólo atiende
+  -- violaciones de restricción y de privilegio) y revierte la operación y el historial.
   begin
     insert into public.reasignaciones_vendedor (
       empresa_id, jornada_id, operacion_id, vendedor_anterior_id,
@@ -306,6 +319,11 @@ begin
        set vendedor_id = p_vendedor_id
      where id = p_jornada_id
        and empresa_id = v_empresa;
+
+    get diagnostics v_filas = row_count;
+    if v_filas <> 1 then
+      raise exception using errcode = 'PT500', message = 'jornada_error_interno';
+    end if;
   exception
     when unique_violation or check_violation or foreign_key_violation
          or not_null_violation or insufficient_privilege then
