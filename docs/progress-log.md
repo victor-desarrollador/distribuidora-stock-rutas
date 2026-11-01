@@ -1,7 +1,11 @@
 ---
-## 01/11/2026 — T3: arnés de concurrencia de jornadas (commit `257efef` auditado; ciclo de corrección T3-C1 en local, sin commit; rama apilada sobre T2)
+## 01/11/2026 — T3: arnés de concurrencia de jornadas (commits `257efef` y C1 `2580372` auditados; ciclo de corrección T3-C2 en local, sin commit; rama apilada sobre T2)
 
-**Estado actual.** El commit original de T3 es `257efef02dd9749656a0e4fed407c0a581b305c9` (padre `b9ba369…`, tree `3d8a9a88…`), local, sin push. Codex lo dictaminó **BLOQUEADO por H-01** y OpenCode **APTO con observaciones**. La corrección T3-C1 (ver al final de esta entrada) está en el worktree **sin commit**, a la espera de revisión humana antes de congelar un hash nuevo. Las secciones que siguen describen el estado auditado en `257efef`; sus cifras son las del implementador.
+**Estado actual.** Commits locales, sin push:
+- T3 original `257efef02dd9749656a0e4fed407c0a581b305c9` (padre `b9ba369…`, tree `3d8a9a88…`): Codex **BLOQUEADO por H-01**; OpenCode **APTO con observaciones**.
+- T3-C1 `258037248e14fd184804ec5b09c087c976775e1a` (padre `257efef…`, tree `2d2a5e7f…`): Codex **BLOQUEADO por C1-H01**; OpenCode **APTO**.
+
+La corrección T3-C2 (al final de esta entrada) está en el worktree **sin commit**, a la espera de revisión humana. Las secciones intermedias describen el estado auditado en `257efef` y en C1; sus cifras son las del implementador, salvo donde se indica la ejecución independiente de Codex.
 
 **Rama:** `feat/rpc-jornadas-t3-arnes-concurrencia`, en el worktree `../distribuidora-rpc-t3`, desde el commit exacto `b9ba36908ecf956ce2e2d54d224e90aae3bc6ad0` (T2). **No se integra a `main`**: depende de T1, T2 y D-1, y M-4 y N-1 de D-1 siguen bloqueando la integración. **Superficie sensible:** concurrencia, idempotencia y Supabase; corresponde security review y auditoría independiente de Codex y OpenCode sobre el hash antes de cualquier merge (AGENTS.md §2.4; ADR-001 §18.4.13, punto 7).
 
@@ -120,6 +124,43 @@ En las tres inyecciones se mantienen el control de deadlocks (AUTO = 4, fuera de
 - **No ejecutado:** `lint`, `typecheck`, `test`, `build` y Playwright (no se modificó `apps/web`); `shellcheck` (no instalado).
 
 **Riesgos residuales.** Un error en otras lecturas de una sola consulta del arnés sigue sin un testigo positivo propio. El contador de deadlocks por base, si la consulta falla, suma cero; lo compensa el cruce obligatorio con las líneas `deadlock detected` del log, que hace fallar la corrida si difieren. Los límites de cobertura de la sección «Límites» y el mutante sobreviviente no cambian.
+
+### Auditorías sobre C1 (`2580372`)
+- **Codex: BLOQUEADO por C1-H01.** En su ejecución independiente (PostgreSQL 17.11, R = 10) el camino normal dio `428 verificaciones, 0 fallas`. Además reprodujo un falso PASS agregando `return 1` después de `cerrar()` en el evaluador de K1.
+- **OpenCode: APTO** (auditoría estática de sólo lectura).
+
+### T3-C2: retorno del evaluador — implementación local, sin commit
+**Decisión humana (01/11/2026):** corrección local limitada a `repetir()` en `casos.sh` y a esta bitácora. Sin cambios en `arnes.sh`, el bootstrap P1, migraciones, RPC, RLS, grants, evaluadores, oráculos, frontend ni CI. Es el segundo ciclo de corrección de T3 (AGENTS.md §2.3.5; el tercero es el límite).
+
+**Causa raíz de C1-H01.** En `repetir()`, el evaluador se invocaba como una sentencia más. Su código de salida se descartaba y sólo se contaban los veredictos (`TOTAL - antes`). Un evaluador que registraba un PASS y luego devolvía un código distinto de cero (un error posterior a `cerrar()`) dejaba la repetición en PASS y la corrida en exit 0.
+
+**Corrección.** En la rama del evaluador, `repetir()` mide justo después de invocarlo su código de salida (`rc=$?`) y la cantidad de veredictos que registró él mismo. Si no registró exactamente uno, FAIL «un veredicto del evaluador». Si `rc ≠ 0`, FAIL «retorno 0 del evaluador», aunque haya registrado un PASS. Esos FAIL los registra el orquestador **después** de medir. Por eso no se cuentan como veredictos del evaluador ni producen un «2 veredictos» espurio, y no ocultan el veredicto original, que queda en el registro. Las ramas de preparación y de mecanismo registran exactamente un FAIL por construcción, así que el control de cardinalidad queda en la rama del evaluador. No depende de `set -e`. Se conservan `INV_OK`, `inv_ok()`, `cerrar()`, `ORACULO` y la limpieza. Los 21 evaluadores no cambian.
+
+**Regresiones negativas (laboratorio, no versionadas; copias descartables, `ARNES_R=2`, K1 salvo G).**
+
+| # | Inyección | Antes de C2 (`2580372`) | Después de C2 |
+|---|---|---|---|
+| A | el evaluador registra PASS y devuelve 1 | **falso PASS**: K1 PASS=4, exit 0 | PASS=4 visibles + FAIL=4 «retorno 1», exit 1 |
+| B | un PASS y retorno 0 | PASS, exit 0 | PASS, exit 0 |
+| C | un FAIL y retorno 0 | FAIL=4, exit 1 | FAIL=4, exit 1 |
+| D | ningún veredicto | FAIL=4, exit 1 | FAIL=4 («0 veredictos»), exit 1 |
+| E | dos veredictos | FAIL=4, exit 1 | FAIL=4 («2 veredictos»), exit 1 |
+| F1 / F2 | error de preparación / de ejecución | FAIL=4, exit 1 | FAIL=4, exit 1 |
+| G | error SQL en `invariantes()` (I10-R) | FAIL=4, exit 1 | FAIL=4, exit 1 |
+| H | `invariantes()` original reinyectado | `ORACULO` aborta antes de AUTO, exit 1 | ídem (0 repeticiones de AUTO ejecutadas) |
+
+Residuos `0|0|0|0` en todas las inyecciones.
+
+**Verificación del implementador sobre C2 (PostgreSQL 17.11).**
+- `bash -n` de `arnes.sh` y `casos.sh`, y `git diff --check`: correctos.
+- Arnés completo, R = 10: `428 verificaciones, 0 fallas`, exit 0, 133 s. Deadlocks: AUTO = 20, fuera de AUTO = 0, log = 20. Residuos `0|0|0|0`; 0 directorios `/tmp/arnes.*`.
+- Banco de mutantes: 7/8 detectados, con el detalle por caso idéntico al de C1; `abrir_jornada` sin 8a sigue sin detectarse (límite declarado).
+- Supabase CLI 2.120.0, stack descartable: `db reset` aplicó 15 migraciones. `test db` de `supabase/tests/concurrencia` dio `NOTESTS`, exit 0, bootstrap `skipped` y catálogo idéntico (476 entradas). `test db` completo: `Files=19, Tests=1587, Result: PASS`. P1, migraciones, `arnes.sh`, `apps` y CI sin cambios respecto de C1.
+- **No ejecutado:** `lint`, `typecheck`, `test`, `build` y Playwright (no se modificó `apps/web`); `shellcheck` (no instalado).
+
+**Evidencia propia frente a independiente.** Todas las cifras de esta sección son del implementador. La única ejecución independiente registrada es la de Codex sobre `257efef` y sobre C1 (sus dictámenes, arriba). C2 todavía no tiene auditoría independiente.
+
+**Riesgos residuales.** Los de C1 y los límites de cobertura de la sección «Límites» no cambian (O2′, I10-A/K10-d sin distinguir 8a del paso 9, K8 parcial, entorno emulado y el mutante sobreviviente). Las funciones `caso_AUTO` y `caso_ORACULO` no pasan por `repetir()`: registran cada veredicto con una estructura `if/else` fija y su exigencia propia (si fallan, el arnés termina con exit 1).
 
 ---
 ## 01/11/2026 — T2: RPC `reasignar_vendedor` (commit `49b3be7` auditado; ciclos de corrección T2-C1 y T2-C2 en local, sin commit; rama apilada sobre T1 y D-1)

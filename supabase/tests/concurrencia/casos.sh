@@ -161,22 +161,27 @@ cerrar() {  # caso orden rep ok esperado resultado_de_invariantes
 
 # Repite un caso R veces en cada orden, con una base nueva por repetición.
 repetir() {   # caso "ordenes" preparar ejecutor evaluar
-  local caso=$1 ordenes=$2 prep=$3 ejec=$4 eval=$5 o r antes n
+  local caso=$1 ordenes=$2 prep=$3 ejec=$4 eval=$5 o r antes n rc
   for o in $ordenes; do
     for (( r = 1; r <= R; r++ )); do
-      antes=$TOTAL
       nueva_base
       MOTIVO=""; RES_T1=""; RES_T2=""; DELANTE=""
       if ! $prep; then
         registrar "$caso" "$o" "$r" FAIL "preparación" "-" "$MOTIVO"
       elif $ejec "$o"; then
+        # El evaluador debe registrar exactamente un veredicto propio (T3-C1) y
+        # devolver 0 (T3-C2). Ambos se miden inmediatamente después de llamarlo;
+        # los FAIL que agrega aquí el orquestador se registran después de medir,
+        # no cuentan como veredictos del evaluador y no ocultan el suyo.
+        antes=$TOTAL
         $eval "$caso" "$o" "$r"
+        rc=$?
+        n=$(( TOTAL - antes ))
+        (( n == 1 )) || registrar "$caso" "$o" "$r" FAIL "un veredicto del evaluador" "$n veredictos"
+        (( rc == 0 )) || registrar "$caso" "$o" "$r" FAIL "retorno 0 del evaluador" "retorno $rc"
       else
         registrar "$caso" "$o" "$r" FAIL "mecanismo del caso" "T1=$(res_corto "${RES_T1:-?|}") T2=$(res_corto "${RES_T2:-?|}")" "$MOTIVO"
       fi
-      # Exactamente un veredicto por repetición (T3-C1): ninguno o varios es FAIL.
-      n=$(( TOTAL - antes ))
-      (( n == 1 )) || registrar "$caso" "$o" "$r" FAIL "un veredicto por repetición" "$n veredictos"
       borrar_base "$BASE"
       DEADLOCKS_CASOS=$(( DEADLOCKS_CASOS + DEADLOCKS_ULTIMA_BASE ))
     done
