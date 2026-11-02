@@ -1,16 +1,16 @@
 # PRD — Sistema de Control de Stock y Rendición
 
 **Proyecto:** Distribuidora de lácteos y fiambres (VM Digital Studio)
-**Fecha:** 26/10/2026
-**Versión:** 0.12
-**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v2.2; **no lo reemplaza**.
+**Fecha:** 29/10/2026
+**Versión:** 0.13
+**Estado:** documento de producto. Complementa a `BLUEPRINT.md` v2.5; **no lo reemplaza**.
 **Alcance de este documento:** describe el producto de Fase 1 y ordena los requisitos ya definidos en el Blueprint. No autoriza implementación.
 
 ---
 
 ## 0. Cómo leer este documento
 
-- **Fuente de verdad:** `BLUEPRINT.md` v2.2, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR vigentes y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
+- **Fuente de verdad:** `BLUEPRINT.md` v2.5, `AGENTS.md`, `CLAUDE.md`, `INVENTARIO_ETAPA_0.md`, las ADR vigentes y `docs/progress-log.md`. Si algo aquí contradice al Blueprint, manda el Blueprint hasta que una decisión aprobada lo cambie.
 - **Referencias:** las citas del tipo «(Blueprint §7.4)» remiten a la sección correspondiente de `BLUEPRINT.md`.
 - **Propuestas:** todo punto marcado como **PROPUESTA NO APROBADA** o **PROPUESTA TÉCNICA NO APROBADA** en el Blueprint se reproduce aquí **con esa misma marca** y **no es un requisito vigente**. No se implementa (AGENTS.md §3).
 - **ADR:** **ADR-001 — Puerta de entrada SQL para operaciones privilegiadas** (versión 1.5, **APROBADA PARA VALIDACIÓN CONTROLADA**), **ADR-002 — Precios independientes de pieza y media pieza** (estado `superada` por ADR-003), **ADR-003 — Precio derivado de media pieza** (`reemplazada` por ADR-005; histórica, sin autoridad normativa), **ADR-005 — Fiambres por peso y unidad mínima en gramos** (estado `aprobada`; D-R1–D-R4 cerradas por decisión humana el 26/10/2026; no autoriza migraciones ni implementación). ADR-001 resolvió P1/P19/P20, P2–P4, P5–P7 y, para validación controlada, P11 (§18.2); P8–P10 y P12–P17 siguen pendientes y P18 es una decisión futura separada. Su estado permite validación sólo local/staging y no autoriza producción. ADR-002 es histórica y superada. ADR-003 regía el precio derivado de media pieza; desde el 25/10/2026 ADR-005 la reemplaza en su totalidad: los fiambres se venden por peso, en kg en pantalla, con gramos enteros como canónico y precio por kg.
@@ -410,7 +410,7 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 11. **Devoluciones por producto** — criterios documentables de aptitud apto/no apto.
 12. **Vencimientos** — fecha por ingreso con `cantidad_inicial` y alertas orientativas; sin FEFO. *(PROPUESTA NO APROBADA.)*
 13. ~~**Precio media pieza**~~ — resuelto por ADR-003 (21/10/2026) y **superado** por ADR-005 (25/10/2026): ya no existe la media pieza; los fiambres se venden por peso.
-14. **Fechas** — día operativo, zona horaria del negocio y corte de jornada (también afecta la fecha y la hora del presupuesto).
+14. **Fechas** — ~~zona horaria del negocio~~ definida (29/10/2026): **`America/Argentina/Tucuman`**; el día operativo actual es la fecha calendario del negocio calculada en esa zona a partir de la hora del servidor (ADR-007; Blueprint §15). **Sigue pendiente:** corte de jornada (también afecta la fecha y la hora del presupuesto).
 15. ~~**Redondeo monetario por peso (ADR-005 D-R1)**~~ — resuelto (26/10/2026) para líneas `peso`: una vez por línea al peso entero, 0,50 hacia arriba, sumadas al total sin recálculo. **Sigue pendiente:** si el importe final de una línea `unidad` conserva centavos o se redondea al peso entero, y si, por lo tanto, un documento mixto (`peso` + `unidad`) puede terminar con centavos (ejemplo: `3 × $1.234,56 = $3.703,68`).
 16. ~~**Pesaje en la operación (D-R2)** y **diferencias de pesaje (D-R3)**~~ — resueltos (26/10/2026): peso efectivamente medido en cada operación; sin tolerancia automática en Fase 1.
 17. ~~**Datos locales/staging en medias piezas (D-R4)**~~ — resuelto (26/10/2026): reinicio limpio, sin reinterpretación.
@@ -448,3 +448,4 @@ Tomado de Blueprint §15 (no se inventan respuestas). **Prioridad alta — antes
 | 0.10 | 23/10/2026 | Alinea las referencias a ADR-001 v1.5: P5–P7 (22/10/2026) y P2–P4 (23/10/2026) resueltas por decisión humana; P8–P17 pendientes, P18 separada y producción bloqueada. Sin cambios de requisitos de producto. |
 | 0.11 | 25/10/2026 | Acompaña a `BLUEPRINT.md` v2.1 tras la reunión con el cliente: **ADR-005** (fiambres por peso; kg ingresado con hasta 3 decimales y mostrado con 3 fijos, gramos enteros, precio por kg, sin `float`; D-R1 completamente pendiente; ADR-003 reemplazada) en §0, RF-01, §9, §13, §17 y §21–§22. **Nuevo RF-12 / §7.1 Presupuestos**: dueño/encargado (vendedor pendiente), productos `unidad` y `peso`, IVA 21% sólo visual, sin descuentos, total = suma de importes, snapshot, sin efecto de stock ni dinero. Pendientes nuevos 15–19. Sin código, SQL ni migraciones. |
 | 0.12 | 26/10/2026 | Acompaña a `BLUEPRINT.md` v2.2: cierre humano de **ADR-005 D-R1–D-R4** (sólo líneas `peso`: importe redondeado una vez por línea al peso entero con 0,50 hacia arriba, sumado al total sin recálculo; peso efectivamente medido por operación; sin tolerancia automática; reinicio limpio de datos pieza/media pieza) en §0, §7.1, §9, criterios de aceptación, §21 y §22. Nuevo pendiente: redondeo de líneas `unidad` y centavos de documentos mixtos. Pendientes de Presupuestos sin cambios. Sin código, SQL ni migraciones. |
+| 0.13 | 29/10/2026 | Acompaña a `BLUEPRINT.md` v2.5: actualiza la referencia al Blueprint (encabezado y §0) y el pendiente «Fechas» (zona horaria operativa `America/Argentina/Tucuman` definida; el corte de jornada sigue pendiente). **Sin cambios de requisitos funcionales**: el detalle de ADR-006 (una línea por producto en ventas nuevas) y de ADR-007 (jornadas y carga) rige desde el Blueprint y las ADR. Sin código, SQL ni migraciones. |
