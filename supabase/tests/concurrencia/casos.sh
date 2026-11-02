@@ -83,7 +83,7 @@ nueva_clave() { NCLAVE=$(( NCLAVE + 1 )); printf -v CLAVE 'fa000000-0000-4000-80
 
 # Jornada confirmada como dato inicial del caso, con la RPC real y el dueño.
 preparar_jornada() {   # clave camion dias vendedor -> uuid de la jornada
-  _psql -v ON_ERROR_STOP=1 -U postgres -d "$BASE" -f - <<EOF | tail -1
+  ins _psql -v ON_ERROR_STOP=1 -U postgres -d "$BASE" -f - <<EOF | tail -1
 begin;
 select set_config('request.jwt.claims', '{"sub":"$ACTOR","role":"authenticated"}', true) is not null;
 set local role authenticated;
@@ -94,8 +94,8 @@ EOF
 jornada() {   # variable camion dias vendedor
   local id
   nueva_clave
-  id=$(preparar_jornada "$CLAVE" "$2" "$3" "$4")
-  [[ $id =~ ^[0-9a-f-]{36}$ ]] || { MOTIVO="no se preparó la jornada ($2, +$3, $4): $id"; return 1; }
+  id=$(ins preparar_jornada "$CLAVE" "$2" "$3" "$4") && [[ $id =~ ^[0-9a-f-]{36}$ ]] \
+    || { MOTIVO="no se preparó la jornada ($2, +$3, $4): $id"; return 1; }
   printf -v "$1" '%s' "$id"
 }
 
@@ -108,30 +108,47 @@ mismo_uuid() {
   [[ -n $a && $a == "$b" ]]
 }
 
-# Invariantes: pares descripción/condición. Imprime el testigo positivo INV_OK
-# sólo si la consulta se ejecutó sin error y todas las condiciones se cumplen.
-# Si falla alguna, imprime «INV_FALLA: <descripciones>»; si la consulta no se
-# pudo ejecutar, «INV_ERROR_SQL(rc=N): <error>». Una salida vacía nunca es
-# éxito (T3-C1, H-01): cerrar() exige el testigo.
+# Invariantes: pares descripción/condición. Separa dos resultados:
+#   - instrumental, por el código de salida: 0 = la consulta corrió y su salida
+#     se pudo interpretar; 2 = error SQL o de conexión (INV_ERROR_SQL), salida
+#     no interpretable (INV_ERROR_SALIDA) o uso inválido (INV_ERROR_USO);
+#   - lógico, por el testigo: INV_OK si todas las condiciones se cumplen;
+#     «INV_FALLA: <descripciones>» si alguna no.
+# El testigo sólo vale con rc 0; cerrar() decide por el testigo (T3-C1, H-01) y
+# quien la llama usa ins, que anota el rc 2. INV_FALLA se acepta sólo si la
+# salida es una única línea formada por descripciones pasadas, en orden y
+# separadas por «; » (clasificador estricto, decisión A-1).
 invariantes() {
-  local sql="select concat_ws('; '" d c out rc
+  local sql="select concat_ws('; '" d c out rc p i=0 sep=$'\x1f'
+  local -a descs=() partes=()
+  (( $# >= 2 && $# % 2 == 0 )) || { printf 'INV_ERROR_USO: %s argumentos' "$#"; return 2; }
   while (( $# >= 2 )); do
     d=$1; c=$2; shift 2
+    [[ -n $d && $d != *';'* && $d != *$'\n'* ]] || { printf 'INV_ERROR_USO: descripción inválida [%s]' "$d"; return 2; }
+    descs+=("$d")
     sql+=", case when not coalesce(($c), false) then '${d//\'/\'\'}' end"
   done
   sql+=")"
-  out=$(sql_pg "$BASE" "select case when f = '' then 'INV_OK' else f end from ($sql) as s(f)" 2>&1)
+  # invariantes clasifica su propio rc: llama a _psql directamente (excepción de LINT).
+  out=$(_psql -v ON_ERROR_STOP=1 -U postgres -d "$BASE" -c "select case when f = '' then 'INV_OK' else f end from ($sql) as s(f)" 2>&1)
   rc=$?
   if (( rc != 0 )); then
     printf 'INV_ERROR_SQL(rc=%s): %s' "$rc" "${out//$'\n'/ }"
-    return 1
+    return 2
   fi
   if [[ $out == INV_OK ]]; then
     printf 'INV_OK'
     return 0
   fi
-  printf 'INV_FALLA: %s' "${out:-sin salida}"
-  return 1
+  [[ -n $out && $out != *$'\n'* ]] || { printf 'INV_ERROR_SALIDA: %s' "${out:-vacía}"; return 2; }
+  IFS=$sep read -r -a partes <<<"${out//; /$sep}"
+  for p in "${partes[@]}"; do
+    while (( i < ${#descs[@]} )) && [[ ${descs[i]} != "$p" ]]; do i=$(( i + 1 )); done
+    (( i < ${#descs[@]} )) || { printf 'INV_ERROR_SALIDA: %s' "$out"; return 2; }
+    i=$(( i + 1 ))
+  done
+  printf 'INV_FALLA: %s' "$out"
+  return 0
 }
 # Uno o más testigos INV_OK concatenados, y nada más (cadena vacía = falla).
 inv_ok() { [[ $1 =~ ^(INV_OK)+$ ]]; }
@@ -155,19 +172,27 @@ cerrar() {  # caso orden rep ok esperado resultado_de_invariantes
   local c=$1 o=$2 r=$3 ok=$4 esp=$5 inv=${6:-} det="resultado distinto del esperado"
   local obt="T1=$(res_corto "$RES_T1") T2=$(res_corto "$RES_T2")${DELANTE:+ delante=$DELANTE}"
   if ! inv_ok "$inv"; then ok=1; det=${inv:-invariantes sin resultado}; fi
-  if (( ok == 0 )); then registrar "$c" "$o" "$r" PASS "$esp" "$obt"
-  else registrar "$c" "$o" "$r" FAIL "$esp" "$obt" "$det"; fi
+  if (( ok == 0 )); then ins registrar "$c" "$o" "$r" PASS "$esp" "$obt"
+  else ins registrar "$c" "$o" "$r" FAIL "$esp" "$obt" "$det"; fi
 }
 
 # Repite un caso R veces en cada orden, con una base nueva por repetición.
+# Cada repetición fija REP_ID (caso|orden|rep|base) antes de crear su base y lo
+# restaura después de borrarla: todo fallo instrumental anotado en ese tramo,
+# incluida la creación y el borrado de la base, es FAIL de esa repetición.
 repetir() {   # caso "ordenes" preparar ejecutor evaluar
-  local caso=$1 ordenes=$2 prep=$3 ejec=$4 eval=$5 o r antes n rc
+  local caso=$1 ordenes=$2 prep=$3 ejec=$4 eval=$5 o r antes n rc desde
   for o in $ordenes; do
     for (( r = 1; r <= R; r++ )); do
-      nueva_base
+      REP_ID="$caso|$o|$r|rep$(( NBASE + 1 ))"
+      registro_leer; desde=${#REG[@]}
       MOTIVO=""; RES_T1=""; RES_T2=""; DELANTE=""
-      if ! $prep; then
-        registrar "$caso" "$o" "$r" FAIL "preparación" "-" "$MOTIVO"
+      if ! ins nueva_base; then
+        ins registrar "$caso" "$o" "$r" FAIL "base de la repetición" "-" "no se creó $BASE"
+      elif [[ $BASE != "${REP_ID##*|}" ]]; then
+        ins registrar "$caso" "$o" "$r" FAIL "base de la repetición" "$BASE" "atribución: se esperaba ${REP_ID##*|}"
+      elif ! $prep; then
+        ins registrar "$caso" "$o" "$r" FAIL "preparación" "-" "$MOTIVO"
       elif $ejec "$o"; then
         # El evaluador debe registrar exactamente un veredicto propio (T3-C1) y
         # devolver 0 (T3-C2). Ambos se miden inmediatamente después de llamarlo;
@@ -177,51 +202,76 @@ repetir() {   # caso "ordenes" preparar ejecutor evaluar
         $eval "$caso" "$o" "$r"
         rc=$?
         n=$(( TOTAL - antes ))
-        (( n == 1 )) || registrar "$caso" "$o" "$r" FAIL "un veredicto del evaluador" "$n veredictos"
-        (( rc == 0 )) || registrar "$caso" "$o" "$r" FAIL "retorno 0 del evaluador" "retorno $rc"
+        (( n == 1 )) || ins registrar "$caso" "$o" "$r" FAIL "un veredicto del evaluador" "$n veredictos"
+        (( rc == 0 )) || ins registrar "$caso" "$o" "$r" FAIL "retorno 0 del evaluador" "retorno $rc"
       else
-        registrar "$caso" "$o" "$r" FAIL "mecanismo del caso" "T1=$(res_corto "${RES_T1:-?|}") T2=$(res_corto "${RES_T2:-?|}")" "$MOTIVO"
+        ins registrar "$caso" "$o" "$r" FAIL "mecanismo del caso" "T1=$(res_corto "${RES_T1:-?|}") T2=$(res_corto "${RES_T2:-?|}")" "$MOTIVO"
       fi
-      borrar_base "$BASE"
+      ins borrar_base "$BASE"
       DEADLOCKS_CASOS=$(( DEADLOCKS_CASOS + DEADLOCKS_ULTIMA_BASE ))
+      # Punto de control: después de medir el veredicto y el retorno del evaluador.
+      control_registro "$caso" "$o" "$r" "$desde"
+      REP_ID=GLOBAL
     done
   done
 }
 
 # -----------------------------------------------------------------------------
-# ORACULO — autoverificación del oráculo de invariantes (T3-C1, H-01). Antes de
-# AUTO y de los casos: una condición verdadera debe dar el testigo; una falsa,
-# un error SQL real (división por cero, tabla y columna inexistentes), la cadena
-# vacía y una concatenación con una falla deben ser rechazados. Si no, el arnés
-# termina con exit 1 sin medir nada.
+# ORACULO — autoverificación del oráculo de invariantes (T3-C1, H-01; contrato
+# A-2). Antes de AUTO y de los casos, distingue resultado lógico de error
+# instrumental:
+#   - verdadera: rc 0 y exactamente INV_OK;
+#   - falsa: rc 0 e «INV_FALLA: falsa» (resultado lógico, no es un fallo);
+#   - división por cero, tabla y columna inexistentes: rc 2, INV_ERROR_SQL y un
+#     fallo esperado anotado por ins_esperado (los únicos del arnés);
+#   - la cadena vacía y una concatenación con una falla: rechazadas por inv_ok.
+# Además, el registro debe tener exactamente esos 3 esperados y ningún fallo
+# inesperado de ORACULO. Si algo no se cumple, el arnés termina con exit 1 sin
+# medir nada.
 # -----------------------------------------------------------------------------
 caso_ORACULO() {
-  local inv
+  local inv rc a b ra rb d c desde i rid esp e=0
   BASE=oraculo
-  sql_admin postgres "create database oraculo template arnes owner postgres" >/dev/null \
+  REP_ID=ORACULO
+  registro_leer; desde=${#REG[@]}
+  ins sql_admin postgres "create database oraculo template arnes owner postgres" >/dev/null \
     || error_entorno "no se creó la base de la autoverificación del oráculo"
-  inv=$(invariantes "verdadera" "true")
-  if inv_ok "$inv"; then registrar ORACULO - verdadera PASS "INV_OK" "$inv"
-  else registrar ORACULO - verdadera FAIL "INV_OK" "$inv"; fi
-  local d c
-  for d in falsa division_por_cero tabla_inexistente columna_inexistente; do
+  inv=$(ins invariantes "verdadera" "true"); rc=$?
+  if (( rc == 0 )) && [[ $inv == INV_OK ]] && inv_ok "$inv"; then ins registrar ORACULO - verdadera PASS "rc=0 INV_OK" "rc=$rc $inv"
+  else ins registrar ORACULO - verdadera FAIL "rc=0 INV_OK" "rc=$rc $inv"; fi
+  inv=$(ins invariantes "falsa" "false"); rc=$?
+  if (( rc == 0 )) && [[ $inv == "INV_FALLA: falsa" ]] && ! inv_ok "$inv"; then ins registrar ORACULO - falsa PASS "rc=0 INV_FALLA" "rc=$rc $inv"
+  else ins registrar ORACULO - falsa FAIL "rc=0 INV_FALLA" "rc=$rc ${inv:0:60}"; fi
+  for d in division_por_cero tabla_inexistente columna_inexistente; do
     case $d in
-      falsa) c="false" ;;
       division_por_cero) c="(select 1 / 0) = 1" ;;
       tabla_inexistente) c="(select count(*) from public.tabla_inexistente) = 0" ;;
       columna_inexistente) c="(select count(columna_inexistente) from public.jornadas) = 0" ;;
     esac
-    inv=$(invariantes "$d" "$c")
-    if inv_ok "$inv"; then registrar ORACULO - "$d" FAIL "rechazo" "$inv"
-    else registrar ORACULO - "$d" PASS "rechazo" "${inv:0:60}"; fi
+    inv=$(ins_esperado 2 invariantes "$d" "$c"); rc=$?
+    if (( rc == 0 )) && [[ $inv == 'INV_ERROR_SQL('* ]] && ! inv_ok "$inv"; then ins registrar ORACULO - "$d" PASS "rc=2 INV_ERROR_SQL" "${inv:0:60}"
+    else ins registrar ORACULO - "$d" FAIL "rc=2 INV_ERROR_SQL" "ins_esperado=$rc ${inv:0:60}"; fi
   done
-  if inv_ok ""; then registrar ORACULO - vacia FAIL "rechazo" "aceptada"
-  else registrar ORACULO - vacia PASS "rechazo" "rechazada"; fi
-  inv="$(invariantes "verdadera" "true")$(invariantes "falsa" "false")"
-  if inv_ok "$inv"; then registrar ORACULO - concatenada FAIL "rechazo" "$inv"
-  else registrar ORACULO - concatenada PASS "rechazo" "${inv:0:60}"; fi
-  borrar_base oraculo
+  if inv_ok ""; then ins registrar ORACULO - vacia FAIL "rechazo" "aceptada"
+  else ins registrar ORACULO - vacia PASS "rechazo" "rechazada"; fi
+  a=$(ins invariantes "verdadera" "true"); ra=$?
+  b=$(ins invariantes "falsa" "false"); rb=$?
+  inv="$a$b"
+  if (( ra == 0 && rb == 0 )) && ! inv_ok "$inv"; then ins registrar ORACULO - concatenada PASS "rechazo" "${inv:0:60}"
+  else ins registrar ORACULO - concatenada FAIL "rechazo" "rc=$ra/$rb $inv"; fi
+  ins borrar_base oraculo
   DEADLOCKS_CASOS=$(( DEADLOCKS_CASOS + DEADLOCKS_ULTIMA_BASE ))
+  # Registro: exactamente los 3 esperados y ningún inesperado, todos de ORACULO.
+  registro_leer
+  for (( i = desde; i < ${#REG[@]}; i++ )); do
+    IFS=$'\t' read -r _ rid esp _ <<<"${REG[i]}"
+    [[ $esp == 1 && $rid == ORACULO ]] && e=$(( e + 1 ))
+  done
+  registro_nuevos "$desde"
+  if (( e != 3 || REG_N != 0 )); then
+    ins registrar ORACULO - registro FAIL "3 esperados, 0 inesperados" "$e esperados, $REG_N inesperados" "${REG_DET:0:200}"
+  fi
+  REP_ID=GLOBAL
 }
 
 # -----------------------------------------------------------------------------
@@ -234,10 +284,12 @@ caso_ORACULO() {
 pred_auto() { pred_espera_adv "$1" && [[ $(campo "$1" 6) != *,* && -n $(campo "$1" 6) && $(campo "$1" 7) == "$PUERTA" ]]; }
 
 caso_AUTO() {
-  local o r primero segundo r1 r2 ok
+  local o r primero segundo r1 r2 ok desde
   BASE=auto
-  sql_admin postgres "create database auto template arnes owner postgres" >/dev/null
-  sql_pg auto "create schema zz_arnes;
+  REP_ID="AUTO|-|preparación|auto"
+  registro_leer; desde=${#REG[@]}
+  ins sql_admin postgres "create database auto template arnes owner postgres" >/dev/null
+  ins sql_pg auto "create schema zz_arnes;
 create function zz_arnes.reasignar_ingenua(p_empresa uuid, p_vigente uuid, p_nuevo uuid, p_puerta bigint)
 returns void language plpgsql as \$\$
 begin
@@ -247,21 +299,24 @@ begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
     'jornadas:vendedor:' || p_empresa::text || ':' || p_nuevo::text, 0));
 end \$\$;" >/dev/null || error_entorno "no se creó la función de control de AUTO"
-  PUERTA=$(clave_txt 'zz_arnes:puerta')
+  PUERTA=$(ins clave_txt 'zz_arnes:puerta') || error_entorno "no se calculó la clave de la puerta de AUTO"
+  control_registro AUTO - preparación "$desde"
   for o in 1 2; do
     for (( r = 1; r <= R; r++ )); do
+      REP_ID="AUTO|$o|$r|auto"
+      registro_leer; desde=${#REG[@]}
       MOTIVO=""; RES_T1=""; RES_T2=""; DELANTE=""
       if [[ $o == 1 ]]; then primero=T1; segundo=T2; else primero=T2; segundo=T1; fi
       EXPR_T1="zz_arnes.reasignar_ingenua('$EMPRESA', '$V3', '$V6', $PUERTA)"
       EXPR_T2="zz_arnes.reasignar_ingenua('$EMPRESA', '$V6', '$V3', $PUERTA)"
       CTRL_CLAVES=("$PUERTA")
       ok=1
-      if ses_abrir C auto && ses_abrir T1 auto && ses_abrir T2 auto && control_tomar; then
+      if ins ses_abrir C auto && ins ses_abrir T1 auto && ins ses_abrir T2 auto && ins control_tomar; then
         # T3-C3: lanzamientos, resultados y cierres se comprueban uno por uno.
-        if ! { ses_lanzar "$primero" "" "$(expr_de "$primero")" && ses_lanzar "$segundo" "" "$(expr_de "$segundo")"; }; then
+        if ! { ins ses_lanzar "$primero" "" "$(expr_de "$primero")" && ins ses_lanzar "$segundo" "" "$(expr_de "$segundo")"; }; then
           MOTIVO="no se lanzaron las sesiones"
-        elif foto_par_estable pred_auto "${S_PID[T1]}" "" "${S_PID[T2]}" "" && control_liberar; then
-          if RES_T1=$(ses_resultado T1) && RES_T2=$(ses_resultado T2) && ses_fin T1 && ses_fin T2; then
+        elif foto_par_estable pred_auto "${S_PID[T1]}" "" "${S_PID[T2]}" "" && ins control_liberar; then
+          if RES_T1=$(ins ses_resultado T1) && RES_T2=$(ins ses_resultado T2) && ins ses_fin T1 && ins ses_fin T2; then
             r1=${RES_T1%%|*}; r2=${RES_T2%%|*}
             [[ "$r1 $r2" == "00000 40P01" || "$r1 $r2" == "40P01 00000" ]] && ok=0
           else
@@ -273,17 +328,22 @@ end \$\$;" >/dev/null || error_entorno "no se creó la función de control de AU
       else
         MOTIVO="no se preparó la autoverificación"
       fi
-      if (( ok == 0 )); then registrar AUTO "$o" "$r" PASS "{00000,40P01}" "T1=${RES_T1%%|*} T2=${RES_T2%%|*}"
-      else registrar AUTO "$o" "$r" FAIL "{00000,40P01}" "T1=${RES_T1%%|*} T2=${RES_T2%%|*}" "${MOTIVO:-sin 40P01}"; fi
-      cerrar_todas
+      if (( ok == 0 )); then ins registrar AUTO "$o" "$r" PASS "{00000,40P01}" "T1=${RES_T1%%|*} T2=${RES_T2%%|*}"
+      else ins registrar AUTO "$o" "$r" FAIL "{00000,40P01}" "T1=${RES_T1%%|*} T2=${RES_T2%%|*}" "${MOTIVO:-sin 40P01}"; fi
+      ins cerrar_todas
+      control_registro AUTO "$o" "$r" "$desde"
     done
   done
-  borrar_base auto
+  REP_ID="AUTO|-|cierre|auto"
+  registro_leer; desde=${#REG[@]}
+  ins borrar_base auto
+  control_registro AUTO - cierre "$desde"
+  REP_ID=GLOBAL
   DEADLOCKS_AUTO=$DEADLOCKS_ULTIMA_BASE
   if (( DEADLOCKS_AUTO == 2 * R )); then
-    registrar AUTO-CONT - - PASS "deadlocks=$(( 2 * R ))" "deadlocks=$DEADLOCKS_AUTO"
+    ins registrar AUTO-CONT - - PASS "deadlocks=$(( 2 * R ))" "deadlocks=$DEADLOCKS_AUTO"
   else
-    registrar AUTO-CONT - - FAIL "deadlocks=$(( 2 * R ))" "deadlocks=$DEADLOCKS_AUTO"
+    ins registrar AUTO-CONT - - FAIL "deadlocks=$(( 2 * R ))" "deadlocks=$DEADLOCKS_AUTO"
   fi
 }
 
@@ -293,15 +353,17 @@ end \$\$;" >/dev/null || error_entorno "no se creó la función de control de AU
 # bloqueos con el vigente ya cambiado a V6: sin el paso 8a, 8b la rechazaría.
 # -----------------------------------------------------------------------------
 prep_I10_R() {
-  jornada J1 "$CAM1" 30 "$V3" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
   nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$EXPR_T1
-  CTRL_CLAVES=("$(kv "$V3")" "$(kv "$V6")")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+  CTRL_CLAVES+=("$(ins kv "$V6")")
 }
 eval_I10_R() {
   local ok=1
   es_ok "$RES_T1" && es_ok "$RES_T2" && mismo_uuid && ok=0
-  cerrar "$@" $ok "las dos 00000 con el mismo uuid" "$(invariantes \
+  cerrar "$@" $ok "las dos 00000 con el mismo uuid" "$(ins invariantes \
     "una operación" "$(n_reas 1)" "un historial" "$(n_hist 1)" "clave única" "$(n_clave "$IDEM_T1" 1)" \
     "vendedor final V6" "$(vend_de "$J1" "$V6")" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
@@ -310,16 +372,19 @@ caso_I10_R() { repetir I10-R "1 2" prep_I10_R correr_par eval_I10_R; }
 # I11-R — misma clave, payload distinto (T1 → V6, T2 → V7): conflicto en 8a,
 # nunca jornada_estado_invalido; efectos sólo de la que confirmó.
 prep_I11_R() {
-  jornada J1 "$CAM1" 30 "$V3" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
   nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(reasignar "$IDEM_T2" "$J1" "$V7")
-  CTRL_CLAVES=("$(kv "$V3")" "$(kv "$V6")" "$(kv "$V7")")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+  CTRL_CLAVES+=("$(ins kv "$V6")")
+  CTRL_CLAVES+=("$(ins kv "$V7")")
 }
 eval_I11_R() {
   local ok=1 dest
   [[ $DELANTE == T1 ]] && dest=$V6 || dest=$V7
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
-  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_conflicto_idempotencia" "$(invariantes \
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_conflicto_idempotencia" "$(ins invariantes \
     "una operación" "$(n_reas 1)" "un historial" "$(n_hist 1)" \
     "vendedor final = destino de la sesión delante" "$(vend_de "$J1" "$dest")" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
@@ -330,12 +395,14 @@ caso_I11_R() { repetir I11-R "1 2" prep_I11_R correr_par eval_I11_R; }
 prep_I10_A() {
   nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM1" 30 "$V3"); EXPR_T2=$EXPR_T1
-  CTRL_CLAVES=("$(kc "$CAM1")" "$(kv "$V3")")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kc "$CAM1")")
+  CTRL_CLAVES+=("$(ins kv "$V3")")
 }
 eval_aper_mismo() {
   local ok=1
   es_ok "$RES_T1" && es_ok "$RES_T2" && mismo_uuid && ok=0
-  cerrar "$@" $ok "las dos 00000 con el mismo uuid de jornada" "$(invariantes \
+  cerrar "$@" $ok "las dos 00000 con el mismo uuid de jornada" "$(ins invariantes \
     "una jornada" "$(n_jorn 1)" "una apertura" "$(n_aper 1)" "clave única" "$(n_clave "$IDEM_T1" 1)" \
     "la jornada pedida" "$(jorn_en "$CAM1" 30 "$V3" 1)" \
     "respuesta = jornada" "(select id::text from public.jornadas) = '$(uuid_de "$RES_T1")'" \
@@ -348,15 +415,17 @@ caso_I10_A() { repetir I10-A "1 2" prep_I10_A correr_par eval_aper_mismo; }
 # jornada_vendedor_ocupado en cualquier orden; cero 40P01.
 # -----------------------------------------------------------------------------
 prep_K1() {
-  jornada J1 "$CAM1" 30 "$V3" && jornada J2 "$CAM2" 30 "$V6" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" && ins jornada J2 "$CAM2" 30 "$V6" || return 1
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(reasignar "$IDEM_T2" "$J2" "$V3")
-  CTRL_CLAVES=("$(kv "$V3")" "$(kv "$V6")")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+  CTRL_CLAVES+=("$(ins kv "$V6")")
 }
 eval_K1() {
   local ok=1
   es_err "$RES_T1" PT409 jornada_vendedor_ocupado && es_err "$RES_T2" PT409 jornada_vendedor_ocupado && ok=0
-  cerrar "$@" $ok "las dos PT409 jornada_vendedor_ocupado" "$(invariantes \
+  cerrar "$@" $ok "las dos PT409 jornada_vendedor_ocupado" "$(ins invariantes \
     "sin operaciones" "$(n_reas 0)" "sin historial" "$(n_hist 0)" \
     "J1 conserva V3" "$(vend_de "$J1" "$V3")" "J2 conserva V6" "$(vend_de "$J2" "$V6")" "I-J1" "$INV_IJ1")"
 }
@@ -366,21 +435,24 @@ caso_K1() { repetir K1 "1 2" prep_K1 correr_par eval_K1; }
 # la cola observada: T1 delante → las dos confirman; T2 delante → T2 PT409
 # jornada_vendedor_ocupado y T1 confirma.
 prep_K2() {
-  jornada J1 "$CAM1" 30 "$V3" && jornada J2 "$CAM2" 30 "$V6" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" && ins jornada J2 "$CAM2" 30 "$V6" || return 1
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V7"); EXPR_T2=$(reasignar "$IDEM_T2" "$J2" "$V3")
-  CTRL_CLAVES=("$(kv "$V3")" "$(kv "$V6")" "$(kv "$V7")")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+  CTRL_CLAVES+=("$(ins kv "$V6")")
+  CTRL_CLAVES+=("$(ins kv "$V7")")
 }
 eval_K2() {
   local ok=1
   if [[ $DELANTE == T1 ]]; then
     es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
-    cerrar "$@" $ok "serial T1;T2: las dos 00000" "$(invariantes \
+    cerrar "$@" $ok "serial T1;T2: las dos 00000" "$(ins invariantes \
       "dos operaciones" "$(n_reas 2)" "dos historiales" "$(n_hist 2)" \
       "J1 → V7" "$(vend_de "$J1" "$V7")" "J2 → V3" "$(vend_de "$J2" "$V3")" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
   else
     es_ok "$RES_T1" && es_err "$RES_T2" PT409 jornada_vendedor_ocupado && ok=0
-    cerrar "$@" $ok "serial T2;T1: T2 PT409 jornada_vendedor_ocupado, T1 00000" "$(invariantes \
+    cerrar "$@" $ok "serial T2;T1: T2 PT409 jornada_vendedor_ocupado, T1 00000" "$(ins invariantes \
       "una operación" "$(n_reas 1)" "un historial" "$(n_hist 1)" \
       "J1 → V7" "$(vend_de "$J1" "$V7")" "J2 conserva V6" "$(vend_de "$J2" "$V6")" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
   fi
@@ -390,21 +462,21 @@ caso_K2() { repetir K2 "1 2" prep_K2 correr_par eval_K2; }
 # K3 — I-2 apertura con el vigente: T1 reasigna J1 (V3, f) → V6; T2 abre
 # (camión 2, f, V3). Se encolan en adv(V3).
 prep_K3() {
-  jornada J1 "$CAM1" 30 "$V3" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(abrir "$IDEM_T2" "$CAM2" 30 "$V3")
-  CTRL_CLAVES=("$(kv "$V3")")
+  CTRL_CLAVES=("$(ins kv "$V3")")
 }
 eval_K3() {
   local ok=1
   if [[ $DELANTE == T1 ]]; then
     es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
-    cerrar "$@" $ok "serial T1;T2: las dos 00000" "$(invariantes \
+    cerrar "$@" $ok "serial T1;T2: las dos 00000" "$(ins invariantes \
       "J1 → V6" "$(vend_de "$J1" "$V6")" "apertura de camión 2 con V3" "$(jorn_en "$CAM2" 30 "$V3" 1)" \
       "una reasignación" "$(n_reas 1)" "dos aperturas" "$(n_aper 2)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
   else
     es_err "$RES_T2" PT409 jornada_vendedor_ocupado && es_ok "$RES_T1" && ok=0
-    cerrar "$@" $ok "serial T2;T1: T2 PT409 jornada_vendedor_ocupado, T1 00000" "$(invariantes \
+    cerrar "$@" $ok "serial T2;T1: T2 PT409 jornada_vendedor_ocupado, T1 00000" "$(ins invariantes \
       "J1 → V6" "$(vend_de "$J1" "$V6")" "sin jornada del camión 2" "$(n_jorn 1)" \
       "una reasignación" "$(n_reas 1)" "una apertura" "$(n_aper 1)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
   fi
@@ -414,19 +486,19 @@ caso_K3() { repetir K3 "1 2" prep_K3 correr_par eval_K3; }
 # K4 — I-2 hacia el nuevo: T1 reasigna J1 (V3, f) → V6; T2 abre (camión 2, f,
 # V6). Se encolan en adv(V6): una confirma y la otra PT409 jornada_vendedor_ocupado.
 prep_K4() {
-  jornada J1 "$CAM1" 30 "$V3" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(abrir "$IDEM_T2" "$CAM2" 30 "$V6")
-  CTRL_CLAVES=("$(kv "$V6")")
+  CTRL_CLAVES=("$(ins kv "$V6")")
 }
 eval_K4() {
   local ok=1
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_vendedor_ocupado && ok=0
   if [[ $DELANTE == T1 ]]; then
-    cerrar "$@" $ok "T1 00000; T2 PT409 jornada_vendedor_ocupado" "$(invariantes \
+    cerrar "$@" $ok "T1 00000; T2 PT409 jornada_vendedor_ocupado" "$(ins invariantes \
       "J1 → V6" "$(vend_de "$J1" "$V6")" "sin jornada del camión 2" "$(n_jorn 1)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
   else
-    cerrar "$@" $ok "T2 00000; T1 PT409 jornada_vendedor_ocupado" "$(invariantes \
+    cerrar "$@" $ok "T2 00000; T1 PT409 jornada_vendedor_ocupado" "$(ins invariantes \
       "J1 conserva V3" "$(vend_de "$J1" "$V3")" "apertura de camión 2 con V6" "$(jorn_en "$CAM2" 30 "$V6" 1)" \
       "sin reasignaciones" "$(n_reas 0)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
   fi
@@ -437,29 +509,32 @@ caso_K4() { repetir K4 "1 2" prep_K4 correr_par eval_K4; }
 # con DISTINTA clave: la sesión de atrás recibe PT409 jornada_estado_invalido
 # (8b), sin reserva ni historial; reintentar con la misma clave confirma.
 prep_K9_R() {
-  jornada J1 "$CAM1" 30 "$V3" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(reasignar "$IDEM_T2" "$J1" "$V7")
-  CTRL_CLAVES=("$(kv "$V3")" "$(kv "$V6")" "$(kv "$V7")")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+  CTRL_CLAVES+=("$(ins kv "$V6")")
+  CTRL_CLAVES+=("$(ins kv "$V7")")
 }
 eval_K9_R() {
   local ok=1 inv_rech reint="" fallo="" dest_otro dest_del clave_otro
   if [[ $OTRO == T1 ]]; then dest_otro=$V6; dest_del=$V7; clave_otro=$IDEM_T1
   else dest_otro=$V7; dest_del=$V6; clave_otro=$IDEM_T2; fi
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_estado_invalido && ok=0
-  inv_rech=$(invariantes "el rechazo no reservó la clave" "$(n_clave "$clave_otro" 0)" \
+  inv_rech=$(ins invariantes "el rechazo no reservó la clave" "$(n_clave "$clave_otro" 0)" \
     "un historial" "$(n_hist 1)" "J1 → destino de delante" "$(vend_de "$J1" "$dest_del")")
   # Reintento con la misma clave y el mismo payload: la RPC recalcula el vigente.
   # Cada paso instrumental se comprueba (T3-C3, C2-H01): si uno falla, la
   # repetición es FAIL aunque los efectos observados parezcan correctos.
-  if ! ses_lanzar "$OTRO" "$ACTOR" "$(expr_de "$OTRO")"; then fallo="no se lanzó el reintento"
-  elif ! reint=$(ses_resultado "$OTRO"); then fallo="el reintento no respondió"
-  elif ! ses_fin "$OTRO"; then fallo="no se cerró la transacción del reintento"
+  if ! ins ses_lanzar "$OTRO" "$ACTOR" "$(expr_de "$OTRO")"; then fallo="no se lanzó el reintento"
+  elif ! reint=$(ins ses_resultado "$OTRO"); then fallo="el reintento no respondió"
+  elif ! ins ses_fin "$OTRO"; then fallo="no se cerró la transacción del reintento"
   fi
   [[ -z $fallo ]] && es_ok "$reint" || ok=1
   (( ok == 0 )) || echo "    reintento=$(res_corto "$reint")${fallo:+ fallo=[$fallo]}" | tee -a "$SALIDA"
   # cerrar() es el último comando: su retorno es el del evaluador (T3-C3).
-  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_estado_invalido; reintento 00000" "${inv_rech}$(invariantes \
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_estado_invalido; reintento 00000" "${inv_rech}$(ins invariantes \
     "dos operaciones tras el reintento" "$(n_reas 2)" "dos historiales" "$(n_hist 2)" \
     "J1 → destino del reintento" "$(vend_de "$J1" "$dest_otro")" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
@@ -471,14 +546,14 @@ caso_K9_R() { repetir K9-R "1 2" prep_K9_R correr_par eval_K9_R; }
 prep_K10_a() {  # mismo camión y misma fecha, vendedores distintos
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM1" 30 "$V3"); EXPR_T2=$(abrir "$IDEM_T2" "$CAM1" 30 "$V6")
-  CTRL_CLAVES=("$(kc "$CAM1")")
+  CTRL_CLAVES=("$(ins kc "$CAM1")")
 }
 eval_K10_a() {
   local ok=1 o
   o=$(res_de "$OTRO")
   es_ok "$(res_de "$DELANTE")" \
     && { es_err "$o" PT409 jornada_duplicada || es_err "$o" PT409 jornada_camion_con_jornada_abierta; } && ok=0
-  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_duplicada o jornada_camion_con_jornada_abierta" "$(invariantes \
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_duplicada o jornada_camion_con_jornada_abierta" "$(ins invariantes \
     "una jornada" "$(n_jorn 1)" "una apertura" "$(n_aper 1)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
 caso_K10_a() { repetir K10-a "1 2" prep_K10_a correr_par eval_K10_a; }
@@ -486,12 +561,12 @@ caso_K10_a() { repetir K10-a "1 2" prep_K10_a correr_par eval_K10_a; }
 prep_K10_b() {  # mismo camión, fechas distintas
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM1" 30 "$V3"); EXPR_T2=$(abrir "$IDEM_T2" "$CAM1" 31 "$V6")
-  CTRL_CLAVES=("$(kc "$CAM1")")
+  CTRL_CLAVES=("$(ins kc "$CAM1")")
 }
 eval_K10_b() {
   local ok=1
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_camion_con_jornada_abierta && ok=0
-  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_camion_con_jornada_abierta" "$(invariantes \
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_camion_con_jornada_abierta" "$(ins invariantes \
     "una jornada" "$(n_jorn 1)" "una apertura" "$(n_aper 1)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
 caso_K10_b() { repetir K10-b "1 2" prep_K10_b correr_par eval_K10_b; }
@@ -499,12 +574,12 @@ caso_K10_b() { repetir K10-b "1 2" prep_K10_b correr_par eval_K10_b; }
 prep_K10_c() {  # mismo vendedor y misma fecha, camiones distintos: cola en adv(V3)
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM1" 30 "$V3"); EXPR_T2=$(abrir "$IDEM_T2" "$CAM2" 30 "$V3")
-  CTRL_CLAVES=("$(kv "$V3")")
+  CTRL_CLAVES=("$(ins kv "$V3")")
 }
 eval_K10_c() {
   local ok=1
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_vendedor_ocupado && ok=0
-  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_vendedor_ocupado" "$(invariantes \
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_vendedor_ocupado" "$(ins invariantes \
     "una jornada" "$(n_jorn 1)" "una apertura" "$(n_aper 1)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
 caso_K10_c() { repetir K10-c "1 2" prep_K10_c correr_par eval_K10_c; }
@@ -512,20 +587,20 @@ caso_K10_c() { repetir K10-c "1 2" prep_K10_c correr_par eval_K10_c; }
 prep_K10_d() {  # misma clave y mismos parámetros; el control retiene sólo el camión
   nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM1" 30 "$V3"); EXPR_T2=$EXPR_T1
-  CTRL_CLAVES=("$(kc "$CAM1")")
+  CTRL_CLAVES=("$(ins kc "$CAM1")")
 }
 caso_K10_d() { repetir K10-d "1 2" prep_K10_d correr_par eval_aper_mismo; }
 
 prep_K10_e() {  # misma clave y distinto vendedor
   nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM1" 30 "$V3"); EXPR_T2=$(abrir "$IDEM_T2" "$CAM1" 30 "$V6")
-  CTRL_CLAVES=("$(kc "$CAM1")")
+  CTRL_CLAVES=("$(ins kc "$CAM1")")
 }
 eval_K10_e() {
   local ok=1 vd
   [[ $DELANTE == T1 ]] && vd=$V3 || vd=$V6
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
-  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_conflicto_idempotencia" "$(invariantes \
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_conflicto_idempotencia" "$(ins invariantes \
     "una jornada" "$(n_jorn 1)" "una apertura" "$(n_aper 1)" "la jornada de la sesión delante" "$(jorn_en "$CAM1" 30 "$vd" 1)" \
     "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
@@ -539,16 +614,18 @@ caso_K10_e() { repetir K10-e "1 2" prep_K10_e correr_par eval_K10_e; }
 # reserva en curso, a la transacción abierta de la primera (paso 9); al
 # confirmar la primera, el ON CONFLICT da PT409 jornada_conflicto_idempotencia.
 prep_K8_CLAVE() {
-  jornada J1 "$CAM1" 30 "$V3" && jornada J2 "$CAM2" 30 "$V7" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" && ins jornada J2 "$CAM2" 30 "$V7" || return 1
   nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(reasignar "$IDEM_T2" "$J2" "$V9")
-  CTRL_CLAVES=("$(kv "$V3")" "$(kv "$V7")")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+  CTRL_CLAVES+=("$(ins kv "$V7")")
 }
 eval_K8_CLAVE() {
   local ok=1 jd jo vd vo
   if [[ $DELANTE == T1 ]]; then jd=$J1; vd=$V6; jo=$J2; vo=$V7; else jd=$J2; vd=$V9; jo=$J1; vo=$V3; fi
   es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
-  cerrar "$@" $ok "primera 00000; la otra PT409 jornada_conflicto_idempotencia en el paso 9" "$(invariantes \
+  cerrar "$@" $ok "primera 00000; la otra PT409 jornada_conflicto_idempotencia en el paso 9" "$(ins invariantes \
     "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "un historial" "$(n_hist 1)" \
     "jornada de la primera cambiada" "$(vend_de "$jd" "$vd")" "jornada de la otra intacta" "$(vend_de "$jo" "$vo")" \
     "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
@@ -561,28 +638,28 @@ caso_K8_CLAVE() { repetir K8-CLAVE "1 2" prep_K8_CLAVE correr_independientes eva
 prep_K8_BAJA() {
   nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=""
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM3" 30 "$V9"); EXPR_T2=$(baja_camion "$CAM3")
-  CTRL_CLAVES=("$(kc "$CAM3")")
+  CTRL_CLAVES=("$(ins kc "$CAM3")")
 }
 correr_baja_en_espera() {
   MOTIVO=""; DELANTE=""; OTRO=""; RES_T1=""; RES_T2=""
-  ses_abrir C "$BASE" && ses_abrir T1 "$BASE" && ses_abrir T2 "$BASE" || { MOTIVO="no se abrieron las sesiones"; return 1; }
-  control_tomar || return 1
+  ins ses_abrir C "$BASE" && ins ses_abrir T1 "$BASE" && ins ses_abrir T2 "$BASE" || { MOTIVO="no se abrieron las sesiones"; return 1; }
+  ins control_tomar || return 1
   # T3-C3: cada operación instrumental se comprueba; ninguna queda sin verificar.
-  ses_lanzar T1 "$ACTOR" "$EXPR_T1" || { MOTIVO="no se lanzó la apertura"; return 1; }
+  ins ses_lanzar T1 "$ACTOR" "$EXPR_T1" || { MOTIVO="no se lanzó la apertura"; return 1; }
   foto_estable pred_abcd "${S_PID[T1]}" "$IDEM_T1" || { MOTIVO="T1 no llegó a la espera: $FOTO"; return 1; }
-  ses_lanzar T2 "$ACTOR" "$EXPR_T2" || { MOTIVO="no se lanzó la baja"; return 1; }
-  RES_T2=$(ses_resultado T2) || { MOTIVO="la baja no terminó: espera espuria ($(foto "${S_PID[T2]}"))"; return 1; }
-  ses_fin T2 || { MOTIVO="no se cerró la transacción de la baja"; return 1; }
+  ins ses_lanzar T2 "$ACTOR" "$EXPR_T2" || { MOTIVO="no se lanzó la baja"; return 1; }
+  RES_T2=$(ins ses_resultado T2) || { MOTIVO="la baja no terminó: espera espuria ($(ins foto "${S_PID[T2]}"))"; return 1; }
+  ins ses_fin T2 || { MOTIVO="no se cerró la transacción de la baja"; return 1; }
   foto_estable pred_abcd "${S_PID[T1]}" "$IDEM_T1" && [[ $(campo "$FOTO" 5) == "${S_PID[C]}" ]] \
     || { MOTIVO="T1 dejó de esperar sólo al control: $FOTO"; return 1; }
-  control_liberar || { MOTIVO="el control no liberó"; return 1; }
-  RES_T1=$(ses_resultado T1) || { MOTIVO="T1 no respondió"; return 1; }
-  ses_fin T1 || { MOTIVO="no se cerró la transacción de la apertura"; return 1; }
+  ins control_liberar || { MOTIVO="el control no liberó"; return 1; }
+  RES_T1=$(ins ses_resultado T1) || { MOTIVO="T1 no respondió"; return 1; }
+  ins ses_fin T1 || { MOTIVO="no se cerró la transacción de la apertura"; return 1; }
 }
 eval_K8_BAJA_a() {
   local ok=1
   es_ok "$RES_T2" && es_err "$RES_T1" PT409 jornada_camion_inactivo && ok=0
-  cerrar "$@" $ok "baja 00000; apertura PT409 jornada_camion_inactivo" "$(invariantes \
+  cerrar "$@" $ok "baja 00000; apertura PT409 jornada_camion_inactivo" "$(ins invariantes \
     "sin jornadas" "$(n_jorn 0)" "sin aperturas" "$(n_aper 0)" "camión inactivo" "(select not activo from public.camiones where id = '$CAM3')")"
 }
 caso_K8_BAJA_a() { repetir K8-BAJA-a "-" prep_K8_BAJA correr_baja_en_espera eval_K8_BAJA_a; }
@@ -594,7 +671,7 @@ caso_K8_BAJA_a() { repetir K8-BAJA-a "-" prep_K8_BAJA correr_baja_en_espera eval
 eval_K8_BAJA_b() {
   local ok=1
   es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
-  cerrar "$@" $ok "apertura 00000; baja 00000 sin esperar" "$(invariantes \
+  cerrar "$@" $ok "apertura 00000; baja 00000 sin esperar" "$(ins invariantes \
     "una jornada" "$(n_jorn 1)" "la apertura pedida" "$(jorn_en "$CAM3" 30 "$V9" 1)" \
     "camión inactivo" "(select not activo from public.camiones where id = '$CAM3')" "sin huérfanas" "$INV_HUERFANAS")"
 }
@@ -606,28 +683,28 @@ caso_K8_BAJA_b() { repetir K8-BAJA-b "1" prep_K8_BAJA correr_secuencial eval_K8_
 # una operación sobre recursos disjuntos termina sin esperarla.
 # -----------------------------------------------------------------------------
 prep_S_ESP_RR() {
-  jornada J1 "$CAM1" 30 "$V3" && jornada J2 "$CAM2" 30 "$V7" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" && ins jornada J2 "$CAM2" 30 "$V7" || return 1
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(reasignar "$IDEM_T2" "$J2" "$V9")
 }
 eval_S_ESP_RR() {
   local ok=1
   es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
-  cerrar "$@" $ok "las dos 00000 sin esperarse" "$(invariantes \
+  cerrar "$@" $ok "las dos 00000 sin esperarse" "$(ins invariantes \
     "dos operaciones" "$(n_reas 2)" "J1 → V6" "$(vend_de "$J1" "$V6")" "J2 → V9" "$(vend_de "$J2" "$V9")" \
     "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
 caso_S_ESP_RR() { repetir S-ESP-RR "1 2" prep_S_ESP_RR correr_secuencial eval_S_ESP_RR; }
 
 prep_S_ESP_RA() {
-  jornada J1 "$CAM1" 30 "$V3" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
   nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$J1" "$V6"); EXPR_T2=$(abrir "$IDEM_T2" "$CAM3" 30 "$V9")
 }
 eval_S_ESP_RA() {
   local ok=1
   es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
-  cerrar "$@" $ok "las dos 00000 sin esperarse" "$(invariantes \
+  cerrar "$@" $ok "las dos 00000 sin esperarse" "$(ins invariantes \
     "J1 → V6" "$(vend_de "$J1" "$V6")" "apertura de camión 3" "$(jorn_en "$CAM3" 30 "$V9" 1)" \
     "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")"
 }
@@ -643,29 +720,29 @@ caso_S_ESP_RA() { repetir S-ESP-RA "1 2" prep_S_ESP_RA correr_secuencial eval_S_
 prep_O_R() {   # vigente nuevo clave_retenida
   local dias=30
   [[ $1 == "$V7" ]] && dias=31
-  jornada JO "$([[ $dias == 30 ]] && echo "$CAM1" || echo "$CAM2")" "$dias" "$1" || return 1
+  ins jornada JO "$([[ $dias == 30 ]] && echo "$CAM1" || echo "$CAM2")" "$dias" "$1" || return 1
   nueva_clave; IDEM_T1=$CLAVE
   EXPR_T1=$(reasignar "$IDEM_T1" "$JO" "$2")
   CTRL_CLAVES=("$3")
-  OBS_RET=$(lista "$(kv "$1")" "$(kv "$2")")
+  OBS_RET=$(lista "$(ins kv "$1")" "$(ins kv "$2")")
 }
 eval_O() {
   local ok=1
   es_ok "$RES_T1" && [[ -z $MOTIVO ]] && ok=0
   cerrar "$@" $ok "concedidos=[$OBS_G] esperado=[$OBS_W] xid NULL; al volver retiene [$OBS_RET]" \
-    "$(invariantes "sin efectos (revertido)" "$(n_clave "$IDEM_T1" 0)")"
+    "$(ins invariantes "sin efectos (revertido)" "$(n_clave "$IDEM_T1" 0)")"
 }
-prep_O_R1() { prep_O_R "$V3" "$V6" "$(kv "$V3")" && OBS_G="" && OBS_W=$(kv "$V3"); }
-prep_O_R2() { prep_O_R "$V3" "$V6" "$(kv "$V6")" && OBS_G=$(kv "$V3") && OBS_W=$(kv "$V6"); }
-prep_O_R3() { prep_O_R "$V7" "$V3" "$(kv "$V7")" && OBS_G=$(kv "$V3") && OBS_W=$(kv "$V7"); }
-prep_O_R4() { prep_O_R "$V7" "$V3" "$(kv "$V3")" && OBS_G="" && OBS_W=$(kv "$V3"); }
+prep_O_R1() { prep_O_R "$V3" "$V6" "$(ins kv "$V3")" && OBS_G="" && OBS_W=$(ins kv "$V3"); }
+prep_O_R2() { prep_O_R "$V3" "$V6" "$(ins kv "$V6")" && OBS_G=$(ins kv "$V3") && OBS_W=$(ins kv "$V6"); }
+prep_O_R3() { prep_O_R "$V7" "$V3" "$(ins kv "$V7")" && OBS_G=$(ins kv "$V3") && OBS_W=$(ins kv "$V7"); }
+prep_O_R4() { prep_O_R "$V7" "$V3" "$(ins kv "$V3")" && OBS_G="" && OBS_W=$(ins kv "$V3"); }
 prep_O_A() {
   nueva_clave; IDEM_T1=$CLAVE
   EXPR_T1=$(abrir "$IDEM_T1" "$CAM3" 30 "$V9")
-  OBS_RET=$(lista "$(kc "$CAM3")" "$(kv "$V9")")
+  OBS_RET=$(lista "$(ins kc "$CAM3")" "$(ins kv "$V9")")
 }
-prep_O_A1() { prep_O_A && CTRL_CLAVES=("$(kv "$V9")") && OBS_G=$(kc "$CAM3") && OBS_W=$(kv "$V9"); }
-prep_O_A2() { prep_O_A && CTRL_CLAVES=("$(kc "$CAM3")") && OBS_G="" && OBS_W=$(kc "$CAM3"); }
+prep_O_A1() { prep_O_A && CTRL_CLAVES=("$(ins kv "$V9")") && OBS_G=$(ins kc "$CAM3") && OBS_W=$(ins kv "$V9"); }
+prep_O_A2() { prep_O_A && CTRL_CLAVES=("$(ins kc "$CAM3")") && OBS_G="" && OBS_W=$(ins kc "$CAM3"); }
 caso_O_R1() { repetir O-R1 "-" prep_O_R1 correr_observado eval_O; }
 caso_O_R2() { repetir O-R2 "-" prep_O_R2 correr_observado eval_O; }
 caso_O_R3() { repetir O-R3 "-" prep_O_R3 correr_observado eval_O; }

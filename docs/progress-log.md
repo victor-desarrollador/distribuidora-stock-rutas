@@ -238,6 +238,57 @@ AUTO se ejecutó en todas las inyecciones salvo H y 4a–c. Residuos `0|0|0|0` e
 - `ses_fin` comprueba que la sentencia terminó (el marcador), no que el `COMMIT` confirmó. Las invariantes posteriores se leen desde otra conexión y detectan una confirmación faltante.
 - Siguen los riesgos de C1 y C2 y los límites de cobertura de la sección «Límites».
 
+### T3 — intervención humana extraordinaria: capa de fallos instrumentales (02/11/2026) — implementación local, sin commit
+**Decisión humana.** Intervención extraordinaria única sobre `23b90e6` (AGENTS.md §2.3.5). **No es C4 ni un ciclo automático.** Durante la validación, el humano autorizó dos ampliaciones puntuales, cada una por separado y después de una detención obligatoria: (1) excepciones de LINT con cantidad exacta; (2) corrección de SIGUSR1 en asignaciones de arreglo. Alcance: sólo `supabase/tests/concurrencia/arnes.sh`, `casos.sh` y esta bitácora. Sin cambios en el bootstrap P1, migraciones, rollback, `config.toml`, RPC, RLS, grants, `apps` ni CI (verificado con `git diff --quiet 23b90e6`).
+
+**Qué se implementó** (diseño `DISENO-capa-errores-arnes-T3.md` y complemento A–C, fuera del repositorio):
+- `ins` envuelve toda llamada instrumental y anota cualquier retorno ≠ 0 en un registro de sólo-agregar (`$TMP/fallos`), aunque el sitio de llamada pierda el código (por ejemplo, dentro de `$(…)`). `ins_esperado` es exclusivo de los tres errores SQL de ORACULO.
+- Cada repetición, AUTO y ORACULO revisan el registro (`control_registro`): un fallo nuevo es FAIL atribuido a caso, orden, repetición y base. El cierre global convierte cualquier fallo no atribuido en `FAIL INSTRUMENTAL`. La limpieza actúa como red: una corrida que iba a terminar con 0 y tiene fallos anotados, o cuya limpieza falla, termina con exit 2.
+- Si un subshell no puede anotar un fallo, avisa al shell principal con SIGUSR1 y el arnés termina con exit 2.
+- `invariantes()` separa el resultado instrumental (rc 0/2) del lógico (`INV_OK` / `INV_FALLA`), con clasificador estricto (decisión A-1). ORACULO exige rc y exactamente 3 fallos esperados.
+- LINT (estático, antes del clúster): rechaza llamadas instrumentales sin `ins`, llamadas indirectas, funciones en segundo plano y asignaciones de arreglo con dos o más `$(…)`. Las dos excepciones tienen cantidad exacta (`limpieza:cerrar_todas:1`, `invariantes:_psql:1`): una llamada de más o de menos es exit 2, y no se admiten excepciones `zz_*` ni `__lab_*`. Autoprueba 6/6.
+- INSTR (autoprueba del registro, sin clúster): anotación en `$(…)`, en sentencia suelta y en argumento; atribución; 7 corrupciones; SIGUSR1 en 4 contextos; registro principal intacto.
+- Se eliminó `FOTO_RET`, que no tenía lectores (en `23b90e6` sólo se asignaba). O2′ y O5 se siguen verificando en `correr_observado` con `$FOTO`.
+
+**Defectos encontrados durante la validación y corregidos con autorización.**
+
+| Defecto | Reproducción | Corrección |
+|---|---|---|
+| LINT aceptaba una segunda llamada directa a `_psql` en `invariantes()`: la excepción era función:llamada, sin cantidad | exit 0 con la llamada adicional | excepciones `función:llamada:cantidad`; autoprueba con `zz_exc` (2 directas, 1 autorizada) |
+| Con bash 5.2.37, si SIGUSR1 llega mientras queda otra `$(…)` por expandir en la misma orden, el trap no se ejecuta (error de sintaxis «EOF inesperado»), se aborta la orden de nivel superior y el script sigue | reproducción mínima: exit 0. En el arnés, en los 7 sitios `CTRL_CLAVES=("$(ins kv …)" "$(ins kv …)"…)` el caso desaparecía del resumen sin veredictos y sólo una base residual daba exit 1 | `CTRL_CLAVES=()` más un `+=` por clave en `prep_I10_R`, `prep_I11_R`, `prep_I10_A`, `prep_K1`, `prep_K2`, `prep_K8_CLAVE` y `prep_K9_R`; regla de LINT para arreglos con varias `$(…)` |
+
+En la corrección de SIGUSR1, las claves de control son idénticas antes y después: 28 repeticiones (7 casos × 2 órdenes × R=2), con el mismo caso, la misma cantidad, el mismo orden y el mismo valor. `control_tomar` no cambió, y el retorno de cada `prep_X` es el mismo en ambas formas (el de la última `$(…)`). Después de corregir, la falla en los 7 sitios termina con exit 2 («un subshell no pudo anotar un fallo (SIGUSR1)»), atribuida a su repetición y su llamador, sin error de sintaxis.
+
+**Validación del implementador sobre el código definitivo** (`arnes.sh` `aa9c3447…2595`, `casos.sh` `a3207ef6…f047`; PostgreSQL 17.11, bash 5.2.37, mawk 1.3.4):
+- **Matriz adversarial M1/M2:** grafo regenerado (294 sitios, 192 pares), 384 corridas, **0 falsos PASS** y 0 inyecciones inválidas; 338 detectadas, con la vía de detección registrada. 23 pares no se ejercieron:
+  - 16 son coincidencias textuales, no llamadas («jornada» en descripciones, «foto» en un `MOTIVO`, cadenas de LINT);
+  - 2 se ejecutaron con otro caso y se detectaron;
+  - 5 sólo existen después de un fallo y se cubren con 32 pruebas compuestas: todas dispararon la inyección secundaria y terminaron con exit ≠ 0.
+- **Mecanismo (31/31):**
+  - registro borrado, truncado, corrupto, con línea modificada o parcial, encabezado alterado, vacío, con esperado ajeno o con esperado de más → exit 2;
+  - registro no escribible en el principal, en un subshell o reemplazado por un directorio → exit 2;
+  - `registrar` roto (global M1/M2, en ORACULO, en AUTO, o en `control_registro` y `cierre_registro` con un fallo real) → exit ≠ 0;
+  - INSTR saboteado de 5 formas → exit 2;
+  - 6 combinaciones → exit ≠ 0.
+- **Pruebas sin clúster:**
+  - clasificador de `invariantes()` 27/27, que incluye las 16 combinaciones del diseño;
+  - supuestos P1–P6 de bash: ok;
+  - espera válida no satisfecha frente a error del monitor: 7/7, con los límites `PLAZO * N` y los predicados idénticos a `23b90e6`.
+- **Regresiones históricas (34/34):** H-01, V0, V2; A–H de C2; D1–D6; propagación de `cerrar()` 36/36; ORACULO e `invariantes()` de `23b90e6` reinyectados → exit ≠ 0. Las formas sin `ins` las rechaza LINT (exit 2).
+- **Arnés completo, R = 10:** `428 verificaciones, 0 fallas`, exit 0, 137 s. LINT 6/6, INSTR ok, ORACULO 7/7, AUTO 20/20. Deadlocks: AUTO = 20, fuera de AUTO = 0, log = 20. 0 fallos instrumentales anotados (3 esperados de ORACULO). Residuos `0|0|0|0`; 0 directorios `/tmp/arnes.*`.
+- **Banco de mutantes:** 7/8, con el mismo detalle por caso que en C3. `abrir_jornada` sin 8a sigue sin detectarse (límite contractual declarado).
+- **Supabase CLI 2.120.0, stack descartable:** `db reset` aplicó 15 migraciones. `test db` de `supabase/tests/concurrencia`: `NOTESTS`, bootstrap `skipped`, catálogo idéntico (476 entradas). `test db` completo: `Files=19, Tests=1587, Result: PASS`. Después: 0 contenedores y 0 volúmenes del stack.
+- `bash -n` y `git diff --check`: correctos.
+- **No ejecutado:** `lint`, `typecheck`, `test`, `build` y Playwright (no se modificó `apps/web`); `shellcheck` (no instalado).
+
+**Evidencia** (fuera del repositorio, no versionada): `evidencia-T3/validacion-sigusr1/` (`MANIFIESTO.sha256` = `da8bf21a…4e7c`, 640 archivos) y `evidencia-T3/validacion-lint-exacto/` (`MANIFIESTO.sha256` = `cc834efb…d1a`). Contiene scripts de laboratorio, matrices, registros de cada corrida y reproducciones mínimas. Todas las cifras son del implementador; la intervención **no tiene auditoría independiente**.
+
+**Límites y riesgos residuales.**
+- El defecto de SIGUSR1 de bash 5.2.37 también afecta a otros contextos con varias `$(…)` en la misma orden: argumentos de una función, dos asignaciones en una línea, condiciones `[[ ]]`, aritmética, here-strings, concatenación y `${x:-$(…)}`. El código actual no tiene ninguno con una `$(…)` capaz de avisar seguida de otra (escaneo de laboratorio más revisión manual de `[[ ]]`). LINT sólo prohíbe el caso de los arreglos, así que **un cambio futuro podría reintroducir el defecto en otro contexto sin que LINT lo rechace**. Queda como decisión humana pendiente.
+- Los supuestos de bash (P1–P6 y el comportamiento anterior) se verificaron sólo en bash 5.2.37; no se probó otra versión ni CI.
+- LINT es léxico, sobre `declare -f`. Es conservador: comparar con `== nombre` sin comillas cuenta como llamada.
+- Siguen los riesgos de C1–C3 y los límites de la sección «Límites».
+
 ---
 ## 01/11/2026 — T2: RPC `reasignar_vendedor` (commit `49b3be7` auditado; ciclos de corrección T2-C1 y T2-C2 en local, sin commit; rama apilada sobre T1 y D-1)
 
