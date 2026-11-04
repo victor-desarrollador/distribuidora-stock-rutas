@@ -376,6 +376,12 @@ select pg_temp.intentar('cargar', pg_catalog.format($$public.registrar_carga('b1
 select pg_temp.intentar('replay_cargar', pg_catalog.format($$public.registrar_carga('b1b1b1b1-2222-4000-8000-000000000008', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[5])$$,
   (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
 
+-- T6: registrar_descarga sobre la jornada ya cargada (motivo con espacios laterales) y su replay.
+select pg_temp.intentar('descargar', pg_catalog.format($$public.registrar_descarga('b1b1b1b1-2222-4000-8000-000000000009', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[2], '  Sobrante ')$$,
+  (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
+select pg_temp.intentar('replay_descargar', pg_catalog.format($$public.registrar_descarga('b1b1b1b1-2222-4000-8000-000000000009', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[2], 'Sobrante')$$,
+  (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
+
 -- Dueño de A con objetos de la empresa B.
 select pg_temp.intentar('b_camion', $$public.abrir_jornada('b1b1b1b1-3333-4000-8000-000000000001', 'c1c1c1c1-0000-4000-8000-0000000000c1', '2999-03-02', 'b1b1b1b1-0000-4000-8000-000000000005')$$);
 select pg_temp.intentar('b_vendedor', $$public.abrir_jornada('b1b1b1b1-3333-4000-8000-000000000002', 'b1b1b1b1-0000-4000-8000-0000000000c4', '2999-03-02', 'c1c1c1c1-0000-4000-8000-000000000002')$$);
@@ -411,6 +417,8 @@ select pg_temp.intentar('ro_abrir_otra_huella', $$public.abrir_jornada('b1b1b1b1
 select pg_temp.intentar('ro_reasignar_replay', pg_catalog.format($$public.reasignar_vendedor('b1b1b1b1-2222-4000-8000-000000000006', %L, 'b1b1b1b1-0000-4000-8000-000000000004')$$,
   (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
 select pg_temp.intentar('ro_cargar_replay', pg_catalog.format($$public.registrar_carga('b1b1b1b1-2222-4000-8000-000000000008', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[5])$$,
+  (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
+select pg_temp.intentar('ro_descargar_replay', pg_catalog.format($$public.registrar_descarga('b1b1b1b1-2222-4000-8000-000000000009', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[2], 'Sobrante')$$,
   (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
 select pg_catalog.setval('pg_temp.control_ro'::pg_catalog.regclass,
   (select pg_catalog.count(*) from pg_temp.resultados r
@@ -487,15 +495,18 @@ select is((select valor from resultados where caso = 'hostiles'), '4/9/1',
 
 select is(
   (select string_agg(caso || '=' || split_part(valor, ':', 1), ',' order by caso) from resultados
-    where caso in ('abrir', 'replay_abrir', 'reasignar', 'replay_reasignar', 'encargado_abrir', 'cargar', 'replay_cargar')),
-  'abrir=ok,cargar=ok,encargado_abrir=ok,reasignar=ok,replay_abrir=ok,replay_cargar=ok,replay_reasignar=ok',
-  'P2: las 3 RPC (y la apertura del encargado) completan con los objetos hostiles presentes');
+    where caso in ('abrir', 'replay_abrir', 'reasignar', 'replay_reasignar', 'encargado_abrir', 'cargar', 'replay_cargar',
+                   'descargar', 'replay_descargar')),
+  'abrir=ok,cargar=ok,descargar=ok,encargado_abrir=ok,reasignar=ok,replay_abrir=ok,replay_cargar=ok,replay_descargar=ok,replay_reasignar=ok',
+  'P2: las 4 RPC (y la apertura del encargado) completan con los objetos hostiles presentes');
 
 select is(
   (select valor from resultados where caso = 'replay_abrir') || '/' || (select valor from resultados where caso = 'replay_reasignar')
-  || '/' || (select valor from resultados where caso = 'replay_cargar'),
+  || '/' || (select valor from resultados where caso = 'replay_cargar')
+  || '/' || (select valor from resultados where caso = 'replay_descargar'),
   (select valor from resultados where caso = 'abrir') || '/' || (select valor from resultados where caso = 'reasignar')
-  || '/' || (select valor from resultados where caso = 'cargar'),
+  || '/' || (select valor from resultados where caso = 'cargar')
+  || '/' || (select valor from resultados where caso = 'descargar'),
   'P2: los replays con la misma clave y huella devuelven la misma jornada y las mismas operaciones');
 
 select is(
@@ -527,8 +538,8 @@ select is(
                from public.reasignaciones_vendedor r where r.empresa_id = 'b1b1b1b1-0000-4000-8000-000000000000')
   || ';' || (select string_agg(o.tipo, ',' order by o.tipo) from public.operaciones o
               where o.empresa_id = 'b1b1b1b1-0000-4000-8000-000000000000'),
-  'c1:2999-03-01:04:cargada,c2:2999-03-01:05:abierta,c5:2999-03-01:06:abierta;03>04;apertura_jornada,apertura_jornada,apertura_jornada,carga,ingreso,reasignacion_vendedor',
-  'P2/P5: equivalencia de comportamiento — 3 jornadas (c1 cargada por T5; la del control revertida no queda), 1 reasignación y sólo las 5 operaciones del contrato, más el ingreso de fixture de T5');
+  'c1:2999-03-01:04:cargada,c2:2999-03-01:05:abierta,c5:2999-03-01:06:abierta;03>04;apertura_jornada,apertura_jornada,apertura_jornada,carga,descarga,ingreso,reasignacion_vendedor',
+  'P2/P5: equivalencia de comportamiento — 3 jornadas (c1 cargada por T5; la del control revertida no queda), 1 reasignación y sólo las 6 operaciones del contrato (con la carga de T5 y la descarga de T6), más el ingreso de fixture');
 
 select is(
   (select string_agg(caso || '=' || valor, ' ; ' order by caso) from resultados
@@ -555,12 +566,12 @@ select is(
   'P4: jornadas, operaciones, camiones y reasignaciones de la empresa B sin cambios');
 
 select is((select valor from resultados where caso = 'medida_p2'), '0/0',
-  'P1/P2/P4: 0 ejecuciones del código temporal como propietario_rpc y como authenticated en las 19 llamadas');
+  'P1/P2/P4: 0 ejecuciones del código temporal como propietario_rpc y como authenticated en las 21 llamadas');
 
 select is(
   (select last_value - 1 from pg_temp.control_ro) || '/' || (select last_value - 1 from pg_temp.control_ro_priv),
-  '5/0',
-  'E-SL1: en sólo lectura, las 5 llamadas (clave nueva, replay, otra huella, replay de reasignación y replay de carga) responden 25006 jornada_metodo_no_permitido, con 0 ejecuciones como propietario_rpc');
+  '6/0',
+  'E-SL1: en sólo lectura, las 6 llamadas (clave nueva, replay, otra huella y replays de reasignación, carga y descarga) responden 25006 jornada_metodo_no_permitido, con 0 ejecuciones como propietario_rpc');
 
 select is(
   (select prosrc from pg_proc where oid = 'privado.abrir_jornada(uuid,uuid,date,uuid)'::regprocedure) ~ E'\nbegin\n  -- Paso 0 \\(corrección T14'

@@ -1,4 +1,4 @@
-// abrir_jornada, reasignar_vendedor y registrar_carga por la Data API real (PostgREST de
+// abrir_jornada, reasignar_vendedor, registrar_carga y registrar_descarga por la Data API real (PostgREST de
 // Supabase local): método HTTP, idempotencia, permisos y concurrencia.
 //
 // Corrección extraordinaria T1/T2 (ADR-001 §6 y §16 T14; migración
@@ -617,6 +617,111 @@ test.describe("registrar_carga por HTTP", () => {
   });
 });
 
+// registrar_descarga (T6): mismos arreglos que la carga, más el motivo.
+function descargaParams(clave: string, jornada: string, producto: string, cantidad: number | string, motivo: string) {
+  return { ...cargaParams(clave, jornada, producto, cantidad), p_motivo: motivo } satisfies Params;
+}
+
+function descargaJson(clave: string, jornada: string, producto: string, cantidad: number, motivo: string) {
+  return { ...cargaJson(clave, jornada, producto, cantidad), p_motivo: motivo };
+}
+
+// Jornada cargada con 10 unidades del producto, lista para descargar.
+async function jornadaCargada(request: APIRequestContext, api: DataApi) {
+  const j = await jornadaConStock(request, api);
+  await esperarUuid(
+    await postJson(request, api, "registrar_carga", cargaJson(randomUUID(), j.jornada, j.producto, 10), api.tokenDueno)
+  );
+  return j;
+}
+
+test.describe("registrar_descarga por HTTP", () => {
+  test("POST nuevo, repetido, con otra huella y excedido; GET/HEAD siempre 405", async ({ page, request }) => {
+    const api = await dataApiDesdeApp(page);
+    const { producto, jornada, ubicacion } = await jornadaCargada(request, api);
+    const clave = randomUUID();
+    const params = descargaParams(clave, jornada, producto, 4, "Sobrante");
+
+    // GET y HEAD con clave nueva: 405 y la clave no queda reservada.
+    await esperar405(await get(request, api, "registrar_descarga", params, api.tokenDueno));
+    expect((await head(request, api, "registrar_descarga", params, api.tokenDueno)).status()).toBe(405);
+    expect(await operacionesConClave(request, api, clave)).toEqual([]);
+    expect(await saldoEn(request, api, ubicacion, producto)).toBe(10);
+
+    // POST nuevo (motivo con espacios laterales): el camión baja a 6.
+    const operacion = await esperarUuid(
+      await postJson(request, api, "registrar_descarga", descargaJson(clave, jornada, producto, 4, "  Sobrante  "), api.tokenDueno)
+    );
+    expect(await operacionesConClave(request, api, clave)).toEqual([{ id: operacion, tipo: "descarga" }]);
+    expect(await saldoEn(request, api, ubicacion, producto)).toBe(6);
+
+    // Replay (literales de arreglo y motivo normalizado): mismo uuid, sin efectos.
+    expect(await esperarUuid(await post(request, api, "registrar_descarga", params, api.tokenDueno))).toBe(operacion);
+
+    // Misma clave y otro motivo u otra cantidad: 409.
+    await esperarError(
+      await post(request, api, "registrar_descarga", descargaParams(clave, jornada, producto, 4, "Otro"), api.tokenDueno),
+      409, "PT409", "jornada_conflicto_idempotencia"
+    );
+    await esperarError(
+      await postJson(request, api, "registrar_descarga", descargaJson(clave, jornada, producto, 5, "Sobrante"), api.tokenDueno),
+      409, "PT409", "jornada_conflicto_idempotencia"
+    );
+
+    // GET/HEAD con la clave ya usada: 405, nunca 200 ni 409.
+    await esperar405(await get(request, api, "registrar_descarga", params, api.tokenDueno));
+    await esperar405(await get(request, api, "registrar_descarga", descargaParams(clave, jornada, producto, 4, "Otro"), api.tokenDueno));
+    expect((await head(request, api, "registrar_descarga", params, api.tokenDueno)).status()).toBe(405);
+
+    // Motivo vacío y descarga mayor que la carga neta: rechazos sin efectos.
+    const claveV = randomUUID();
+    await esperarError(
+      await post(request, api, "registrar_descarga", descargaParams(claveV, jornada, producto, 1, "   "), api.tokenDueno),
+      400, "PT400", "jornada_motivo_invalido"
+    );
+    const claveX = randomUUID();
+    await esperarError(
+      await post(request, api, "registrar_descarga", descargaParams(claveX, jornada, producto, 7, "Exceso"), api.tokenDueno),
+      409, "PT409", "jornada_descarga_excede_carga"
+    );
+    expect(await operacionesConClave(request, api, claveV)).toEqual([]);
+    expect(await operacionesConClave(request, api, claveX)).toEqual([]);
+    expect(await saldoEn(request, api, ubicacion, producto)).toBe(6);
+  });
+
+  test("roles y otra empresa: POST según permisos, GET/HEAD 405 para authenticated, anon 401", async ({ page, request }) => {
+    const api = await dataApiDesdeApp(page);
+    const { producto, jornada, ubicacion } = await jornadaCargada(request, api);
+    const [tokenEncargado, tokenVendedor, tokenOtra] = await Promise.all([
+      tokenDe(request, api, CUENTAS.encargado),
+      tokenDe(request, api, CUENTAS.vendedor),
+      tokenDe(request, api, CUENTAS.otraEmpresa),
+    ]);
+
+    const paramsE = descargaParams(randomUUID(), jornada, producto, 3, "Encargado");
+    await esperar405(await get(request, api, "registrar_descarga", paramsE, tokenEncargado));
+    const operacion = await esperarUuid(await post(request, api, "registrar_descarga", paramsE, tokenEncargado));
+    expect(await operacionesConClave(request, api, paramsE.p_idempotency_key)).toEqual([{ id: operacion, tipo: "descarga" }]);
+
+    const paramsV = descargaParams(randomUUID(), jornada, producto, 1, "Vendedor");
+    await esperarError(await post(request, api, "registrar_descarga", paramsV, tokenVendedor), 403, "PT403", "jornada_no_autorizado");
+    await esperar405(await get(request, api, "registrar_descarga", paramsV, tokenVendedor));
+    expect((await head(request, api, "registrar_descarga", paramsV, tokenVendedor)).status()).toBe(405);
+
+    const paramsB = descargaParams(randomUUID(), jornada, producto, 1, "Otra empresa");
+    await esperarError(await post(request, api, "registrar_descarga", paramsB, tokenOtra), 404, "PT404", "jornada_no_encontrada");
+    await esperar405(await get(request, api, "registrar_descarga", paramsB, tokenOtra));
+
+    await esperarError(await post(request, api, "registrar_descarga", paramsE), 401, "42501");
+    await esperarError(await get(request, api, "registrar_descarga", paramsE), 401, "42501");
+    expect((await head(request, api, "registrar_descarga", paramsE)).status()).toBe(401);
+
+    expect(await saldoEn(request, api, ubicacion, producto)).toBe(7);
+    expect(await operacionesConClave(request, api, paramsV.p_idempotency_key)).toEqual([]);
+    expect(await operacionesConClave(request, api, paramsB.p_idempotency_key)).toEqual([]);
+  });
+});
+
 test.describe("superficie de la Data API de jornadas", () => {
   test("Content-Profile/Accept-Profile privado no alcanza las implementaciones", async ({ page, request }) => {
     const api = await dataApiDesdeApp(page);
@@ -627,6 +732,7 @@ test.describe("superficie de la Data API de jornadas", () => {
       ["abrir_jornada", params],
       ["reasignar_vendedor", reasignacionParams(randomUUID(), randomUUID(), ID_VENDEDOR)],
       ["registrar_carga", cargaParams(randomUUID(), randomUUID(), randomUUID(), 1)],
+      ["registrar_descarga", descargaParams(randomUUID(), randomUUID(), randomUUID(), 1, "x")],
     ] as const) {
       const rPost = await request.post(rpcUrl(api, rpc), {
         headers: encabezados(api, api.tokenDueno, { "content-profile": "privado" }),
@@ -684,6 +790,7 @@ test.describe("service_role sobre la Data API de jornadas", () => {
       ["abrir_jornada", apertura],
       ["reasignar_vendedor", reasignacion],
       ["registrar_carga", cargaParams(randomUUID(), jornada, randomUUID(), 1)],
+      ["registrar_descarga", descargaParams(randomUUID(), jornada, randomUUID(), 1, "x")],
     ] as const) {
       const rPost = await conClaveSecreta(clave, "POST", rpcUrl(api, rpc), p);
       expect([rPost.status, rPost.cuerpo?.code]).toEqual([403, "42501"]);

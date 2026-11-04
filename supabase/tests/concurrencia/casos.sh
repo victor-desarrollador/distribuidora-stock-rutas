@@ -1167,3 +1167,110 @@ eval_K8_CLAVE_C() {
 caso_K8_CLAVE_C() { repetir K8-CLAVE-C "1 2" prep_K8_CLAVE_C correr_fila_indep eval_K8_CLAVE_C; }
 
 CASOS+=(I10-C I11-C K8-CC-a K8-CC-b K8-CR K8-CM K8-SM K8-CLAVE-C)
+
+# =============================================================================
+# T6 — registrar_descarga (ADR-001 §18.4.9 I10, I11 y K11-d; §18.4.11). Casos
+# nuevos, agregados sin modificar arnes.sh ni los casos anteriores:
+#
+#   I10-D   misma clave y mismo payload: las dos con la misma operación
+#   I11-D   misma clave y payload distinto: una confirma, la otra PT409
+#   K11-d   dos descargas con claves distintas, cada una dentro de lo cargado neto
+#           pero con suma mayor: una confirma y la otra jornada_descarga_excede_carga
+#   K8-CD   carga contra descarga de la misma jornada (regresión de K8)
+#
+# Como registrar_carga, la descarga no toma advisory de niveles 1 ni 2: el control
+# retiene el FOR UPDATE de la jornada (correr_fila_par de T5). La jornada se
+# prepara cargada con la RPC real. K11-a, K11-b y K11-c (contra confirmar_salida)
+# quedan NO APLICABLES hasta T7.
+# =============================================================================
+descargar() { printf "public.registrar_descarga('%s', '%s', array['%s']::uuid[], array[%s], '%s')" "$1" "$2" "$PROD1" "$3" "$4"; }
+
+# Carga confirmada como dato inicial del caso, con la RPC real y el dueño.
+cargar_previa() {   # jornada cantidad
+  local r
+  nueva_clave
+  r=$(ins _psql -v ON_ERROR_STOP=1 -U postgres -d "$BASE" -f - <<EOF | tail -1
+begin;
+select set_config('request.jwt.claims', '{"sub":"$ACTOR","role":"authenticated"}', true) is not null;
+set local role authenticated;
+select $(cargar "$CLAVE" "$1" "$2");
+commit;
+EOF
+) && [[ $r =~ ^[0-9a-f-]{36}$ ]] || { MOTIVO="no se preparó la carga previa ($1, $2): $r"; return 1; }
+}
+
+# Stock 10 en el depósito, J1 en CAM1 cargada con 8, control sobre la fila de J1.
+prep_descarga_base() {
+  prep_carga_base 10 || return 1
+  cargar_previa "$J1" 8
+}
+
+prep_I10_D() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(descargar "$IDEM_T1" "$J1" 3 "Sobrante"); EXPR_T2=$EXPR_T1
+}
+eval_I10_D() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && mismo_uuid && ok=0
+  cerrar "$@" $ok "las dos 00000 con la misma operación" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "una descarga" "$(n_tipo descarga 1)" \
+    "un movimiento de descarga" "$(n_mov descarga 1)" "camión 5" "$(saldo_es "$UBI1" 5)" "depósito 5" "$(saldo_es "$DEP" 5)" \
+    "jornada cargada" "$(estado_es "$J1" cargada)" "sin saldos negativos" "$INV_STOCK" \
+    "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_I10_D() { repetir I10-D "1 2" prep_I10_D correr_fila_par eval_I10_D; }
+
+prep_I11_D() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(descargar "$IDEM_T1" "$J1" 3 "Sobrante"); EXPR_T2=$(descargar "$IDEM_T2" "$J1" 4 "Sobrante")
+}
+eval_I11_D() {
+  local ok=1 q
+  [[ $DELANTE == T1 ]] && q=3 || q=4
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_conflicto_idempotencia" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "un movimiento de descarga" "$(n_mov descarga 1)" \
+    "camión sólo con la de delante" "$(saldo_es "$UBI1" $(( 8 - q )))" "depósito sólo con la de delante" "$(saldo_es "$DEP" $(( 2 + q )))" \
+    "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_I11_D() { repetir I11-D "1 2" prep_I11_D correr_fila_par eval_I11_D; }
+
+# K11-d — dos descargas (5 y 5) sobre una carga neta de 8.
+prep_K11_d() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(descargar "$IDEM_T1" "$J1" 5 "Sobrante A"); EXPR_T2=$(descargar "$IDEM_T2" "$J1" 5 "Sobrante B")
+}
+eval_K11_d() {
+  local ok=1
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_descarga_excede_carga && ok=0
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_descarga_excede_carga" "$(ins invariantes \
+    "una descarga" "$(n_tipo descarga 1)" "un movimiento de descarga" "$(n_mov descarga 1)" \
+    "la rechazada no reservó" "$(n_clave "$(idem_de "$OTRO")" 0)" \
+    "camión 3" "$(saldo_es "$UBI1" 3)" "depósito 7" "$(saldo_es "$DEP" 7)" \
+    "jornada cargada" "$(estado_es "$J1" cargada)" "sin saldos negativos" "$INV_STOCK" \
+    "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_K11_d() { repetir K11-d "1 2" prep_K11_d correr_fila_par eval_K11_d; }
+
+# K8-CD — carga de 2 (T1) contra descarga de 3 (T2) de la misma jornada: las dos
+# caben en cualquier orden serial.
+prep_K8_CD() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(cargar "$IDEM_T1" "$J1" 2); EXPR_T2=$(descargar "$IDEM_T2" "$J1" 3 "Sobrante")
+}
+eval_K8_CD() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
+  cerrar "$@" $ok "las dos 00000 (equivale a algún orden serial)" "$(ins invariantes \
+    "dos cargas" "$(n_tipo carga 2)" "una descarga" "$(n_tipo descarga 1)" \
+    "camión 7" "$(saldo_es "$UBI1" 7)" "depósito 3" "$(saldo_es "$DEP" 3)" \
+    "jornada cargada" "$(estado_es "$J1" cargada)" "sin saldos negativos" "$INV_STOCK" \
+    "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_K8_CD() { repetir K8-CD "1 2" prep_K8_CD correr_fila_par eval_K8_CD; }
+
+CASOS+=(I10-D I11-D K11-d K8-CD)

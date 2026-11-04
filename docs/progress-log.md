@@ -1,4 +1,65 @@
 ---
+## 04/11/2026 — T6: RPC `registrar_descarga` (sin commit)
+
+**Rama:** `feat/rpc-jornadas-t6-registrar-descarga`, desde `e79bf8e2191967763ae59d532c1a2b770629b123` (T5). Toca superficies sensibles (Supabase, `SECURITY DEFINER`, `movimientos_stock`, idempotencia, concurrencia, RLS, `empresa_id`).
+
+**Procedimiento de la fase (decisión humana del 04/11/2026):** se terminan primero todas las RPC de jornadas (T6, T7 y T4). Después se unifican las ramas de la fase, se prueba lo integrado y se hace una única auditoría integral con Codex y OpenCode, sólo cuando el usuario la autorice. No hay auditorías por RPC; cada tarea corre sus tests obligatorios y queda con su commit y su entrada en esta bitácora.
+
+**Precedencia aprobada (04/11/2026):** estado → ubicaciones → productos (sólo existencia y empresa) → carga neta y saldo del camión. ADR-007 §2.6.3 y §2.7 admiten descargar productos y camiones dados de baja, así que no hay validación de «activo».
+
+### Qué se hizo
+- **Migración `20261107120000_rpc_registrar_descarga.sql`.** Crea `public.registrar_descarga(uuid, uuid, uuid[], integer[], text)`, una fachada `SECURITY INVOKER` de `postgres`, y `privado.registrar_descarga`, `SECURITY DEFINER` de `propietario_rpc`, con `search_path = ''`.
+  - `EXECUTE` sólo para `authenticated`; propiedad transferida con `CREATE` transitorio (O-3) y verificación fail-closed.
+  - **Sin cambios de esquema, grants ni políticas:** usa lo que dejó D-1.
+  - **Precondiciones:** exige A1, T5, `check_function_bodies` activo y que `propietario_rpc` no tenga `CREATE` previo.
+  - **pg_temp:** tipos y casts calificados con `pg_catalog`.
+- **Contrato** (ADR-007 §2.6 y §2.7; ADR-001 §18.4; E-SL1):
+  - **Paso 0:** sólo lectura → `25006`.
+  - **Estructura, en este orden:** clave, jornada, motivo (`btrim`; nulo o vacío → `PT400 jornada_motivo_invalido`), arreglos, repetidos y cantidades.
+  - **Huella:** `v1|descarga|<jornada>|<líneas ordenadas>|+<motivo>`.
+  - **Bloqueos:** `FOR UPDATE` de la jornada, 8a y reserva; después, advisory de stock (nivel 4) de la ubicación del camión por producto (I-CAMION c).
+  - **Negocio:** sólo en `cargada`, y el estado no cambia. Por producto, la cantidad no supera la carga neta de la jornada ni el saldo del camión → `PT409 jornada_descarga_excede_carga`.
+  - **Escrituras:** un movimiento `descarga` por línea (camión → depósito, con `jornada_id` y el motivo con `btrim`), verificado por `ROW_COUNT`.
+- **`supabase/tests/jornadas_descarga.test.sql` (93 aserciones):**
+  - **Catálogo y seguridad:** roles, otra empresa, `anon`/`service_role` y DML directo.
+  - **Estructura:** I13/I14, con el motivo antes que los arreglos.
+  - **Casos de ADR-007:** 18 (la carga original queda intacta), 19 (exceso, abierta), 22 (fixture `en_reparto`) y 24 (camión de baja: la descarga se admite y la carga sigue rechazada).
+  - **§2.6.3:** producto de baja.
+  - **Vaciado:** descargar todo deja el camión en 0 y la jornada sigue `cargada`.
+  - **Idempotencia:** I1–I9 e I12. El motivo canoniza `btrim`; mayúsculas y espacios internos distintos dan conflicto.
+  - **Invariantes:** I-J2, conservación del total, I-CAMION y empresa B intacta.
+  - **E-SL1:** sólo lectura → `25006`.
+- **Pruebas ampliadas:**
+  - productos y camiones: 18 funciones `SECURITY DEFINER`;
+  - grants: 34 firmas;
+  - hardening: 28 firmas de negocio y 14 implementaciones;
+  - `pg_temp_jornadas`: descarga y replay con los objetos hostiles presentes y 6 llamadas en sólo lectura.
+- **Arnés** (`casos.sh`, sólo agregados): `I10-D`, `I11-D`, `K11-d` y `K8-CD` (carga contra descarga), con el ejecutor por fila de T5.
+- **HTTP:** bloque `registrar_descarga` (GET/HEAD 405, POST, replay, conflicto por motivo y por cantidad, motivo vacío, exceso, roles, otra empresa y `anon`) y su inclusión en los recorridos de `Content-Profile` y `service_role`.
+
+### Cómo se verificó (04/11/2026; laboratorio `pgtempa1-lab`, PostgreSQL 17, CLI 2.120.0)
+Evidencia en `../evidencia-t6-descarga/`.
+- `supabase db reset` (`01_…`): 22 migraciones, exit 0. `supabase test db` (`02_…`): `Files=30, Tests=1983, Result: PASS`, exit 0. `db lint --level warning` (`03_…`): sin errores, exit 0.
+- **Mutantes** (`04_…`, `scripts/mutantes_descarga.py`). Detectados:
+  - un tipo sin calificar;
+  - huella sin motivo;
+  - replay sin huella;
+  - sin guarda;
+  - sin el control de exceso;
+  - estado `abierta` admitido;
+  - productos inactivos rechazados (contra §2.6.3);
+  - motivo sin `btrim`.
+  - **Equivalentes esperados, sin detectar:** M5b (sólo sin la condición de carga neta) y M5c (sólo sin la de saldo del camión). Mientras vale I-J2, cada condición cubre a la otra; se conservan como defensa en profundidad.
+- **Sensibilidad focalizada del arnés** (`05_…`): con la migración mutada sin el `FOR UPDATE` de la jornada, K11-d (R=2, dos órdenes) dio FAIL en las 4 repeticiones: sin el bloqueo, la descarga choca con la fila que retiene el control (`FOR KEY SHARE` de la FK) y aborta por `lock_timeout`, así que el mutante se detecta. 16 verificaciones, 4 fallas, exit 1 esperado, residuos 0. Cobertura pendiente, por costo: no se mutó el advisory de nivel 4 de la descarga. Las descargas de una misma jornada ya se serializan por el `FOR UPDATE`, y el nivel 4 protege contra otros débitos del camión (ventas) que todavía no existen.
+- **Arnés completo** (`06_…`): código original, una sola corrida: `668 verificaciones, 0 fallas`, exit 0, 305 s; 22 migraciones. I10-D, I11-D, K11-d y K8-CD dan 20/20 cada uno, y los casos de T3 y T5 no cambian. Deadlocks sólo en AUTO (20/20); residuos 0; sin fallos instrumentales. Al terminar no quedan procesos, clústeres ni directorios del arnés.
+- **`apps/web/`:** `typecheck`, `lint`, `test` (`31 files, 1168 tests`) y `build`, exit 0. `npx playwright test`: `108 passed`, exit 0.
+
+### Riesgos y pendientes
+- **NO APLICABLES en T6:** K11-a/b/c (contra `confirmar_salida`), para T7.
+- **Fixtures `en_reparto`:** el caso 22 y el I3 usan un fixture; hay que repetirlos con el flujo real en T7.
+- **Auditoría independiente y security review:** pendientes de la auditoría integral de la fase.
+
+---
 ## 04/11/2026 — T5: RPC `registrar_carga` (sin commit)
 
 **Rama:** `feat/rpc-jornadas-t5-registrar-carga`, desde `261f45d18e91f87fb971d49d22bbe087a1e72ab8` (B1 v2). Toca superficies sensibles (Supabase, `SECURITY DEFINER`, `movimientos_stock`, idempotencia, concurrencia, RLS, `empresa_id`): **corresponde security review y auditoría independiente**, que el usuario ejecutará manualmente. Validación sólo local; prohibido aplicar en producción.

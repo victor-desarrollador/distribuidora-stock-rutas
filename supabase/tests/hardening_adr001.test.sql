@@ -54,8 +54,9 @@ insert into tablas_negocio values
   ('public.correcciones_jornada');
 grant select on tablas_negocio to public;
 
--- Las 26 firmas de negocio (fachadas + implementaciones): 20 de productos, camiones y
--- clientes, 2 de abrir_jornada (T1), 2 de reasignar_vendedor (T2) y 2 de registrar_carga (T5).
+-- Las 28 firmas de negocio (fachadas + implementaciones): 20 de productos, camiones y
+-- clientes, 2 de abrir_jornada (T1), 2 de reasignar_vendedor (T2), 2 de registrar_carga (T5)
+-- y 2 de registrar_descarga (T6).
 -- Stock se verifica por separado.
 create temp table rpc_negocio (firma regprocedure);
 insert into rpc_negocio values
@@ -72,6 +73,7 @@ insert into rpc_negocio values
   ('public.abrir_jornada(uuid,uuid,date,uuid)'),
   ('public.reasignar_vendedor(uuid,uuid,uuid)'),
   ('public.registrar_carga(uuid,uuid,uuid[],integer[])'),
+  ('public.registrar_descarga(uuid,uuid,uuid[],integer[],text)'),
   ('privado.crear_producto(text,text,text,text,numeric,integer)'),
   ('privado.actualizar_producto(uuid,text,text,numeric,integer)'),
   ('privado.cambiar_estado_producto(uuid,boolean)'),
@@ -84,7 +86,8 @@ insert into rpc_negocio values
   ('privado.cambiar_estado_cliente(uuid,boolean)'),
   ('privado.abrir_jornada(uuid,uuid,date,uuid)'),
   ('privado.reasignar_vendedor(uuid,uuid,uuid)'),
-  ('privado.registrar_carga(uuid,uuid,uuid[],integer[])');
+  ('privado.registrar_carga(uuid,uuid,uuid[],integer[])'),
+  ('privado.registrar_descarga(uuid,uuid,uuid[],integer[],text)');
 grant select on rpc_negocio to public;
 
 -- ===========================================================================
@@ -130,7 +133,7 @@ select is(
   (select count(*)::int from rpc_negocio r
     where has_function_privilege('service_role', r.firma, 'EXECUTE')),
   0,
-  'P11: service_role sin EXECUTE sobre las 26 firmas de negocio (fachadas e implementaciones)');
+  'P11: service_role sin EXECUTE sobre las 28 firmas de negocio (fachadas e implementaciones)');
 
 select is(
   (select count(*)::int from pg_proc p
@@ -223,8 +226,8 @@ select is(
   (select count(*)::int from rpc_negocio r join pg_proc p on p.oid = r.firma
     where p.pronamespace = 'privado'::regnamespace
       and p.prosecdef and p.proowner = 'propietario_rpc'::regrole),
-  13,
-  'O-3: las 13 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
+  14,
+  'O-3: las 14 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
 
 select ok(
   not exists (select 1 from pg_auth_members
