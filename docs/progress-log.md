@@ -1,4 +1,56 @@
 ---
+## 04/11/2026 — A3: endurecimiento pg_temp de las RPC de Stock (sin commit; NO cierra la vulnerabilidad global)
+
+**Rama:** `fix/pg-temp-stock`, desde `52b9d87dde11c7e20f98a42ccc426722b5b98dfb` (A2). Tercer paso (A3) del plan de remediación pg_temp, alternativa A. Toca superficies sensibles (`SECURITY DEFINER`, `movimientos_stock`, idempotencia, concurrencia, RLS, `empresa_id`): **corresponde auditoría independiente** antes de cerrar. Validación sólo local; prohibido aplicar en producción.
+
+**Estado de A2:** la entrada de A2, más abajo, dice «sin commit» porque se redactó antes de autorizarlo. A2 quedó commiteada como `52b9d87dde11c7e20f98a42ccc426722b5b98dfb` (árbol `704315ff…`), tras la auditoría de cierre de Codex y OpenCode (ambas FAVORABLE CON OBSERVACIONES). Esa entrada no se modifica.
+
+### Qué se hizo
+- **Migración `20261105120200_pg_temp_stock.sql`:** 43 calificaciones (`uuid` → `pg_catalog.uuid`, `text` → `pg_catalog.text`):
+  - `registrar_ingreso`: 11 = 9 declaraciones + 2 casts de la huella v1;
+  - `mover_a_cuarentena`: 16 = 10 declaraciones + 3 casts de la huella + 3 de la clave del advisory lock;
+  - `registrar_merma`: 16, con la misma distribución.
+  - `bigint` y `boolean` son palabras clave y no se tocan.
+  - El cast calificado es el mismo tipo (mismo oid): la huella v1 y la clave del lock no cambian, y los replays de operaciones anteriores siguen coincidiendo.
+- **Patrón de A1/A2,** con dos diferencias:
+  - **Equivalencia mecánica:** dos cuerpos vigentes ya tenían 3 calificaciones `pg_catalog.` de funciones. Por eso se exige que el cuerpo vigente no contenga `pg_catalog.uuid` ni `pg_catalog.text`, y que al revertir sólo esos dos tokens se obtenga el cuerpo anterior byte a byte. La cantidad de `pg_catalog.` debe crecer exactamente en las calificaciones previstas.
+  - **Dependencias:** exige A1 (`usuario_actual` `2ab0212d…`). Mantiene A1-B01 (`check_function_bodies`) y A1-B02 (topología de `propietario_rpc`). No exige A2, que no utiliza.
+- **Lo que se verifica:** manifiesto de 4 funciones, distribución de homónimos, `pg_proc` salvo `prosrc` (oid, owner, ACL, `SECURITY`, volatilidad, firmas y valores por defecto), dependencias, ACL de `privado` sin `CREATE` residual, lista de `SECURITY DEFINER` y P11.
+- **`supabase/tests/pg_temp_stock.test.sql` (23 aserciones).** Los objetos hostiles se crean antes de la primera llamada: dominios `uuid`/`text`/`date`/`jsonb`, vistas homónimas de `operaciones`, `movimientos_stock`, `productos`, `ubicaciones` y `perfiles`, funciones `btrim`/`encode` y operador `=`. Cubre:
+  - las 3 RPC y el ingreso del encargado, con 0 ejecuciones;
+  - huellas v1 contra el literal canónico y replay idempotente;
+  - saldos exactos;
+  - rechazos: rol, identidad, conflicto de huella, motivo, stock insuficiente, producto inactivo y origen no válido;
+  - otra empresa (producto y ubicación), con huella de B intacta y sin operaciones residuales;
+  - control negativo P6;
+  - P7, cuyo detector excluye también los casts a palabras clave como `::bigint`;
+  - P8.
+- **`supabase/tests/pg_temp_stock_posterior.test.sql` (7 aserciones):** los objetos hostiles se crean después de una ronda legítima. Incluye el control con `mover_a_cuarentena` y su recompilación.
+- **Observación de A2:** se corrige el texto de una aserción de `pg_temp_catalogos.test.sql` («30 llamadas» → «25»). Sólo cambia la descripción, no la lógica.
+
+### Cómo se verificó (04/11/2026; laboratorio `pgtempa1-lab`, PostgreSQL 17, CLI 2.120.0)
+Evidencia en `../evidencia-pg-temp-a3/`:
+- **Sonda de las 3 RPC** por sus fachadas (`authenticated`, dominios antes de la primera llamada): sin A3, **76** ejecuciones como `propietario_rpc`; con A3, **0**, con los mismos movimientos, replay y huellas (`01_…`, `08_…`).
+- **Casos hostiles de la migración** (`02_…`):
+  - objetos hostiles en `public`/`pg_temp` con 4 `search_path`: 0 ejecuciones;
+  - abortan sin cambios: 18 desviaciones (ACL, `SECURITY`, `search_path`, volatilidad, comentario, cuerpo, sobrecarga, homónimo, A1 ausente, `check_function_bodies = off`, `CREATE` previo, `INHERIT`, owner, `REPLICATION`, miembro extra, `propietario_rpc` miembro de otro rol y ejecutores con `SET ROLE`) y la sesión `supabase_admin`;
+  - reaplicación: aborta.
+- **Sensibilidad** (`03_…`, `04_…`):
+  - sin A3 fallan 5/23 y 1/7;
+  - una sola referencia sin calificar (de 43), sea el cast de la huella o el de la clave del lock, se detecta estática y dinámicamente.
+- **`supabase db reset`:** aplica las 15 migraciones (`05_…`).
+- **`supabase test db`:** `Files=19, Tests=1173, Result: PASS`. Incluye las suites existentes de Stock y de aislamiento `REPEATABLE READ`/`SERIALIZABLE` sin cambios (`06_…`).
+- **`supabase db lint --level warning`:** sin errores (`07_…`).
+- **`apps/web/`:**
+  - `typecheck`, `lint`, `test` y `build`: exit 0; Vitest `31 files, 1168 tests passed` (`09_…`);
+  - `npx playwright test` contra el laboratorio: `96 passed` (`10_…`).
+
+### Riesgos pendientes
+- **No cierra la vulnerabilidad global (ALTA):** queda B1 (`abrir_jornada` 19 y `reasignar_vendedor` 24 referencias, sobre el apilado de jornadas). B1 necesita el merge auditado de `main` con A1–A3 en el apilado y depende de E-SL1.
+- **Orden de versiones en remoto:** sigue pendiente de decisión humana.
+- **Pendientes heredados de A2:** triage separado de los avisos de `npm ci`; documentar por entorno la topología de roles exigida.
+
+---
 ## 04/11/2026 — A2: endurecimiento pg_temp de las RPC de catálogos y de los auxiliares `exigir_*` (sin commit; NO cierra la vulnerabilidad global)
 
 **Rama:** `fix/pg-temp-catalogos`, desde `b71beb0236d3c0762e0242c7aebd73271d53c3bd` (A1). Segundo paso (A2) del plan de remediación pg_temp, alternativa A. Toca superficies sensibles (`SECURITY DEFINER`/`INVOKER`, RLS, `empresa_id`, Supabase): **corresponde auditoría independiente** antes de cerrar. Validación sólo local; prohibido aplicar en producción.

@@ -545,7 +545,7 @@ select is(
   'P4: las filas de la empresa B no cambiaron');
 
 select is((select valor from resultados where caso = 'medida_p3'), '0/0',
-  'P1/P3/P4: 0 ejecuciones del código temporal como propietario_rpc y 0 como authenticated en las 30 llamadas');
+  'P1/P3/P4: 0 ejecuciones del código temporal como propietario_rpc y 0 como authenticated en las 25 llamadas');
 
 select ok(pg_temp.ejecuciones_secuencia('pg_temp.control_mutante') = 1,
   'P6: los cuerpos reintroducidos son exactamente los anteriores a A2 (SHA-256)');
