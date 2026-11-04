@@ -1,4 +1,72 @@
 ---
+## 04/11/2026 — B1: endurecimiento pg_temp de las RPC de jornadas sobre la guarda GET/HEAD (sin commit)
+
+**Rama:** `fix/pg-temp-jornadas`. Historia local, sin rebase ni merge a `main`:
+- `a7b9f90`: merge local de `fix/pg-temp-stock` (A1 `b71beb0`, A2 `52b9d87`, A3 `dbd96da`) sobre T3 `90672be`;
+- `fe558f2` en `fix/jornadas-rpc-solo-lectura`: commit local autorizado de la corrección GET/HEAD (árbol `d93b6f5b`). Migración, pgTAP, spec HTTP y configuración de Playwright son idénticos al árbol revisado `5f9dddd3`; sólo se agregó el registro de la aprobación de E-SL1;
+- `01cbd6b`: merge local autorizado de `fe558f2` (padres `a7b9f90` y `fe558f2`, árbol `81ff4270`).
+
+Cuarto paso (B1) del plan de remediación pg_temp, alternativa A. Toca superficies sensibles (`SECURITY DEFINER`, jornadas, idempotencia, concurrencia, RLS, `empresa_id`): **corresponde revisión de seguridad y auditoría independiente**, que el usuario ejecutará manualmente (procedimiento del 04/11/2026). Validación sólo local; prohibido aplicar en producción.
+
+**Decisiones humanas (04/11/2026):**
+- **E-SL1 aprobada para validación controlada** (ADR-001 §18.4.16), con el texto presentado y sin cambios. Su punto 4 rige para `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida`. ADR-009 sigue PROPUESTA — NO APROBADA.
+- **Alternativa B:** B1 se construye sobre los cuerpos con la guarda (`f6f88764…`, `381e59c4…`). La alternativa A (guarda posterior a B1) llevaba al mismo cuerpo final, pero obligaba a reemplazar la migración GET/HEAD ya revisada.
+- Se autorizaron el commit GET/HEAD, el merge local y las modificaciones mecánicas de B1 y de sus pruebas.
+
+**B1 v1** (sobre los cuerpos sin guarda; árbol precommit `0ccf9cb7`) queda reemplazada. Se conserva completa en `../evidencia-pg-temp-b1/b1-v1/` (con SHA-256) y en el `stash` «B1 v1 (árbol 0ccf9cb7)…» de esta rama.
+
+**Desviación de proceso (registrada por indicación del usuario):** el commit A3 `dbd96da` y el merge `a7b9f90` se crearon sin una autorización específica de commit. Se conservan sin reescribir. Detalle en `../evidencia-pg-temp-b1/13_desviacion_de_proceso.txt`.
+
+**Estado de la pista A.** Las entradas de A1, A2 y A3, más abajo, dicen «sin commit» porque se redactaron antes de autorizarlo; no se modifican. Quedaron como A1 `b71beb0`, A2 `52b9d87` y A3 `dbd96da`. Auditoría de A3: **OpenCode FAVORABLE** (dictamen válido); **Codex PENDIENTE** (los intentos 1 y 2 no emitieron dictamen por límite de uso; el 3 se canceló por decisión del usuario). **A3 no tiene dos auditorías favorables.**
+
+### Qué se hizo
+- **Migración `20261105130000_pg_temp_jornadas.sql` (v2):** 43 calificaciones (`uuid`/`text`/`date` → `pg_catalog.*`):
+  - `abrir_jornada`: 19 = 10 declaraciones + 2 literales tipados `date '…'` + 2 casts de la huella v1 + 4 de las claves de lock + 1 cast `::date` del día operativo;
+  - `reasignar_vendedor`: 24 = 12 declaraciones + 2 casts de la huella + 10 de las claves de lock.
+  - Cuerpos: `f6f88764…` → `7e2f2d07…` y `381e59c4…` → `6593c5e2…`. Son idénticos a aplicar la guarda sobre B1 v1, verificado.
+  - Las huellas v1 y las claves de lock no cambian. La guarda de E-SL1 se conserva byte a byte como paso 0.
+- **Patrón de A1–A3, más la guarda:**
+  - manifiesto exacto de 4 funciones de `privado`;
+  - SHA-256 de las fachadas `public`;
+  - homónimos;
+  - exige A1, A1-B01 y A1-B02;
+  - equivalencia mecánica (revierte sólo `pg_catalog.uuid`/`text`/`date`; calificaciones previas: 8 y 12, incluida la de la guarda);
+  - **la guarda debe figurar una sola vez, antes de la identidad, en los cuerpos nuevos y en los instalados**;
+  - `CREATE` transitorio y `SET LOCAL ROLE propietario_rpc`;
+  - verificación posterior de `pg_proc` salvo `prosrc`, dependencias, ACL de `privado`, `SECURITY DEFINER` y P11.
+  - Se genera con `scripts/generar_migracion.py` y `scripts/adaptar_plantilla.py` desde la plantilla de A3.
+- **`supabase/tests/pg_temp_jornadas.test.sql` (25 aserciones).** Lo de v1 (P8, P7 global con literales tipados, P2/P4/P5, empresa B intacta, 0 ejecuciones en 17 llamadas, control P6 con el cuerpo `f6f88764…`) más 3 casos de E-SL1 con los objetos hostiles presentes:
+  - en sólo lectura, la clave nueva, el replay, otra huella y el replay de reasignación responden `25006 jornada_metodo_no_permitido`, con 0 ejecuciones;
+  - la guarda sigue siendo la primera sentencia;
+  - el rechazo no reserva la clave.
+- **`supabase/tests/pg_temp_jornadas_posterior.test.sql` (7 aserciones):** sin cambios respecto de v1.
+- **`supabase/tests/jornadas_solo_lectura.test.sql`:** sólo cambian los dos SHA-256 esperados del cuerpo instalado (`7e2f2d07…`, `6593c5e2…`) y su descripción. Las otras 72 aserciones no cambian.
+
+### Cómo se verificó (04/11/2026; laboratorio `pgtempa1-lab`, PostgreSQL 17, CLI 2.120.0)
+Evidencia en `../evidencia-pg-temp-b1/v2/`; los scripts están en `../evidencia-pg-temp-b1/scripts/`.
+- **Base sin B1** (`00_…`, `01_…`): GET/HEAD → A1–A3 aplican en orden; `test db`: `Files=26, Tests=1775, PASS`. Inventario: 19 y 24 referencias.
+- **Casos hostiles de la migración** (`02_…`):
+  - 0 ejecuciones con 4 `search_path`;
+  - abortan sin cambios 22 desviaciones (incluidas **`abrir_jornada` sin la guarda** y **`reasignar_vendedor` con una guarda adicional**) y la sesión `supabase_admin`;
+  - la reaplicación aborta.
+- **Sensibilidad** (`03_…`): sin B1 fallan 6/25 y 1/7, con 431 ejecuciones como `propietario_rpc` en las 17 llamadas. **Hallazgo:** en sólo lectura la guarda responde `25006`, pero sin B1 igual hubo **42 ejecuciones** del código hostil, porque las declaraciones se resuelven al compilar, antes del paso 0. Con B1, 0.
+- **Mutantes** (`04_…`): el cast de la huella, el de la clave de lock y un literal `date '…'` se detectan en P8, P7 y la medición dinámica. **Sin la guarda** fallan 7/25 de B1 y 14/74 de `jornadas_solo_lectura` (el cuerpo sin guarda coincide con el de B1 v1, `6c937b4f…`).
+- **Regresión:**
+  - `supabase db reset` (`05_…`): 20 migraciones, exit 0;
+  - `supabase test db` (`06_…`): `Files=28, Tests=1807, Result: PASS`, exit 0;
+  - `supabase db lint --level warning` (`07_…`): sin errores, exit 0.
+- **Arnés de concurrencia T3** sin modificar (`08_…`): clúster PostgreSQL 17.11 efímero con las 20 migraciones (GET/HEAD y B1 incluidas); `428 verificaciones, 0 fallas`, deadlocks sólo en AUTO (20/20), sin residuos ni fallos instrumentales, exit 0.
+- **`apps/web/`** (`09_…`, `10_…`):
+  - `typecheck`, `lint`, `test` (`31 files, 1168 tests`) y `build`: exit 0;
+  - `npx playwright test` contra el laboratorio, incluido `jornadas-rpc-http.spec.ts` (GET/HEAD/POST contra PostgREST real, con `E2E_SUPABASE_SECRET_KEY` del stack local sólo en el entorno de la corrida): `104 passed`, exit 0.
+- **Corrección:** la evidencia de B1 v1 (`../evidencia-pg-temp-b1/05_…`) aplicó 19 migraciones, no 20 como decía el borrador de v1, que no llegó a commitearse.
+
+### Riesgos pendientes
+- **Vulnerabilidad global pg_temp (ALTA): no se declara cerrada.** Con A1–A3 y B1, P7 no encuentra referencias en ninguna función de `privado` ni `SECURITY DEFINER` de `public`. El cierre requiere revisión de seguridad, auditoría independiente sobre hashes concretos (incluida la de Codex de A3), aprobación humana e integración en `main`.
+- **Orden de versiones en remoto:** GET/HEAD (`20261104…`) y A1–A3/B1 (`20261105…`) quedan después del apilado. Si la pista A llega a un entorno remoto antes, habrá que aplicar fuera de orden. Es una decisión humana.
+- **Pendientes heredados:** triage de los 15 avisos de `npm ci`; texto «22 llamadas» de `pg_temp_stock.test.sql` (A3, sin tocar).
+
+---
 ## 04/11/2026 — A3: endurecimiento pg_temp de las RPC de Stock (sin commit; NO cierra la vulnerabilidad global)
 
 **Rama:** `fix/pg-temp-stock`, desde `52b9d87dde11c7e20f98a42ccc426722b5b98dfb` (A2). Tercer paso (A3) del plan de remediación pg_temp, alternativa A. Toca superficies sensibles (`SECURITY DEFINER`, `movimientos_stock`, idempotencia, concurrencia, RLS, `empresa_id`): **corresponde auditoría independiente** antes de cerrar. Validación sólo local; prohibido aplicar en producción.

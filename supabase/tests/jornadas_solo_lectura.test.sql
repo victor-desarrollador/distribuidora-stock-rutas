@@ -170,13 +170,13 @@ grant select, insert on res to public;
 select is(
   (select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') from pg_proc p
     where p.oid = 'privado.abrir_jornada(uuid, uuid, date, uuid)'::regprocedure),
-  'f6f88764d337df49f2d05fdb8deaafd6a5be9e13500c38caf8be31b143faea07',
-  'privado.abrir_jornada: el cuerpo instalado es el de la migración correctiva');
+  '7e2f2d07ffe75a90af6fba379c32d874ca3d229daa7c841f300aef5f467c5440',
+  'privado.abrir_jornada: el cuerpo instalado es el de la migración correctiva con las calificaciones pg_temp de B1 (20261105130000)');
 select is(
   (select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') from pg_proc p
     where p.oid = 'privado.reasignar_vendedor(uuid, uuid, uuid)'::regprocedure),
-  '381e59c479faad5e5e7829311da859640adbdab702054582cf1d198ce9e58943',
-  'privado.reasignar_vendedor: el cuerpo instalado es el de la migración correctiva');
+  '6593c5e2e1ed10d47ca1d880eee3e53ff9809596987d5f33f8beedef6ba618dd',
+  'privado.reasignar_vendedor: el cuerpo instalado es el de la migración correctiva con las calificaciones pg_temp de B1 (20261105130000)');
 select ok(
   (select strpos(p.prosrc, E'\nbegin\n  -- Paso 0') > 0
       and strpos(p.prosrc, 'transaction_read_only') < strpos(p.prosrc, 'transaction_isolation')
