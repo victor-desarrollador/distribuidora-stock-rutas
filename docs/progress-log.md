@@ -1,4 +1,54 @@
 ---
+## 04/11/2026 — A1: endurecimiento pg_temp de `privado.usuario_actual()` (sin commit; NO cierra la vulnerabilidad global)
+
+**Rama:** `fix/pg-temp-rpc-main`, desde `origin/main` = `fc906cc1ffcdd0c99dd2d65f5d04f2f3f352617d`. Primer paso (A1) del plan de remediación pg_temp, alternativa A (hallazgo ALTO heredado de las RPC `SECURITY DEFINER`; ronda 4 de Codex y OpenCode). Toca superficies sensibles (`SECURITY DEFINER`/`INVOKER`, RLS, `empresa_id`, Supabase): **corresponde security review** antes de cerrar la tarea. Validación sólo local; prohibido aplicar en producción.
+
+### Qué se hizo
+- **Migración `20261105120000_pg_temp_auxiliar_usuario_actual.sql`:** en el cuerpo de `privado.usuario_actual()` cambian únicamente dos casts: `::jsonb` pasa a `::pg_catalog.jsonb` y `::uuid` a `::pg_catalog.uuid`. Con `search_path = ''`, PostgreSQL busca `pg_temp` antes que `pg_catalog` para tipos y relaciones sin calificar. Por eso un dominio temporal `uuid`/`jsonb` creado por `authenticated` ejecutaba código propio como `propietario_rpc` en cada RPC y en cada política RLS de `propietario_rpc`.
+  - **Patrón de la migración** (el de la corrección GET/HEAD): un único bloque `DO` con el `search_path` controlado `pg_catalog, pg_temp`, restaurado al final. El cuerpo nuevo está escrito explícitamente.
+  - **Precondiciones fail-closed:**
+    - ejecutor `postgres`, P3 y O-3;
+    - sin `CREATE` previo ni sobrecargas;
+    - manifiesto exacto de `usuario_actual` y `empresa_gestion_actual` (SHA-256 `6c5f9459…` y `6d0a758d…`);
+    - cuerpo previo sin `pg_catalog.`.
+  - **Verificación del cuerpo nuevo:** SHA-256 `2ab0212d…`; quitando `pg_catalog.` se obtiene el cuerpo anterior byte a byte; exactamente 2 calificaciones.
+  - **Instalación:** `GRANT CREATE` transitorio, `SET LOCAL ROLE propietario_rpc`, `CREATE OR REPLACE`, y después `RESET ROLE` y `REVOKE`.
+  - **Verificación posterior:** `pg_proc` idéntico salvo `prosrc` (mismo oid, owner, ACL, `SECURITY INVOKER`, `STABLE`, `search_path = ''`), `empresa_gestion_actual` sin cambios, mismas dependencias de políticas (`pg_depend`), ACL de `privado` sin `CREATE` residual, misma lista de `SECURITY DEFINER` y P11.
+- **`supabase/tests/pg_temp_rpc_privilegiadas.test.sql` (42 aserciones).** Los dominios hostiles `pg_temp.uuid`/`pg_temp.jsonb` de `authenticated` se crean antes de la primera llamada; dos secuencias temporales cuentan las ejecuciones (privilegiada y llamador). Cubre:
+  - **P1:** dominios hostiles creados.
+  - **P3:** rutas positivas como `propietario_rpc` que atraviesan los casts (claim JSON, claim `sub` heredado, sin `sub`, `empresa_gestion_actual`, la vista privada y RLS de productos), con 0 ejecuciones.
+  - **P4:** aislamiento por `empresa_id` (claims de A con IDs de B, claims de B, vendedor sin gestión, huella md5 de B).
+  - **P6:** control del detector. En un savepoint se reintroduce el cuerpo anterior byte a byte y la llamada directa y la ruta RLS **sí** ejecutan el código temporal. Tras revertir, el resultado vuelve a 0.
+  - **P7:** guardia estática léxica sobre los dos auxiliares, con controles M1/M2.
+  - **P8:** manifiesto, cuerpo exacto, equivalencia mecánica, ACL/P11, sin `CREATE` residual, sin sobrecargas, `SECURITY DEFINER` sólo en `privado` y de `propietario_rpc`, y políticas dependientes del oid vigente.
+- **`supabase/tests/pg_temp_rpc_privilegiadas_posterior.test.sql` (10 aserciones):** los dominios se crean **después** de una llamada legítima. Resultados idénticos con 0 ejecuciones, aislamiento con claims de B, y el control del detector también en este orden.
+- **ADR-001 §17.1:** nota aclaratoria marcada **PROPUESTA — pendiente de aprobación humana**: «todo objeto» incluye tipos y casts. No cambia ninguna regla ni el estado de la ADR.
+
+### Cómo se verificó (04/11/2026; laboratorio descartable `pgtempa1-lab`, puertos 573xx, PostgreSQL 17, CLI 2.120.0)
+Evidencia en `../evidencia-pg-temp-a1/`:
+- **Línea base sin A1:** la sonda registra **22** ejecuciones privilegiadas (`01_linea_base_fc906cc.txt`). Con A1, **0**, con los mismos resultados funcionales (`02_…`, `09_…`).
+- **Casos hostiles de la migración** (`03_…`):
+  - con objetos hostiles en `public` y `pg_temp` (dominios, funciones homónimas y tabla `pg_temp.pg_proc`) y los `search_path` `public, pg_catalog`, el de sesión, `pg_temp, public, pg_catalog` y `public`: 0 ejecuciones y `search_path` restaurado;
+  - owner, ACL, `SECURITY DEFINER`, `search_path`, volatilidad, comentario, cuerpo, sobrecarga, homónimo en `public`, cambios en `empresa_gestion_actual`, `CREATE` previo, `INHERIT`, ejecutor con `SET ROLE` y sesión `supabase_admin`: aborta sin cambios;
+  - reaplicación: aborta.
+- **Sensibilidad** (`04_…`, `05_…`):
+  - sin A1 fallan 11/42 y 3/10, incluidas todas las aserciones dinámicas;
+  - los mutantes parciales (un solo cast calificado) también se detectan.
+- **`supabase db reset`:** aplica las 13 migraciones (`06_…`).
+- **`supabase test db`:** `Files=15, Tests=1111, Result: PASS` (`07_…`).
+- **`supabase db lint --level warning`:** sin errores (`08_…`).
+- **`apps/web/`:**
+  - `typecheck`, `lint`, `test` y `build`: exit 0; Vitest `31 files, 1168 tests passed` (`10_…`);
+  - `npx playwright test` contra el laboratorio: `96 passed` (`11_…`).
+
+### Riesgos pendientes
+- **No cierra la vulnerabilidad:** las 15 RPC `SECURITY DEFINER` y los auxiliares `exigir_*` conservan referencias propias sin calificar. Quedan pendientes A2 (catálogos), A3 (Stock) y B1 (jornadas, sobre el apilado).
+- **P7:** la guardia estática cubre sólo los dos auxiliares. A2, A3 y B1 deben extenderla, y P2 (llamadas positivas a las RPC) queda para ellas.
+- **Orden de versiones en entornos remotos:** `20261105120000` es posterior a todo `main` y al apilado de jornadas (`20261030`–`20261104`). En local no hay conflicto, y ninguna migración del apilado fija el cuerpo de `usuario_actual` (D-1 sólo fija `empresa_gestion_actual`, que no cambia). En remoto, aplicar A1 antes del apilado exigiría aplicar el apilado fuera de orden. Es una decisión humana; no hay aplicación remota autorizada.
+- **Pendiente de una tarea autorizada:** el incidente `docs/incidents/2026-11-03-pg-temp-security-definer.md` previsto por el plan, y la corrección documental de `progress-log` del apilado.
+- E-SL1 y ADR-009 siguen PROPUESTA — NO APROBADA. No se tocó A5-2.
+
+---
 ## 30/10/2026 — Incidente de Vercel Production: verificación posterior al merge del PR #35 y resolución (documental, sin commit)
 
 **Rama:** `docs/vercel-incidente-post-merge`, desde `origin/main` = `03d41db9268b8ea9f666ea1444f123960a66fa45`. Tarea **sólo documental**: actualiza `docs/incidents/2026-10-30-vercel-production-automatico.md`, `docs/incidents/README.md` y esta bitácora. Sin cambios de código, SQL, migraciones, RPC, RLS ni grants. Claude Code no modificó Vercel, GitHub ni Supabase, ni hizo pushes o deployments de prueba. No incluye D-1.

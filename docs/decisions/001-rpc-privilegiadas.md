@@ -391,6 +391,7 @@ Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabas
 Está documentado y **no es una incógnita del entorno**. Se prueba para detectar errores de implementación; puede probarse **localmente**.
 
 - `SET search_path = ''`: con search path vacío todo objeto debe estar calificado con su esquema (PostgreSQL *CREATE FUNCTION*; Supabase lint 0011). Se prueba que cada función lo tenga fijado y que funcione con nombres calificados.
+  - **Nota aclaratoria (PROPUESTA — pendiente de aprobación humana; 04/11/2026, plan de remediación pg_temp, A1).** No modifica la regla ni el estado de esta ADR; sólo precisa su alcance. «Todo objeto» incluye los **tipos** (declaraciones, firmas, `%TYPE`, `CAST(... AS tipo)` y casts `::tipo`) y las **relaciones**, no sólo las funciones. Con `search_path = ''`, PostgreSQL busca `pg_temp` **antes** que `pg_catalog` para tipos y relaciones sin calificar; no lo hace para funciones ni operadores. Por eso se escribe, por ejemplo, `::pg_catalog.uuid`. La prueba correspondiente crea objetos temporales hostiles y verifica que no se ejecuten como el owner técnico (`supabase/tests/pg_temp_rpc_privilegiadas*.test.sql`).
 - `EXECUTE` a `PUBLIC` por defecto en funciones nuevas, y su revocación efectiva.
 - Que un `REVOKE` de privilegios por defecto hecho por esquema no elimina un grant global (sección 12.6).
 - Que el propietario de una tabla elude RLS salvo `FORCE`, y que `BYPASSRLS` o superusuario la eluden siempre.
