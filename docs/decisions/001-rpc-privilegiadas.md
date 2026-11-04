@@ -1,8 +1,8 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 29/10/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 04/11/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15; enmienda E-SL1 en 18.4.16, **aprobada para validación controlada el 04/11/2026**)
 
 > **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; el 23/10/2026, P2, P3 y P4 (§18); y el 24/10/2026, P11 global y las observaciones O-3 y O-4, para validación controlada (§18.2). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P10 y P12–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P10 ni P12–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
@@ -30,6 +30,8 @@
 | v1.5 + anexo §18.4 (candidato) | Claude Code | Incorpora §18.4 v0.4 (contrato técnico de las seis RPC de ADR-007) con la fe de erratas E1–E3, como **PROPUESTA TÉCNICA NO APROBADA**. No aprueba el anexo, no cambia el estado de la ADR, no modifica ADR-007, no autoriza SQL ni producción; D-1, D-2, arnés, CI y security review siguen pendientes. |
 | v1.5 + anexo §18.4 (aprobado) | Claude Code | Registra la decisión humana del 29/10/2026: aprueba, **para validación controlada local/staging y acotado a jornadas y carga de camiones**, el contenido de §18.4 auditado por Codex en `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (SHA-256 `0170ab56afff633457dc4547ec46ef6a1ada007ec904a7a33cffdb4f0f9763dd`). Resuelve P10 y P12–P17 sólo para las seis RPC de ADR-007 y D-N1. No aprueba P8 ni P9, otros dominios, decisiones globales ni producción; el estado de la ADR no cambia. Registra la excepción aceptada a `AGENTS.md` §2.2 (OpenCode no auditó) y los ciclos que superaron `AGENTS.md` §2.3.5. Sólo cambian rótulos, referencias y trazabilidad; el contrato técnico no se modifica. |
 | v1.5 + anexo §18.4 (cierre D-2) | Claude Code | Registra el cierre de D-2 (18.4.15): commit auditado `e826d308aab9a0b108ece17128c5c3448d7729ae`, PASS de Codex y de OpenCode, aceptación humana de esos informes como security review sólo para D-2, merge del PR #33 (`4654a95fb478c7b118dca4f67368ccd6a9b331b7`), CI en verde y el despliegue automático de Vercel a Production. Registra las aclaraciones C-1 y C-2 sobre el texto de 18.4.2.1 sin editarlo, y C-3 y C-4. No modifica 18.4.1 a 18.4.12, no cambia el estado de la ADR, no autoriza D-1, el arnés, las seis RPC ni producción. |
+| v1.5 + anexo §18.4 (E-SL1 propuesta) | Claude Code | Agrega 18.4.16: enmienda E-SL1 (paso 0 de rechazo de transacciones de sólo lectura en `abrir_jornada` y `reasignar_vendedor`, código `25006 jornada_metodo_no_permitido`), como **PROPUESTA TÉCNICA NO APROBADA**, con la dirección técnica humana del 03/11/2026 registrada sin aprobarla. No modifica 18.4.1 a 18.4.15 ni el estado de la ADR; no autoriza producción. |
+| v1.5 + anexo §18.4 (E-SL1 aprobada) | Claude Code | Registra la decisión humana del 04/11/2026: E-SL1 (18.4.16) queda **APROBADA PARA VALIDACIÓN CONTROLADA**, con el texto presentado y sin cambios, como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006 jornada_metodo_no_permitido`) y §16 T14. El punto 4 de la dirección técnica rige para `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida` en sus tareas autorizadas. No modifica 18.4.1 a 18.4.15, no cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. |
 
 ---
 
@@ -1234,6 +1236,42 @@ Este apartado es sólo trazabilidad. No forma parte del contrato técnico de 18.
 **Despliegue a Production de Vercel.** El push del merge a `main` disparó un despliegue automático de Vercel en el entorno **Production** (GitHub deployment `7428037655`, creado por `vercel[bot]` el 30/10/2026 01:03:06 UTC; estado `success`). **No hubo una autorización humana de deploy** (`AGENTS.md` §2.2.1 y §2.3.8). Hechos verificados en el repositorio: el merge no modifica `apps/web/`, y `apps/web/vercel.json` sólo declara un `rewrite` al `index.html` y no ejecuta migraciones. No hay evidencia de que la migración de D-2 se haya aplicado en el Supabase remoto, pero tampoco se verificó su estado. La forma de impedir que se repita queda pendiente de decisión humana. Registro: `docs/incidents/2026-10-30-vercel-production-automatico.md` (abierto).
 
 **Pendiente después del cierre:** D-1, la tabla `jornadas`, las seis RPC (con P11/P12 de D-2), el arnés y su integración en CI, el corte de jornada y el control del despliegue automático a Production. Producción sigue bloqueada para ADR-001 (§15 y §19).
+
+#### 18.4.16 Enmienda E-SL1 — rechazo de transacciones de sólo lectura antes del replay (APROBADA PARA VALIDACIÓN CONTROLADA, 04/11/2026)
+
+**Estado: APROBADA PARA VALIDACIÓN CONTROLADA (decisión humana del 04/11/2026).** Propuesta el 03/11/2026 como PROPUESTA TÉCNICA NO APROBADA, redactada por Claude Code dentro de la corrección extraordinaria T1/T2 autorizada por el usuario; el usuario la aprobó el 04/11/2026 con el texto de esta sección, sin cambios. Desde esa fecha, el «Texto propuesto» rige como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006`) y §16 T14, con la «Dirección técnica humana» de abajo. Esos apartados no se reescriben: se leen junto con esta enmienda, que prevalece donde los precisa. No cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. El punto 4 de la dirección técnica rige para las otras cuatro RPC de jornadas, cada una dentro de su propia tarea autorizada.
+
+**Problema.** §6 y T14 (§16) exigen que GET sobre una RPC de escritura responda 405 porque PostgREST lo ejecuta en una transacción READ ONLY. El orden de 18.4.3 hace el replay (pasos 5 y 8a) antes de cualquier escritura, y un replay sólo lee. Resultado observado con PostgREST real sobre `90672be`: GET y HEAD con una `idempotency_key` ya usada respondían **200** con el uuid guardado, y con otra huella **409**; el 405 sólo aparecía cuando la primera escritura fallaba, con el texto interno de PostgreSQL (`cannot execute INSERT in a read-only transaction` / `… SELECT FOR UPDATE …`) en `message`.
+
+**Texto propuesto.**
+
+1. **18.4.3, paso 0 (nuevo, antes del paso 1).** En `abrir_jornada` y `reasignar_vendedor`, la primera sentencia de la implementación privada es:
+   `transaction_read_only = on` → `SQLSTATE 25006`, `message = jornada_metodo_no_permitido`.
+   Precede al aislamiento (paso 1), a la identidad y el rol (paso 2), a la estructura (paso 3), a la huella y a todo replay (pasos 5 y 8a). No lee tablas ni toma bloqueos. Los pasos 1 a 12 no cambian.
+2. **18.4.7.** Se agrega a la tabla: `25006` → `jornada_metodo_no_permitido` (método HTTP no admitido / transacción de sólo lectura). Es la única excepción a la regla «SQLSTATE `PTxyz`»: PostgREST traduce `25006` a 405 (*PostgREST, Errors → SQLSTATE to HTTP status*). Los tests verifican el SQLSTATE y el código de `message`.
+3. **§16, T14 (precisión).** GET y HEAD sobre `abrir_jornada` y `reasignar_vendedor` responden 405 con clave nueva, con clave ya usada y misma huella, y con clave ya usada y otra huella, para dueño, encargado, vendedor/piloto y usuarios de otra empresa. `anon` y `service_role` siguen rechazados antes del cuerpo por falta de `EXECUTE` (`42501`; HTTP 401 y 403). Un rechazo por sólo lectura no reserva la clave: el POST posterior con esa clave se ejecuta como primera ejecución, y con una clave ya usada devuelve la respuesta original.
+
+**Consecuencias.**
+- Para un authenticated sin `sub`, sin perfil o con rol no autorizado, un GET responde 405 en lugar de 401/403: la guarda precede a la autorización. El 405 no revela datos ni el estado de la clave, porque es idéntico para todo llamador con `EXECUTE`.
+- Una llamada SQL interna en una transacción de sólo lectura (por ejemplo, `BEGIN READ ONLY`) también se rechaza, aun cuando sería un replay.
+- No cambia idempotencia, bloqueos, permisos, RLS, grants ni la huella.
+
+**Alternativas.**
+- *Sin guarda (estado anterior):* contradice T14 (200 en el replay) y expone texto interno de PostgreSQL.
+- *`PT405` en lugar de `25006`:* PostgREST traduce `PTxyz` a HTTP `xyz`, así que también daría 405 y respetaría la convención `PTxyz` de 18.4.7. Se usó `25006` porque así lo especificó la autorización de la corrección y es el SQLSTATE nativo de PostgreSQL para este caso. El usuario mantuvo `25006` (dirección técnica de abajo).
+- *Rechazar en la fachada `public`:* la fachada es SQL `SECURITY INVOKER` que sólo delega (18.4.6); la guarda en la implementación cubre también la llamada directa a `privado` y no agrega funciones.
+
+**Dirección técnica humana (03/11/2026).** El usuario fijó, como dirección para esta enmienda, que:
+1. la condición de rechazo es `transaction_read_only = on`;
+2. el SQLSTATE es `25006` (no `PT405`), con `message = jornada_metodo_no_permitido`;
+3. la guarda va antes del replay idempotente (paso 0, antes de los pasos 1 a 12);
+4. el mismo requisito rige para las futuras RPC de jornadas que tengan operaciones de escritura o replay (`corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida`, todavía no implementadas).
+
+Esta dirección, por sí sola, no aprobaba E-SL1 ni modificaba 18.4.1 a 18.4.15 (texto del 03/11/2026, conservado). La aprobación llegó por la decisión humana del 04/11/2026 registrada abajo. Para las cuatro RPC futuras, el punto 4 se aplica a través de E-SL1 aprobada y de la tarea autorizada de cada RPC.
+
+**Decisión humana (04/11/2026).** E-SL1 queda **APROBADA PARA VALIDACIÓN CONTROLADA** (local/staging), conforme al texto de esta sección y a la dirección técnica anterior. No autoriza producción ni cambia el estado de ADR-001; ADR-009 sigue PROPUESTA — NO APROBADA. Con la misma decisión, el usuario eligió construir el endurecimiento pg_temp de jornadas (B1) sobre los cuerpos con esta guarda.
+
+**Implementación candidata (local, sin commit).** Rama `fix/jornadas-rpc-solo-lectura` desde `90672be`: `supabase/migrations/20261104120000_jornadas_rpc_rechazo_solo_lectura.sql`, `supabase/tests/jornadas_solo_lectura.test.sql` y `apps/web/tests/jornadas-rpc-http.spec.ts`. Evidencia en `docs/progress-log.md` (entrada del 03/11/2026).
 
 ---
 

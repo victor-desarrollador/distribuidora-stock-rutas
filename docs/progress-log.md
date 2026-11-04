@@ -161,6 +161,124 @@ Evidencia en `../evidencia-pg-temp-a1/`:
 - **Orden de versiones en entornos remotos:** `20261105120000` es posterior a todo `main` y al apilado de jornadas (`20261030`–`20261104`). En local no hay conflicto, y ninguna migración del apilado fija el cuerpo de `usuario_actual` (D-1 sólo fija `empresa_gestion_actual`, que no cambia). En remoto, aplicar A1 antes del apilado exigiría aplicar el apilado fuera de orden. Es una decisión humana; no hay aplicación remota autorizada.
 - **Pendiente de una tarea autorizada:** el incidente `docs/incidents/2026-11-03-pg-temp-security-definer.md` previsto por el plan, y la corrección documental de `progress-log` del apilado.
 - E-SL1 y ADR-009 siguen PROPUESTA — NO APROBADA. No se tocó A5-2.
+## 03/11/2026 — Corrección extraordinaria T1/T2: GET/HEAD sobre `abrir_jornada` y `reasignar_vendedor` deben responder 405 (local, sin commit; rama `fix/jornadas-rpc-solo-lectura` desde `90672be`)
+
+**Actualización (04/11/2026):** el usuario aprobó E-SL1 (ADR-001 §18.4.16) **para validación controlada**, con el texto presentado y sin cambios, y autorizó el commit local de esta corrección. Las menciones de «E-SL1 no aprobada» de esta entrada describen el estado del 03/11/2026 y no se modifican. ADR-009 sigue PROPUESTA — NO APROBADA.
+
+Intervención extraordinaria autorizada por el usuario, acotada a este defecto y sus pruebas. T3 agotó sus tres ciclos normales: no se abrió otra ronda sobre el arnés. Superficies sensibles (`AGENTS.md` §2.4): Supabase, RPC, `SECURITY DEFINER`, grants transitorios, idempotencia y concurrencia → **security review obligatoria y pendiente**.
+
+### Defecto reproducido
+
+Stack Supabase local descartable (`project_id = fixsl-lab`, puertos 553xx; PostgreSQL 17.11, PostgREST v16.4, CLI 2.120.0), sobre `90672beea1e51a216b8baf63592159981eee5217` (tree `3822f181…`):
+
+| Solicitud | Antes | Después |
+|---|---|---|
+| GET `abrir_jornada`, clave nueva | 405, `message` = «cannot execute INSERT in a read-only transaction» | 405 `25006 jornada_metodo_no_permitido` |
+| GET/HEAD `abrir_jornada`, clave usada, misma huella | **200** con el uuid guardado | 405 |
+| GET `abrir_jornada`, clave usada, otra huella | **409** `PT409` | 405 |
+| GET/HEAD `reasignar_vendedor`, clave usada | **200** con el uuid de la operación | 405 |
+| GET `reasignar_vendedor`, clave nueva | 405, «cannot execute SELECT FOR UPDATE…» | 405 `25006 jornada_metodo_no_permitido` |
+| POST nuevo / repetido | 200 / mismo uuid | sin cambios |
+
+### Causa raíz
+
+PostgREST ejecuta GET y HEAD en una transacción READ ONLY (ADR-001 §6). El orden de 18.4.3 resuelve el replay (pasos 5 y 8a) con lecturas, antes de cualquier escritura: con una clave ya usada la RPC nunca escribía y la transacción de sólo lectura terminaba bien (200) o con el `PT409` del conflicto. El 405 dependía de que la primera escritura fallara, y entonces filtraba el texto interno de PostgreSQL.
+
+### Cambio aplicado
+
+- `supabase/migrations/20261104120000_jornadas_rpc_rechazo_solo_lectura.sql` (nueva; T1, T2, D-1, D-2 y T3 sin cambios). Un único bloque `DO` (atómico con la CLI y con `psql` del arnés):
+  - precondiciones fail-closed: `postgres`, atributos de `propietario_rpc` (P3), membresía O-3 (SET sí, INHERIT no), dueño de `privado`, `propietario_rpc` sin `CREATE` previo, sin sobrecargas; **estado aprobado exacto** de las dos fachadas (SQL, `SECURITY INVOKER`, owner `postgres`, `VOLATILE`, `search_path=""`, ACL exacta, retorno `uuid`) y de las dos implementaciones (plpgsql, `SECURITY DEFINER`, owner `propietario_rpc`, `VOLATILE`, `search_path=""`, ACL exacta), más un **manifiesto** fijo de las cuatro funciones (todos los atributos de `pg_proc` relevantes, comentario y SHA-256 de cada cuerpo) (H-02 de la security review);
+  - cuerpo nuevo = cuerpo vigente + guarda insertada tras la línea `begin` (SHA-256 esperado fijo); `GRANT CREATE` transitorio, `SET LOCAL ROLE propietario_rpc`, `CREATE OR REPLACE` de las dos implementaciones, `RESET ROLE`, `REVOKE CREATE`;
+  - verificación: quitando la guarda se obtiene el cuerpo anterior byte a byte; el resto de `pg_proc` (incluido el oid) y las fachadas son idénticos; el manifiesto resultante es el esperado (sólo cambian los dos SHA-256 privados); el ACL de `privado` y la lista de `SECURITY DEFINER` son idénticos; sin `CREATE` residual; P11 intacto;
+  - resolución de nombres controlada (H-4 precommit y H-01 de la security review): el `DECLARE` no tiene inicializadores y sus tipos están calificados con `pg_catalog`; la primera sentencia fija `search_path = 'pg_catalog, pg_temp'` (`pg_temp` explícito y al final) con `pg_catalog.set_config(…, true)` y la última lo restaura; todo tipo, cast, función y relación está calificado, también en el DDL dinámico.
+- Guarda (paso 0, antes del paso 1): `transaction_read_only = on` → `SQLSTATE 25006`, `message jornada_metodo_no_permitido` (PostgREST → 405).
+- `supabase/tests/jornadas_solo_lectura.test.sql` (74 aserciones) y `apps/web/tests/jornadas-rpc-http.spec.ts` (8 pruebas contra PostgREST real; cada corrida de Playwright suma además `auth.setup`, que no es un caso del spec).
+- `apps/web/playwright.config.ts`: comentario sobre `E2E_SUPABASE_SECRET_KEY` (H-5); no cambia la configuración.
+- H-03 de la security review: el spec HTTP desactiva trace, screenshot y video a nivel de archivo (`test.use`; son opciones por worker y no se pueden fijar en un `describe`), y la prueba de `service_role` envía la clave secreta sólo por el `fetch` nativo de Node, que Playwright no registra. La política global de `playwright.config.ts` no cambia.
+- `docs/decisions/001-rpc-privilegiadas.md`: §18.4.16, enmienda **E-SL1, PROPUESTA TÉCNICA NO APROBADA**, con la dirección técnica humana del 03/11/2026, y una fila de historial. El estado de ADR-001 no cambia.
+- ADR-009 v0.2 existe fuera del repositorio, en `~/Documentos/ADR-009-PROPUESTA-v0.2.md`, y continúa **PROPUESTA — NO APROBADA**. La corrección es compatible con su propuesta (migración correctiva hacia adelante, atómica, con pgTAP que falla antes y pasa después); no se agrega rollback manual. Los rollbacks experimentales de T1/T2 (`supabase/rollback/`) verifican el SHA-256 del cuerpo anterior y, después de esta migración, abortan fail-closed.
+
+### Ronda 1 — pruebas sobre el árbol `6d244deae43881aff8908c57201fab3b9cfd6162` (SUPERADA por la ronda 2; no vale para el árbol final)
+
+Laboratorio `fixsl-lab`; Node 24.20.0, npm 11.19.0, Playwright 1.64.0. Evidencia: `../evidencia-fix-jornadas-solo-lectura/` (raíz).
+
+| Comando | Resultado |
+|---|---|
+| `supabase db reset` | exit 0 (16 migraciones + seed) |
+| `supabase test db` | exit 0; 20 archivos, 1661 pruebas, PASS (incluye las 74 nuevas) |
+| `supabase db lint --level warning` | exit 0; «No schema errors found» |
+| `npm run typecheck` / `npm run lint` / `npm run build` | exit 0 / exit 0 / exit 0 |
+| `npm test` (Vitest) | exit 0; 31 archivos, 1168 pruebas |
+| `npx playwright test` (completo) | exit 0; 104 passed |
+| `npx playwright test tests/jornadas-rpc-http.spec.ts` × 3 | exit 0; 9 passed en cada corrida = 8 casos del spec + `auth.setup` |
+| `supabase/tests/concurrencia/arnes.sh` (PG 17.11, R = 10) | exit 0; 428 verificaciones, 0 fallas; deadlocks sólo AUTO (20); residuos 0; fallos instrumentales 0 |
+
+Sensibilidad: con los cuerpos T1/T2 restaurados (transacción revertida) fallan 28 de las 74 aserciones pgTAP nuevas, y con la base del laboratorio sin guarda **6 de los 8 casos del spec HTTP detectan la ausencia de la guarda**; los otros 2 («Content-Profile/Accept-Profile privado» y «service_role») no dependen de ella y pasan, igual que `auth.setup` (Playwright informó «6 failed, 3 passed»). La migración aborta sin cambios al reaplicarse, con `CREATE` preexistente, con un cuerpo alterado y con una ACL alterada; aplica en el control positivo. Evidencia, logs y scripts (sin tokens ni claves): `../evidencia-fix-jornadas-solo-lectura/`.
+
+### Ronda 2 — correcciones precommit H-1 a H-5 y pruebas sobre el árbol `e44375f48cdb5298ecf66e27b5cedbfcc9ee4e6a` (SUPERADA por la ronda 3; no vale para el árbol final)
+
+Autorizadas por el usuario: H-1 (ADR-009 v0.2 existe), H-2 (conteos HTTP), H-3 (dirección técnica en E-SL1, que sigue PROPUESTA TÉCNICA NO APROBADA), H-4 (`search_path` controlado en la migración) y H-5 (comentario de `E2E_SUPABASE_SECRET_KEY` en `playwright.config.ts`). Los cuerpos de las dos RPC no cambian (SHA-256 `f6f88764…` y `381e59c4…`, iguales a la ronda 1); sí cambia la migración (SHA-256 `dd211d9293b4c752afab6689557a90799e51731d238400194851198110aef94b`). Evidencia: `../evidencia-fix-jornadas-solo-lectura/ronda2-h1-h5/`.
+
+| Comando | Resultado |
+|---|---|
+| H-4, control con la migración de la ronda 1 (SHA-256 `3d176d77…`) y `public.format(text, text, text)` hostil | ERROR fail-closed «el cuerpo instalado no es el anterior más la guarda»: el DDL dinámico fue sustituido |
+| H-4, migración final con las mismas sobrecargas hostiles, con el `search_path` de sesión normal y con `public, pg_catalog` | `DO` aplicado; cuerpos esperados; sin `CREATE` residual; `search_path` de la sesión restaurado dentro de la transacción |
+| Casos negativos de la migración final (reaplicar, `CREATE` preexistente, ACL alterada, ejecutor `supabase_admin`) y control positivo | abortan sin cambios / aplica |
+| `supabase db reset` con una sonda **sólo de laboratorio** posterior (falla si hereda `search_path = pg_catalog`) | exit 0: no hubo fuga a la migración siguiente; la sonda se retiró y se volvió a ejecutar `db reset` |
+| `supabase db reset` | exit 0 (16 migraciones + seed) |
+| `supabase test db` | exit 0; 20 archivos, 1661 pruebas, PASS (incluye las 74 de `jornadas_solo_lectura`) |
+| `supabase db lint --level warning` | exit 0; «No schema errors found» |
+| `npm run typecheck` / `npm run lint` / `npm run build` | exit 0 / exit 0 / exit 0 |
+| `npm test` (Vitest) | exit 0; 31 archivos, 1168 pruebas |
+| `npx playwright test tests/jornadas-rpc-http.spec.ts` | exit 0; 9 passed = 8 casos del spec (incluido `service_role`) + `auth.setup` |
+| `npx playwright test` (completo) | exit 0; 104 passed (los 8 casos del spec incluidos) |
+| Reproducción HTTP manual | GET/HEAD con clave nueva, usada y usada con otros parámetros: 405 `25006 jornada_metodo_no_permitido`; POST nuevo y repetido: 200 con el mismo uuid |
+| Sensibilidad pgTAP (cuerpos T1/T2, transacción revertida) | 28 de 74 fallan |
+| Sensibilidad HTTP (cuerpos T1/T2 en el laboratorio; después `db reset`) | 6 de 8 casos fallan; pasan `service_role` y `Content-Profile` (más `auth.setup`) |
+| `supabase/tests/concurrencia/arnes.sh` (PG 17.11, R = 10; migración `dd211d92…`) | exit 0; 428 verificaciones, 0 fallas; deadlocks sólo AUTO (20); residuos 0; fallos instrumentales 0 |
+
+### Ronda 3 — security review independiente de Codex sobre `e44375f4…` y correcciones H-01 a H-03 (03/11/2026)
+
+**Security review.** Codex CLI 0.166.0 (modelo `gpt-5.6-sol`, razonamiento alto, sandbox de sólo lectura) auditó el árbol `e44375f48cdb5298ecf66e27b5cedbfcc9ee4e6a`: **DESFAVORABLE**. Informe sellado en `../evidencia-fix-jornadas-solo-lectura/auditoria-independiente/` (`INFORME-CODEX.md`, SHA-256 `da53a1cc…`).
+
+| ID | Sev. | Hallazgo | Línea base sobre `e44375f4…` (antes de corregir) | Corrección |
+|---|---|---|---|---|
+| H-01 | ALTA | Resolución de tipos y casts antes del `search_path` controlado; tipos sin calificar en el DDL dinámico | Con un dominio temporal `pg_temp.text` cuyo `CHECK` registra su ejecución, **8 ejecuciones como `postgres`** durante el `DECLARE`, en las cuatro variantes de `search_path` (incluida la de sesión normal), y aborto por resolver `uuid` al dominio temporal | `DECLARE` sin inicializadores y con tipos `pg_catalog.*`; `search_path = 'pg_catalog, pg_temp'` como primera sentencia; todo calificado, también en el DDL dinámico |
+| H-02 | MEDIA | Las fachadas sólo se validaban por hash del cuerpo | La migración **se aplicaba** con cada una de las 22 desviaciones de fachada probadas (owner, `SECURITY DEFINER`, `search_path` alterado o quitado, ACL ampliada o reducida, `STABLE`, `STRICT`, `PARALLEL SAFE`, `COST`, comentario; ×2 fachadas) | Validación previa exacta de fachadas e implementaciones + manifiesto completo de las cuatro funciones antes y después |
+| H-03 | BAJA | Una traza de reintento podía guardar la clave de `service_role` | Con `--trace on`, el `trace.zip` de la prueba de `service_role` (spec de la ronda 2) contenía la clave secreta en 2 archivos internos | `test.use({ trace, screenshot, video: "off" })` a nivel de archivo y `fetch` nativo para la clave; con `--trace on` forzado: ninguna traza de esa prueba y 0 artefactos con la clave |
+
+Migración final SHA-256 `a4655b32429f61f804b476753d3064867bbc3e69ee4ec30d751b914c1547e494`; spec HTTP `2041600e…`; `playwright.config.ts` `88343bf0…`; pgTAP sin cambios (`8a45e30f…`). Los cuerpos de las dos RPC no cambian (`f6f88764…` y `381e59c4…`). Evidencia: `../evidencia-fix-jornadas-solo-lectura/ronda3-security-review/` (scripts reproducibles `casos_hostiles.sh`, `hostil.sql`, `h03_trazas.sh`).
+
+| Comando o caso | Resultado |
+|---|---|
+| H-01 sobre la migración corregida: objetos hostiles (13 funciones homónimas en `public`, 7 dominios en `public`, 3 dominios y 4 vistas en `pg_temp`) con `search_path` `public, pg_catalog`, de sesión, `pg_temp, public, pg_catalog` y `public` | `DO` aplicado en los cuatro; **0 ejecuciones hostiles**; cuerpos esperados; sin `CREATE` residual; `search_path` de la sesión restaurado |
+| H-02 sobre la migración corregida: las mismas 22 desviaciones de fachada | las 22 abortan; estado previo intacto |
+| Negativos de implementaciones y ejecutor (CREATE preexistente; ACL privada + `anon` / + `authenticator`; `search_path`, `SECURITY INVOKER`, `STABLE` y comentario en la implementación; sobrecargas en `privado` y `public`; `SET ROLE` activo; ejecutor `supabase_admin`) | todos abortan sin cambios |
+| Controles: positivo y reaplicación | aplica / aborta |
+| `supabase db reset` | exit 0 (16 migraciones + seed); manifiesto posterior = esperado |
+| `supabase test db` | exit 0; 20 archivos, 1661 pruebas, PASS |
+| `supabase db lint --level warning` | exit 0; «No schema errors found» |
+| `npm run typecheck` / `npm run lint` / `npm run build` | exit 0 / exit 0 / exit 0 |
+| `npm test` (Vitest) | exit 0; 31 archivos, 1168 pruebas |
+| `npx playwright test tests/jornadas-rpc-http.spec.ts` | exit 0; 9 passed = 8 casos (incluido `service_role`) + `auth.setup` |
+| `npx playwright test` (completo) | exit 0; 104 passed |
+| Reproducción HTTP manual | GET/HEAD → 405 `25006 jornada_metodo_no_permitido` (clave nueva, usada y usada con otros parámetros); POST nuevo y repetido → 200, mismo uuid |
+| Sensibilidad sin guarda | pgTAP 28 de 74 fallan; HTTP 6 de 8 casos fallan (pasan `service_role` y `Content-Profile`) |
+| `supabase/tests/concurrencia/arnes.sh` (PG 17.11, R = 10; migración `a4655b32…`) | exit 0; 428 verificaciones, 0 fallas; deadlocks sólo AUTO (20); residuos 0; fallos instrumentales 0 |
+
+### Riesgos residuales y pendientes
+
+1. **E-SL1 no aprobada**: el código `25006 jornada_metodo_no_permitido` y el paso 0 no están en el contrato aprobado (18.4.3 y 18.4.7). La dirección técnica humana del 03/11/2026 (`transaction_read_only = on`, `25006`, guarda antes del replay, también en las futuras RPC de jornadas con escritura o replay) quedó registrada en 18.4.16; falta la aprobación formal de E-SL1.
+2. Para authenticated sin `sub`, sin perfil o con rol no autorizado, GET devuelve 405 en lugar de 401/403 (la guarda precede a la autorización). No revela datos.
+3. El rechazo también alcanza a llamadas SQL internas en transacciones de sólo lectura, aunque fueran un replay.
+4. La prueba pgTAP emula el modo de sólo lectura dentro de un subbloque (no puede abrir una transacción READ ONLY propia); la transacción READ ONLY real se prueba por HTTP.
+5. El CI no ejecuta pgTAP, `supabase db lint`, Playwright ni el arnés; la evidencia es local. La prueba de `service_role` exige `E2E_SUPABASE_SECRET_KEY` (documentado en `playwright.config.ts`) y falla sin ella.
+6. No se localizaron `PLAN-CORRECCION-T1-T2.md`, los informes finales de Codex y OpenCode sobre este defecto ni la evidencia HTTP de laboratorio citados en la autorización; se trabajó con la reproducción propia. ADR-009 v0.2 sí está disponible (`~/Documentos/ADR-009-PROPUESTA-v0.2.md`).
+7. (Corregido en la ronda 3, H-01.) La afirmación de la ronda 2 de que `pg_catalog` «se busca primero aunque no figure en el `search_path`» era incompleta: `pg_temp` se busca antes para tipos y relaciones si no figura, y un `pg_catalog` explícito puede quedar detrás de otros esquemas.
+8. **Observación preexistente, fuera del alcance (decisión humana pendiente):** las implementaciones T1/T2 (y, por el mismo contrato, las demás funciones `SECURITY DEFINER` con `search_path = ''`) resuelven tipos no calificados de su cuerpo buscando primero en `pg_temp` de la sesión llamadora. En el laboratorio, una sesión con un dominio temporal `uuid` que llamó a `reasignar_vendedor` ejecutó su `CHECK` 12 veces como `propietario_rpc` (`ronda3-security-review/05_observacion_preexistente_pg_temp_t1_t2.txt`). Requiere crear objetos temporales en la misma sesión, algo que una solicitud de PostgREST no permite; con conexión SQL directa sí. Corregirlo cambia el contrato aprobado (`search_path = ''`, ADR-001 §17.1 y §18.4.2) o los privilegios `TEMP`: no se tocó.
+9. Pendiente: nueva security review independiente del árbol de la ronda 3, auditorías de Codex y OpenCode del hash que se cree con autorización humana y aprobación humana. Sin commit, push, PR, merge ni deploy.
+
+---
 ## 01/11/2026 — T3: arnés de concurrencia de jornadas (commits `257efef`, C1 `2580372` y C2 `4391534` auditados; último ciclo de corrección T3-C3 en local, sin commit; rama apilada sobre T2)
 
 **Estado actual.** Commits locales, sin push:
