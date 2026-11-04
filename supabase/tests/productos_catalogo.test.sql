@@ -231,10 +231,11 @@ select is(
         'privado.empresa_gestion_actual()',
         'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.reasignar_vendedor(uuid,uuid,uuid)',
+        'privado.registrar_carga(uuid,uuid,uuid[],integer[])',
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
-  'las funciones SECURITY DEFINER de privado son exactamente las dieciséis: trece implementaciones de negocio (productos, camiones, clientes y stock), abrir_jornada y reasignar_vendedor (T1, T2) y el auxiliar empresa_gestion_actual (D-2)');
+  'las funciones SECURITY DEFINER de privado son exactamente las diecisiete: trece implementaciones de negocio (productos, camiones, clientes y stock), abrir_jornada, reasignar_vendedor y registrar_carga (T1, T2, T5) y el auxiliar empresa_gestion_actual (D-2)');
 
 select is(
   pg_temp.sd_publicas_no_autorizadas(),
@@ -326,14 +327,15 @@ select is(
     where p.pronamespace = 'privado'::regnamespace
       and p.oid::regprocedure::text not in (select firma from firmas)
       -- Las implementaciones de camiones, clientes, stock y jornadas las cubren
-      -- camiones_catalogo, clientes_catalogo, stock_ingreso, jornadas_abrir y
-      -- jornadas_reasignar.
+      -- camiones_catalogo, clientes_catalogo, stock_ingreso, jornadas_abrir,
+      -- jornadas_reasignar y jornadas_carga.
       and p.proname not in ('crear_camion', 'actualizar_camion',
                             'cambiar_estado_camion', 'crear_cliente',
                             'actualizar_cliente', 'validar_cliente',
                             'cambiar_estado_cliente', 'registrar_ingreso',
                             'mover_a_cuarentena', 'registrar_merma',
-                            'abrir_jornada', 'reasignar_vendedor')
+                            'abrir_jornada', 'reasignar_vendedor',
+                            'registrar_carga')
       and (has_function_privilege('authenticated', p.oid, 'execute')
            or has_function_privilege('anon', p.oid, 'execute')
            or p.proacl is null

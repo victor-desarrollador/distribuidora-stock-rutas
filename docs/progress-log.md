@@ -1,4 +1,68 @@
 ---
+## 04/11/2026 — T5: RPC `registrar_carga` (sin commit)
+
+**Rama:** `feat/rpc-jornadas-t5-registrar-carga`, desde `261f45d18e91f87fb971d49d22bbe087a1e72ab8` (B1 v2). Toca superficies sensibles (Supabase, `SECURITY DEFINER`, `movimientos_stock`, idempotencia, concurrencia, RLS, `empresa_id`): **corresponde security review y auditoría independiente**, que el usuario ejecutará manualmente. Validación sólo local; prohibido aplicar en producción.
+
+**Decisión humana (04/11/2026):** opción (a) del preámbulo. Los casos de concurrencia I10, I11 y K8 aplicables a la carga se agregan al arnés existente, sin modificar `arnes.sh` ni los casos de T3.
+
+### Qué se hizo
+- **Migración `20261106120000_rpc_registrar_carga.sql`.** Crea `public.registrar_carga(uuid, uuid, uuid[], integer[])`, una fachada `SECURITY INVOKER` de `postgres` que sólo delega, y `privado.registrar_carga`, `SECURITY DEFINER` de `propietario_rpc`, con `search_path = ''`.
+  - `EXECUTE` sólo para `authenticated`. La propiedad se transfiere con `CREATE` transitorio (O-3) y la migración termina con una verificación fail-closed.
+  - **Sin cambios de esquema, grants ni políticas:** usa lo que dejó D-1.
+  - **Precondiciones:** exige A1, `check_function_bodies` activo y que `propietario_rpc` no tenga `CREATE` previo.
+  - **pg_temp:** el cuerpo y la DDL tienen todos los tipos y casts calificados con `pg_catalog`; el inventario léxico da 0 referencias y la guardia P7 global de B1 la cubre.
+- **Contrato** (ADR-007 §2.5 y §2.7; ADR-001 §18.4.2–§18.4.7; E-SL1):
+  - **Orden:** paso 0 (sólo lectura → `25006 jornada_metodo_no_permitido`) → READ COMMITTED → identidad y rol → estructura → huella v1 → replay → lectura de la jornada → `FOR UPDATE` → 8a → reserva → negocio → advisory de stock → escrituras.
+  - **Estructura:** clave; jornada (D-N1); arreglos no nulos, unidimensionales, del mismo largo, no vacíos y sin nulos; productos repetidos; cantidades positivas.
+  - **Negocio, en este orden:** estado `abierta`/`cargada`; camión activo; ubicaciones configuradas; productos inexistentes o de otra empresa (`PT404`) y luego inactivos (`PT409`). Esta precedencia es una elección de implementación fijada por los tests, no una regla nueva.
+  - **Advisory de stock (nivel 4):** del depósito por producto, en orden de uuid, con la misma cadena que `mover_a_cuarentena` y `registrar_merma`.
+  - **Saldos:** stock residual del camión sólo en la primera carga; saldo del depósito suficiente.
+  - **Escrituras:** un movimiento `carga` por línea (depósito → camión, con `jornada_id`) y, en la primera carga, `abierta → cargada`. Cada escritura se verifica por `ROW_COUNT`.
+  - **Huella:** `v1|carga|<jornada>|<producto>:<cantidad>,…`, con las líneas ordenadas por el texto del uuid (collation C).
+- **`supabase/tests/jornadas_carga.test.sql` (82 aserciones):**
+  - **Catálogo y seguridad:** `anon`/`service_role` → `42501`; sin `sub` → PT401; sin perfil, inactivo o vendedor → PT403; otra empresa → el mismo PT404 que un inexistente; DML directo → `42501`.
+  - **Estructura (I13/I14):** sin reserva de la clave y con reutilización posterior; la cantidad fraccionaria se rechaza por el tipo (`22P02`).
+  - **Casos de ADR-007:** 13, 14, 15, 16 (saldo, cuarentena, inactivo, repetido, 0, negativo, fraccionario), 17 (1,250 kg = 1250 g en ambos lados), 22 (fixture `en_reparto`) y 4/24 (camión dado de baja).
+  - **Idempotencia:** I1 con la huella recalculada aparte, I2, I3, I4, I5, I6, I7 (más la regresión de Stock: `registrar_merma` con clave de carga responde `stock_conflicto_idempotencia`), I8, I9 e I12.
+  - **E-SL1:** sólo lectura → `25006`, también en replay y con un vendedor, sin reservar la clave.
+  - **Invariantes:** sin saldos negativos, I-CAMION y empresa B intacta.
+- **Pruebas ampliadas** (§18.4.10; nada se relaja):
+  - `productos_catalogo` y `camiones_catalogo`: 17 `SECURITY DEFINER`;
+  - `grants_default_privileges`: 32 firmas;
+  - `hardening_adr001`: 26 firmas de negocio y 13 implementaciones;
+  - `pg_temp_jornadas`: carga y replay con los objetos hostiles presentes, sin ejecuciones; sólo lectura con 5 llamadas; 9 vistas homónimas; 26 aserciones.
+- **Arnés** (`supabase/tests/concurrencia/casos.sh`; sólo líneas agregadas, `arnes.sh` intacto): `I10-C`, `I11-C`, `K8-CC-a`, `K8-CC-b`, `K8-CR`, `K8-CM`, `K8-SM` y `K8-CLAVE-C`, con cuatro ejecutores nuevos.
+  - **Control sobre la jornada:** retiene el `FOR UPDATE` de la jornada (§18.4.11). Las sesiones deben esperar la fila sin haber reservado ni ver la clave.
+  - **Control sobre el stock:** retiene el advisory de stock (K8-CM y K8-SM). Las sesiones reservan y esperan ese advisory, o esperan en el índice único la reserva de la otra.
+  - La cola se lee de `pg_blocking_pids`, con foto estable estricta.
+- **HTTP** (`apps/web/tests/jornadas-rpc-http.spec.ts`):
+  - **`registrar_carga` por PostgREST real:** GET/HEAD 405 con clave nueva, usada y con otra huella; POST nuevo, replay (JSON y literal de arreglo) y conflicto; fraccionario → 400 `22P02`; roles, otra empresa y `anon` 401; saldo del camión leído por la Data API.
+  - **Recorridos existentes:** se agrega `registrar_carga` a `Content-Profile: privado` y a `service_role` → 403.
+
+### Cómo se verificó (04/11/2026; laboratorio `pgtempa1-lab`, PostgreSQL 17, CLI 2.120.0)
+Evidencia en `../evidencia-t5-carga/`.
+- `supabase db reset` (`01_…`): 21 migraciones, exit 0. `supabase test db` (`02_…`): `Files=29, Tests=1890, Result: PASS`, exit 0. `db lint --level warning` (`03_…`): sin errores, exit 0.
+- **Mutantes de `registrar_carga`** (`04_…`, `scripts/mutantes_carga.py`). Todos detectados; al restaurar, PASS. Los ocho:
+  - un tipo sin calificar: P7 y medición dinámica;
+  - huella sin ordenar: I1 e I12;
+  - replay sin comparar la huella: I6;
+  - sin la guarda: E-SL1;
+  - sin comprobación de residual: caso 15;
+  - sin saldo: caso 16;
+  - sin validar estado: caso 22;
+  - productos inactivos aceptados: caso 16.
+- **Sensibilidad del arnés** (`05_…`): **parcial, detenida de forma controlada** (`05_sensibilidad_FOR_UPDATE_parcial.txt`). Con la migración mutada sin el `FOR UPDATE` de la jornada, I10-C, I11-C, K8-CC-a y K8-CC-b dieron FAIL en las 16 repeticiones ejecutadas (R=2, dos órdenes): sin el bloqueo, las sesiones no esperan la fila y la carga choca con el control en el `UPDATE` de la jornada (`lock_timeout`). Así se detecta el mutante. K8-CR quedó incompleto y el mutante sin el advisory de nivel 4 (K8-CM, K8-SM) **no se ejecutó**: la corrida se detuvo (`TERM`, limpieza del arnés, sin procesos ni directorios residuales) porque cada repetición espera el plazo de 30 s. No se declara completa.
+- **Arnés completo** (`06_…`, R=10): código original, una sola corrida: `588 verificaciones, 0 fallas`, exit 0, 196 s; 21 migraciones. Los casos de T5 (I10-C, I11-C, K8-CC-a, K8-CC-b, K8-CR, K8-CM, K8-SM, K8-CLAVE-C) dan 20/20 cada uno y los de T3 no cambian. Deadlocks sólo en AUTO (20/20); residuos 0; sin fallos instrumentales. Las invariantes de cada repetición incluyen una operación por clave, los movimientos exactos, los saldos esperados, sin saldos negativos y sin operaciones huérfanas.
+- **`apps/web/`** (`09_…`, `10_…`): `typecheck`, `lint`, `test` (`31 files, 1168 tests`) y `build`, exit 0. `npx playwright test` contra el laboratorio (con `E2E_SUPABASE_SECRET_KEY` del stack local sólo en el entorno): `106 passed`, exit 0.
+
+### Riesgos y pendientes
+- **Security review y auditoría independiente** del hash: pendientes, de ejecución manual del usuario.
+- **K11** (salida contra cambios de carga neta) y la parte de K8 que involucra `corregir_jornada`, `mover_a_cuarentena` o bajas concurrentes de producto o perfil: **NO APLICABLES en T5**. Quedan para T6/T7 y para `corregir_jornada`.
+- **Fixtures `en_reparto`** (caso 22 e I3): se insertan como owner porque `confirmar_salida` no existe. Hay que repetirlos con el flujo real en T7.
+- **Lectura de la carga por el vendedor:** sin cambios (P10-stock); se decide en el bloque de ventas.
+- **Orden de versiones en remoto** y **avisos de `npm ci`**: pendientes heredados.
+
+---
 ## 04/11/2026 — B1: endurecimiento pg_temp de las RPC de jornadas sobre la guarda GET/HEAD (sin commit)
 
 **Rama:** `fix/pg-temp-jornadas`. Historia local, sin rebase ni merge a `main`:

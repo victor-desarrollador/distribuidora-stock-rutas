@@ -193,14 +193,16 @@ select is(
         'privado.crear_producto(text,text,text,text,numeric,integer)',
         'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.reasignar_vendedor(uuid,uuid,uuid)',
+        'privado.registrar_carga(uuid,uuid,uuid[],integer[])',
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)',
         'reasignar_vendedor(uuid,uuid,uuid)',
+        'registrar_carga(uuid,uuid,uuid[],integer[])',
         'registrar_ingreso(uuid,uuid,integer,text)',
         'registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las treinta firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada y reasignar_vendedor (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las treinta y dos firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor y registrar_carga (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)

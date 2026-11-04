@@ -29,7 +29,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(25);
+select plan(26);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final). Ninguna RPC se
@@ -67,6 +67,22 @@ insert into public.camiones (id, empresa_id, patente, nombre, activo, creado_por
   ('b1b1b1b1-0000-4000-8000-0000000000c4', 'b1b1b1b1-0000-4000-8000-000000000000', 'PB1-04', 'Camión A4', true, 'b1b1b1b1-0000-4000-8000-000000000001'),
   ('b1b1b1b1-0000-4000-8000-0000000000c5', 'b1b1b1b1-0000-4000-8000-000000000000', 'PB1-05', 'Camión A5', true, 'b1b1b1b1-0000-4000-8000-000000000001'),
   ('c1c1c1c1-0000-4000-8000-0000000000c1', 'c1c1c1c1-0000-4000-8000-000000000000', 'PB1-B1', 'Camión B1', true, 'c1c1c1c1-0000-4000-8000-000000000001');
+
+-- T5: depósito, ubicación del camión c1 y un producto con stock (ingreso como owner,
+-- sin llamar a ninguna RPC) para registrar_carga con los objetos hostiles presentes.
+insert into public.ubicaciones (id, empresa_id, tipo, camion_id) values
+  ('b1b1b1b1-0000-4000-8000-0000000000d1', 'b1b1b1b1-0000-4000-8000-000000000000', 'deposito', null),
+  ('b1b1b1b1-0000-4000-8000-0000000000e1', 'b1b1b1b1-0000-4000-8000-000000000000', 'camion', 'b1b1b1b1-0000-4000-8000-0000000000c1');
+insert into public.productos (id, empresa_id, codigo, nombre, categoria, forma_venta, precio, activo, creado_por) values
+  ('b1b1b1b1-0000-4000-8000-0000000000f1', 'b1b1b1b1-0000-4000-8000-000000000000', 'PB1-P1', 'Leche A', 'lacteos', 'unidad', 100, true, 'b1b1b1b1-0000-4000-8000-000000000001');
+insert into public.operaciones (id, empresa_id, actor_id, tipo, idempotency_key, huella) values
+  ('b1b1b1b1-0000-4000-8000-0000000000b0', 'b1b1b1b1-0000-4000-8000-000000000000', 'b1b1b1b1-0000-4000-8000-000000000001',
+   'ingreso', 'b1b1b1b1-0000-4000-8000-0000000000b0', repeat('e', 64));
+insert into public.movimientos_stock (empresa_id, operacion_id, tipo_movimiento, producto_id, cantidad,
+                                      ubicacion_origen_id, ubicacion_destino_id, actor_id, motivo) values
+  ('b1b1b1b1-0000-4000-8000-000000000000', 'b1b1b1b1-0000-4000-8000-0000000000b0', 'ingreso',
+   'b1b1b1b1-0000-4000-8000-0000000000f1', 50, null, 'b1b1b1b1-0000-4000-8000-0000000000d1',
+   'b1b1b1b1-0000-4000-8000-000000000001', 'fixture T5');
 
 -- Jornada de B creada como fixture (sin llamar a la RPC: no se compila nada
 -- antes de los objetos hostiles).
@@ -295,6 +311,9 @@ create temp view reasignaciones_vendedor as select 1 as x where pg_temp.sonda();
 create temp view camiones as select 1 as x where pg_temp.sonda();
 create temp view perfiles as select 1 as x where pg_temp.sonda();
 create temp view perfiles_empresa_gestion as select 1 as x where pg_temp.sonda();
+create temp view movimientos_stock as select 1 as x where pg_temp.sonda();
+create temp view productos as select 1 as x where pg_temp.sonda();
+create temp view ubicaciones as select 1 as x where pg_temp.sonda();
 create function pg_temp.encode(pg_catalog.bytea, pg_catalog.text) returns pg_catalog.text language plpgsql as $f$
 begin perform pg_temp.sonda(); return 'x'; end $f$;
 create function pg_temp.to_char(pg_catalog.date, pg_catalog.text) returns pg_catalog.text language plpgsql as $f$
@@ -351,6 +370,12 @@ select pg_temp.intentar('replay_reasignar', pg_catalog.format($$public.reasignar
 select pg_temp.intentar('sin_cambios', pg_catalog.format($$public.reasignar_vendedor('b1b1b1b1-2222-4000-8000-000000000007', %L, 'b1b1b1b1-0000-4000-8000-000000000004')$$,
   (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
 
+-- T5: registrar_carga sobre la jornada abierta (ya reasignada) y su replay.
+select pg_temp.intentar('cargar', pg_catalog.format($$public.registrar_carga('b1b1b1b1-2222-4000-8000-000000000008', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[5])$$,
+  (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
+select pg_temp.intentar('replay_cargar', pg_catalog.format($$public.registrar_carga('b1b1b1b1-2222-4000-8000-000000000008', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[5])$$,
+  (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
+
 -- Dueño de A con objetos de la empresa B.
 select pg_temp.intentar('b_camion', $$public.abrir_jornada('b1b1b1b1-3333-4000-8000-000000000001', 'c1c1c1c1-0000-4000-8000-0000000000c1', '2999-03-02', 'b1b1b1b1-0000-4000-8000-000000000005')$$);
 select pg_temp.intentar('b_vendedor', $$public.abrir_jornada('b1b1b1b1-3333-4000-8000-000000000002', 'b1b1b1b1-0000-4000-8000-0000000000c4', '2999-03-02', 'c1c1c1c1-0000-4000-8000-000000000002')$$);
@@ -384,6 +409,8 @@ select pg_temp.intentar('ro_abrir_nueva', $$public.abrir_jornada('b1b1b1b1-6666-
 select pg_temp.intentar('ro_abrir_replay', $$public.abrir_jornada('b1b1b1b1-2222-4000-8000-000000000001', 'b1b1b1b1-0000-4000-8000-0000000000c1', '2999-03-01', 'b1b1b1b1-0000-4000-8000-000000000003')$$);
 select pg_temp.intentar('ro_abrir_otra_huella', $$public.abrir_jornada('b1b1b1b1-2222-4000-8000-000000000001', 'b1b1b1b1-0000-4000-8000-0000000000c1', '2999-03-01', 'b1b1b1b1-0000-4000-8000-000000000004')$$);
 select pg_temp.intentar('ro_reasignar_replay', pg_catalog.format($$public.reasignar_vendedor('b1b1b1b1-2222-4000-8000-000000000006', %L, 'b1b1b1b1-0000-4000-8000-000000000004')$$,
+  (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
+select pg_temp.intentar('ro_cargar_replay', pg_catalog.format($$public.registrar_carga('b1b1b1b1-2222-4000-8000-000000000008', %L, array['b1b1b1b1-0000-4000-8000-0000000000f1']::pg_catalog.uuid[], array[5])$$,
   (select pg_catalog.substr(r.valor, 4) from pg_temp.resultados r where r.caso operator(pg_catalog.=) 'abrir')));
 select pg_catalog.setval('pg_temp.control_ro'::pg_catalog.regclass,
   (select pg_catalog.count(*) from pg_temp.resultados r
@@ -448,26 +475,36 @@ drop operator pg_temp.= (pg_catalog.text, pg_catalog.text);
 drop function pg_temp.igual_hostil(pg_catalog.text, pg_catalog.text), pg_temp.encode(pg_catalog.bytea, pg_catalog.text),
   pg_temp.to_char(pg_catalog.date, pg_catalog.text);
 drop view pg_temp.jornadas, pg_temp.operaciones, pg_temp.reasignaciones_vendedor, pg_temp.camiones,
-  pg_temp.perfiles, pg_temp.perfiles_empresa_gestion;
+  pg_temp.perfiles, pg_temp.perfiles_empresa_gestion, pg_temp.movimientos_stock, pg_temp.productos, pg_temp.ubicaciones;
 drop function pg_temp.sonda();
 reset role;
 
 -- ===========================================================================
 -- Afirmaciones (sin objetos hostiles)
 -- ===========================================================================
-select is((select valor from resultados where caso = 'hostiles'), '4/6/1',
-  'P1: 4 dominios, 6 vistas homónimas y 1 operador hostiles creados antes de la primera llamada');
+select is((select valor from resultados where caso = 'hostiles'), '4/9/1',
+  'P1: 4 dominios, 9 vistas homónimas y 1 operador hostiles creados antes de la primera llamada');
 
 select is(
   (select string_agg(caso || '=' || split_part(valor, ':', 1), ',' order by caso) from resultados
-    where caso in ('abrir', 'replay_abrir', 'reasignar', 'replay_reasignar', 'encargado_abrir')),
-  'abrir=ok,encargado_abrir=ok,reasignar=ok,replay_abrir=ok,replay_reasignar=ok',
-  'P2: las 2 RPC (y la apertura del encargado) completan con los objetos hostiles presentes');
+    where caso in ('abrir', 'replay_abrir', 'reasignar', 'replay_reasignar', 'encargado_abrir', 'cargar', 'replay_cargar')),
+  'abrir=ok,cargar=ok,encargado_abrir=ok,reasignar=ok,replay_abrir=ok,replay_cargar=ok,replay_reasignar=ok',
+  'P2: las 3 RPC (y la apertura del encargado) completan con los objetos hostiles presentes');
 
 select is(
-  (select valor from resultados where caso = 'replay_abrir') || '/' || (select valor from resultados where caso = 'replay_reasignar'),
-  (select valor from resultados where caso = 'abrir') || '/' || (select valor from resultados where caso = 'reasignar'),
-  'P2: los replays con la misma clave y huella devuelven la misma jornada y la misma operación');
+  (select valor from resultados where caso = 'replay_abrir') || '/' || (select valor from resultados where caso = 'replay_reasignar')
+  || '/' || (select valor from resultados where caso = 'replay_cargar'),
+  (select valor from resultados where caso = 'abrir') || '/' || (select valor from resultados where caso = 'reasignar')
+  || '/' || (select valor from resultados where caso = 'cargar'),
+  'P2: los replays con la misma clave y huella devuelven la misma jornada y las mismas operaciones');
+
+select is(
+  (select o.huella from public.operaciones o where o.id = (select substr(valor, 4)::uuid from resultados where caso = 'cargar'))
+  || '/' || (select string_agg(m.cantidad::text || ':' || right(m.ubicacion_origen_id::text, 2) || '>' || right(m.ubicacion_destino_id::text, 2), ',')
+               from public.movimientos_stock m where m.operacion_id = (select substr(valor, 4)::uuid from resultados where caso = 'cargar')),
+  encode(sha256(convert_to('v1|carga|' || (select substr(valor, 4) from resultados where caso = 'abrir')
+                           || '|b1b1b1b1-0000-4000-8000-0000000000f1:5', 'UTF8')), 'hex') || '/5:d1>e1',
+  'T5: registrar_carga con los objetos hostiles presentes: huella v1 canónica y un movimiento depósito → camión');
 
 select is(
   (select string_agg(o.tipo || '=' || (o.huella = encode(sha256(convert_to(
@@ -490,8 +527,8 @@ select is(
                from public.reasignaciones_vendedor r where r.empresa_id = 'b1b1b1b1-0000-4000-8000-000000000000')
   || ';' || (select string_agg(o.tipo, ',' order by o.tipo) from public.operaciones o
               where o.empresa_id = 'b1b1b1b1-0000-4000-8000-000000000000'),
-  'c1:2999-03-01:04:abierta,c2:2999-03-01:05:abierta,c5:2999-03-01:06:abierta;03>04;apertura_jornada,apertura_jornada,apertura_jornada,reasignacion_vendedor',
-  'P2/P5: equivalencia de comportamiento — 3 jornadas abiertas (la del control revertida no queda), 1 reasignación y sólo las 4 operaciones del contrato');
+  'c1:2999-03-01:04:cargada,c2:2999-03-01:05:abierta,c5:2999-03-01:06:abierta;03>04;apertura_jornada,apertura_jornada,apertura_jornada,carga,ingreso,reasignacion_vendedor',
+  'P2/P5: equivalencia de comportamiento — 3 jornadas (c1 cargada por T5; la del control revertida no queda), 1 reasignación y sólo las 5 operaciones del contrato, más el ingreso de fixture de T5');
 
 select is(
   (select string_agg(caso || '=' || valor, ' ; ' order by caso) from resultados
@@ -518,12 +555,12 @@ select is(
   'P4: jornadas, operaciones, camiones y reasignaciones de la empresa B sin cambios');
 
 select is((select valor from resultados where caso = 'medida_p2'), '0/0',
-  'P1/P2/P4: 0 ejecuciones del código temporal como propietario_rpc y como authenticated en las 17 llamadas');
+  'P1/P2/P4: 0 ejecuciones del código temporal como propietario_rpc y como authenticated en las 19 llamadas');
 
 select is(
   (select last_value - 1 from pg_temp.control_ro) || '/' || (select last_value - 1 from pg_temp.control_ro_priv),
-  '4/0',
-  'E-SL1: en sólo lectura, las 4 llamadas (clave nueva, replay, otra huella y replay de reasignación) responden 25006 jornada_metodo_no_permitido, con 0 ejecuciones como propietario_rpc');
+  '5/0',
+  'E-SL1: en sólo lectura, las 5 llamadas (clave nueva, replay, otra huella, replay de reasignación y replay de carga) responden 25006 jornada_metodo_no_permitido, con 0 ejecuciones como propietario_rpc');
 
 select is(
   (select prosrc from pg_proc where oid = 'privado.abrir_jornada(uuid,uuid,date,uuid)'::regprocedure) ~ E'\nbegin\n  -- Paso 0 \\(corrección T14'

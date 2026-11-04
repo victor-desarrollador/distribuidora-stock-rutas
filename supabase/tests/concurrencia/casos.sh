@@ -749,3 +749,421 @@ caso_O_R3() { repetir O-R3 "-" prep_O_R3 correr_observado eval_O; }
 caso_O_R4() { repetir O-R4 "-" prep_O_R4 correr_observado eval_O; }
 caso_O_A1() { repetir O-A1 "-" prep_O_A1 correr_observado eval_O; }
 caso_O_A2() { repetir O-A2 "-" prep_O_A2 correr_observado eval_O; }
+
+# =============================================================================
+# T5 — registrar_carga (ADR-001 §18.4.9 I10, I11 y K8; §18.4.11). Casos nuevos,
+# agregados sin modificar arnes.sh ni los casos de T3 (decisión humana del
+# 04/11/2026, opción a):
+#
+#   I10-C       misma clave y mismo payload: las dos con la misma operación
+#   I11-C       misma clave y payload distinto: una confirma, la otra PT409
+#   K8-CC-a     dos cargas de la misma jornada (CONC-18.4-01), ambas caben
+#   K8-CC-b     dos cargas de la misma jornada cuya suma excede el depósito
+#   K8-CR       carga contra reasignación de la misma jornada
+#   K8-CM       registrar_merma contra registrar_carga, misma clave y mismo
+#               advisory de stock (nivel 4)
+#   K8-SM       registrar_merma contra registrar_carga, claves distintas, suma
+#               mayor que el depósito: el advisory de nivel 4 las serializa
+#   K8-CLAVE-C  misma clave en dos jornadas: ON CONFLICT del paso 9
+#
+# registrar_carga no toma advisory de niveles 1 ni 2: según §18.4.11 el control
+# retiene el FOR UPDATE de la jornada (nivel 3) y las sesiones esperan esa fila
+# (paso 8). En K8-CM y K8-SM el control retiene el advisory de stock del depósito
+# (nivel 4), que las dos RPC piden después de reservar su clave. Las esperas se
+# observan con el monitor (pg_stat_activity, pg_locks, pg_blocking_pids) y la foto
+# estable estricta; los sleep sólo espacian lecturas, nunca son la evidencia.
+# K11 (salida contra cambios de carga neta) queda NO APLICABLE en T5: requiere
+# registrar_descarga y confirmar_salida (T6 y T7).
+# =============================================================================
+PROD1='aaaaaaaa-2100-4000-8000-0000000000f1'
+DEP='aaaaaaaa-2100-4000-8000-0000000000d1'
+UBI1='aaaaaaaa-2100-4000-8000-0000000000e1'
+UBI2='aaaaaaaa-2100-4000-8000-0000000000e2'
+OP_ING='aaaaaaaa-2100-4000-8000-0000000000b0'
+JORNADAS_CTRL=()   # filas de jornadas que retiene el control, en orden de uuid
+
+# Depósito, ubicaciones de CAM1 y CAM2, un producto y su ingreso inicial, como
+# postgres (owner, sin RPC) en la base de la repetición.
+preparar_stock() {   # cantidad inicial de PROD1 en el depósito
+  ins sql_pg "$BASE" "
+insert into public.ubicaciones (id, empresa_id, tipo, camion_id) values
+  ('$DEP', '$EMPRESA_A', 'deposito', null),
+  ('$UBI1', '$EMPRESA_A', 'camion', '$CAM1'),
+  ('$UBI2', '$EMPRESA_A', 'camion', '$CAM2');
+insert into public.productos (id, empresa_id, codigo, nombre, categoria, forma_venta, precio, activo, creado_por)
+  values ('$PROD1', '$EMPRESA_A', 'JR-P1', 'Leche', 'lacteos', 'unidad', 100, true, '$DUENO');
+insert into public.operaciones (id, empresa_id, actor_id, tipo, idempotency_key, huella)
+  values ('$OP_ING', '$EMPRESA_A', '$DUENO', 'ingreso', '$OP_ING', repeat('e', 64));
+insert into public.movimientos_stock (empresa_id, operacion_id, tipo_movimiento, producto_id, cantidad,
+                                      ubicacion_origen_id, ubicacion_destino_id, actor_id, motivo)
+  values ('$EMPRESA_A', '$OP_ING', 'ingreso', '$PROD1', $1, null, '$DEP', '$DUENO', 'arnés T5');" >/dev/null \
+    || { MOTIVO="no se preparó el stock"; return 1; }
+}
+
+cargar() { printf "public.registrar_carga('%s', '%s', array['%s']::uuid[], array[%s])" "$1" "$2" "$PROD1" "$3"; }
+mermar() { printf "public.registrar_merma('%s', '%s', '%s', %s, 'vencido', null)" "$1" "$PROD1" "$DEP" "$2"; }
+ks() { ins clave_txt "stock:$EMPRESA:$1:$2"; }   # nivel 4
+
+saldo_es() {  # ubicación cantidad
+  printf "(select coalesce(sum(case when ubicacion_destino_id = '%s' then cantidad else -cantidad end), 0)
+             from public.movimientos_stock where producto_id = '%s'
+              and (ubicacion_destino_id = '%s' or ubicacion_origen_id = '%s')) = %s" "$1" "$PROD1" "$1" "$1" "$2"
+}
+n_tipo() { printf "(select count(*) from public.operaciones where tipo = '%s') = %s" "$1" "$2"; }
+n_mov() { printf "(select count(*) from public.movimientos_stock where tipo_movimiento = '%s') = %s" "$1" "$2"; }
+estado_es() { printf "(select estado from public.jornadas where id = '%s') = '%s'" "$1" "$2"; }
+INV_STOCK="not exists (select 1 from public.stock_actual where cantidad < 0)"
+INV_HUERFANAS_STOCK="not exists (select 1 from public.operaciones o where o.tipo in ('carga', 'merma')
+   and not exists (select 1 from public.movimientos_stock m where m.operacion_id = o.id))
+ and not exists (select 1 from public.movimientos_stock m join public.operaciones o on o.id = m.operacion_id
+                  where m.tipo_movimiento <> o.tipo)"
+
+# Predicados del monitor para las esperas de T5.
+pred_fila_abcd() {   # (a) espera Lock; (b) fila/tupla no concedida; (c) sin reserva; (d) sin operación con la clave
+  [[ $(campo "$1" 1) == active && $(campo "$1" 2) == Lock && $(campo "$1" 8) -ge 1 && $(campo "$1" 9) == 0 ]] \
+    && [[ $(campo "$1" 10) == 0 || $(campo "$1" 10) == - ]]
+}
+pred_adv_reservado() {  # espera un advisory con la clave ya reservada (sin confirmar: no visible)
+  [[ $(campo "$1" 1) == active && $(campo "$1" 2) == Lock && -n $(campo "$1" 7) && $(campo "$1" 9) -ge 1 ]] \
+    && [[ $(campo "$1" 10) == 0 || $(campo "$1" 10) == - ]]
+}
+
+# El control retiene las filas de JORNADAS_CTRL con FOR UPDATE, en una transacción
+# abierta, sin advisory ni escrituras.
+control_fila_tomar() {
+  local j f sql="begin;"
+  for j in "${JORNADAS_CTRL[@]}"; do
+    sql+=$'\n'"select 1 from public.jornadas where id = '$j' and empresa_id = '$EMPRESA' for update;"
+  done
+  ins ses_comando C "$sql" || { MOTIVO="el control no tomó las filas"; return 1; }
+  f=$(ins foto "${S_PID[C]}") || { MOTIVO="falló la foto del control"; return 1; }
+  [[ $(campo "$f" 1) == "idle in transaction" && -z $(campo "$f" 6) && $(campo "$f" 9) == 0 ]] \
+    || { MOTIVO="el control no retiene sólo las filas ($f)"; return 1; }
+}
+
+abrir_sesiones() {
+  ins ses_abrir C "$BASE" && ins ses_abrir T1 "$BASE" && ins ses_abrir T2 "$BASE" \
+    || { MOTIVO="no se abrieron las sesiones"; return 1; }
+}
+
+# Tras liberar: DELANTE vuelve con su transacción abierta (5c); si confirmó, OTRO
+# debe esperar sólo a DELANTE. Después se confirman las dos y se leen resultados.
+terminar_par() {
+  local rd ro
+  rd=$(ins ses_resultado "$DELANTE") || { MOTIVO="$DELANTE no respondió dentro del plazo"; return 1; }
+  if [[ ${rd%%|*} == 00000 ]]; then
+    foto_estable pred_espera_lock "${S_PID[$OTRO]}" \
+      || { MOTIVO="$OTRO no quedó esperando a $DELANTE: $FOTO"; return 1; }
+    bloqueantes_permitidos "$FOTO" "${S_PID[$DELANTE]}" && contiene_pid "$FOTO" "${S_PID[$DELANTE]}" \
+      || { MOTIVO="$OTRO espera a otro proceso: $FOTO"; return 1; }
+  fi
+  ins ses_fin "$DELANTE" || { MOTIVO="no se cerró la transacción de $DELANTE"; return 1; }
+  ro=$(ins ses_resultado "$OTRO") || { MOTIVO="$OTRO no respondió dentro del plazo"; return 1; }
+  ins ses_fin "$OTRO" || { MOTIVO="no se cerró la transacción de $OTRO"; return 1; }
+  if [[ $DELANTE == T1 ]]; then RES_T1=$rd; RES_T2=$ro; else RES_T2=$rd; RES_T1=$ro; fi
+}
+
+# Cola compartida del FOR UPDATE de una jornada (I10-C, I11-C, K8-CC, K8-CR). El
+# primero de la cola espera sólo al control; el otro espera al primero.
+correr_fila_par() {   # orden
+  local primero segundo c p1 p2
+  MOTIVO=""; DELANTE=""; OTRO=""; RES_T1=""; RES_T2=""
+  if [[ $1 == 1 ]]; then primero=T1; segundo=T2; else primero=T2; segundo=T1; fi
+  abrir_sesiones || return 1
+  control_fila_tomar || return 1
+  ins ses_lanzar "$primero" "$ACTOR" "$(expr_de "$primero")" || { MOTIVO="no se lanzó $primero"; return 1; }
+  foto_estable pred_fila_abcd "${S_PID[$primero]}" "$(idem_de "$primero")" \
+    || { MOTIVO="$primero no llegó a la espera de la fila con (a)-(d): $FOTO"; return 1; }
+  ins ses_lanzar "$segundo" "$ACTOR" "$(expr_de "$segundo")" || { MOTIVO="no se lanzó $segundo"; return 1; }
+  foto_estable pred_fila_abcd "${S_PID[$segundo]}" "$(idem_de "$segundo")" \
+    || { MOTIVO="$segundo no llegó a la espera de la fila con (a)-(d): $FOTO"; return 1; }
+  foto_par_estable pred_fila_abcd "${S_PID[T1]}" "$IDEM_T1" "${S_PID[T2]}" "$IDEM_T2" \
+    || { MOTIVO="sin foto conjunta estable de (a)-(d)"; return 1; }
+  FOTO_T1=$FOTO1; FOTO_T2=$FOTO2
+  c=${S_PID[C]}; p1=${S_PID[T1]}; p2=${S_PID[T2]}
+  bloqueantes_permitidos "$FOTO_T1" "$c" "$p2" && bloqueantes_permitidos "$FOTO_T2" "$c" "$p1" \
+    || { MOTIVO="bloqueante ajeno al caso: T1[$FOTO_T1] T2[$FOTO_T2]"; return 1; }
+  if [[ $(campo "$FOTO_T1" 5) == "$c" ]] && contiene_pid "$FOTO_T2" "$p1"; then
+    DELANTE=T1; OTRO=T2
+  elif [[ $(campo "$FOTO_T2" 5) == "$c" ]] && contiene_pid "$FOTO_T1" "$p2"; then
+    DELANTE=T2; OTRO=T1
+  else
+    MOTIVO="cola ambigua: T1[$FOTO_T1] T2[$FOTO_T2]"; return 1
+  fi
+  ins ses_revertir C || { MOTIVO="el control no liberó"; return 1; }
+  terminar_par
+}
+
+# Dos jornadas, sin bloqueos compartidos (K8-CLAVE-C): cada sesión espera su fila
+# sólo al control. Tras liberar, la que vuelve primero retiene su reserva y la
+# otra debe quedar esperando en el índice único de operaciones a esa sesión.
+correr_fila_indep() {   # orden
+  local primero segundo c i rd ro f2
+  MOTIVO=""; DELANTE=""; OTRO=""; RES_T1=""; RES_T2=""
+  if [[ $1 == 1 ]]; then primero=T1; segundo=T2; else primero=T2; segundo=T1; fi
+  abrir_sesiones || return 1
+  control_fila_tomar || return 1
+  ins ses_lanzar "$primero" "$ACTOR" "$(expr_de "$primero")" || { MOTIVO="no se lanzó $primero"; return 1; }
+  foto_estable pred_fila_abcd "${S_PID[$primero]}" "$(idem_de "$primero")" \
+    || { MOTIVO="$primero no llegó a la espera: $FOTO"; return 1; }
+  ins ses_lanzar "$segundo" "$ACTOR" "$(expr_de "$segundo")" || { MOTIVO="no se lanzó $segundo"; return 1; }
+  foto_estable pred_fila_abcd "${S_PID[$segundo]}" "$(idem_de "$segundo")" \
+    || { MOTIVO="$segundo no llegó a la espera: $FOTO"; return 1; }
+  foto_par_estable pred_fila_abcd "${S_PID[T1]}" "$IDEM_T1" "${S_PID[T2]}" "$IDEM_T2" \
+    || { MOTIVO="sin foto conjunta estable"; return 1; }
+  FOTO_T1=$FOTO1; FOTO_T2=$FOTO2
+  c=${S_PID[C]}
+  [[ $(campo "$FOTO_T1" 5) == "$c" && $(campo "$FOTO_T2" 5) == "$c" ]] \
+    || { MOTIVO="las sesiones no son independientes: T1[$FOTO_T1] T2[$FOTO_T2]"; return 1; }
+  ins ses_revertir C || { MOTIVO="el control no liberó"; return 1; }
+  for (( i = 0; i < PLAZO * 200; i++ )); do
+    if ses_listo T1 "${S_TOK[T1]}"; then DELANTE=T1; OTRO=T2; break; fi
+    if ses_listo T2 "${S_TOK[T2]}"; then DELANTE=T2; OTRO=T1; break; fi
+    sleep 0.005
+  done
+  [[ -n $DELANTE ]] || { MOTIVO="ninguna sesión respondió dentro del plazo"; return 1; }
+  rd=$(ins ses_resultado "$DELANTE") || { MOTIVO="sin resultado de $DELANTE"; return 1; }
+  for (( i = 0; i < PLAZO * 100; i++ )); do
+    ses_listo "$OTRO" "${S_TOK[$OTRO]}" && { MOTIVO="$OTRO terminó sin esperar a $DELANTE"; return 1; }
+    FOTO=$(ins foto "${S_PID[$OTRO]}") || { MOTIVO="falló el monitor"; return 1; }
+    if pred_espera_fila "$FOTO"; then
+      f2=$(ins foto "${S_PID[$OTRO]}") || { MOTIVO="falló el monitor"; return 1; }
+      [[ $f2 == "$FOTO" ]] && break
+    fi
+    sleep 0.01
+  done
+  pred_espera_fila "$FOTO" && [[ $(campo "$FOTO" 5) == "${S_PID[$DELANTE]}" && $(campo "$FOTO" 9) -ge 1 ]] \
+    || { MOTIVO="$OTRO no espera la reserva de $DELANTE en el índice único: $FOTO"; return 1; }
+  ins ses_fin "$DELANTE" || { MOTIVO="no se cerró $DELANTE"; return 1; }
+  ro=$(ins ses_resultado "$OTRO") || { MOTIVO="$OTRO no respondió dentro del plazo"; return 1; }
+  ins ses_fin "$OTRO" || { MOTIVO="no se cerró $OTRO"; return 1; }
+  if [[ $DELANTE == T1 ]]; then RES_T1=$rd; RES_T2=$ro; else RES_T2=$rd; RES_T1=$ro; fi
+}
+
+# Misma clave en merma y carga (K8-CM): el control retiene el advisory de stock.
+# El primero reserva su clave y queda esperando ese advisory; el segundo queda
+# esperando en el índice único la reserva del primero.
+correr_reserva_par() {   # orden
+  local primero segundo
+  MOTIVO=""; DELANTE=""; OTRO=""; RES_T1=""; RES_T2=""
+  if [[ $1 == 1 ]]; then primero=T1; segundo=T2; else primero=T2; segundo=T1; fi
+  DELANTE=$primero; OTRO=$segundo
+  abrir_sesiones || return 1
+  ins control_tomar || return 1
+  ins ses_lanzar "$primero" "$ACTOR" "$(expr_de "$primero")" || { MOTIVO="no se lanzó $primero"; return 1; }
+  foto_estable pred_adv_reservado "${S_PID[$primero]}" "$(idem_de "$primero")" \
+    || { MOTIVO="$primero no reservó y esperó el advisory de stock: $FOTO"; return 1; }
+  FOTO_T1=$FOTO
+  ins ses_lanzar "$segundo" "$ACTOR" "$(expr_de "$segundo")" || { MOTIVO="no se lanzó $segundo"; return 1; }
+  foto_estable pred_espera_fila "${S_PID[$segundo]}" \
+    || { MOTIVO="$segundo no quedó esperando la reserva de $primero: $FOTO"; return 1; }
+  FOTO_T2=$FOTO
+  [[ $(campo "$FOTO_T2" 5) == "${S_PID[$primero]}" && $(campo "$FOTO_T1" 5) == "${S_PID[C]}" ]] \
+    || { MOTIVO="cola distinta de control → $primero → $segundo: [$FOTO_T1] [$FOTO_T2]"; return 1; }
+  ins control_liberar || { MOTIVO="el control no liberó"; return 1; }
+  terminar_par
+}
+
+# Claves distintas, mismo advisory de stock (K8-SM): las dos reservan y esperan el
+# advisory que retiene el control; el primero de la cola espera sólo al control y
+# el otro también al primero.
+correr_adv_par() {   # orden
+  local primero segundo c p1 p2
+  MOTIVO=""; DELANTE=""; OTRO=""; RES_T1=""; RES_T2=""
+  if [[ $1 == 1 ]]; then primero=T1; segundo=T2; else primero=T2; segundo=T1; fi
+  abrir_sesiones || return 1
+  ins control_tomar || return 1
+  ins ses_lanzar "$primero" "$ACTOR" "$(expr_de "$primero")" || { MOTIVO="no se lanzó $primero"; return 1; }
+  foto_estable pred_adv_reservado "${S_PID[$primero]}" "$(idem_de "$primero")" \
+    || { MOTIVO="$primero no llegó a la espera del advisory: $FOTO"; return 1; }
+  ins ses_lanzar "$segundo" "$ACTOR" "$(expr_de "$segundo")" || { MOTIVO="no se lanzó $segundo"; return 1; }
+  foto_estable pred_adv_reservado "${S_PID[$segundo]}" "$(idem_de "$segundo")" \
+    || { MOTIVO="$segundo no llegó a la espera del advisory: $FOTO"; return 1; }
+  foto_par_estable pred_adv_reservado "${S_PID[T1]}" "$IDEM_T1" "${S_PID[T2]}" "$IDEM_T2" \
+    || { MOTIVO="sin foto conjunta estable"; return 1; }
+  FOTO_T1=$FOTO1; FOTO_T2=$FOTO2
+  c=${S_PID[C]}; p1=${S_PID[T1]}; p2=${S_PID[T2]}
+  bloqueantes_permitidos "$FOTO_T1" "$c" "$p2" && bloqueantes_permitidos "$FOTO_T2" "$c" "$p1" \
+    || { MOTIVO="bloqueante ajeno al caso: T1[$FOTO_T1] T2[$FOTO_T2]"; return 1; }
+  contiene_pid "$FOTO_T1" "$c" && contiene_pid "$FOTO_T2" "$c" \
+    || { MOTIVO="alguna sesión no espera al control"; return 1; }
+  if contiene_pid "$FOTO_T2" "$p1" && ! contiene_pid "$FOTO_T1" "$p2"; then
+    DELANTE=T1; OTRO=T2
+  elif contiene_pid "$FOTO_T1" "$p2" && ! contiene_pid "$FOTO_T2" "$p1"; then
+    DELANTE=T2; OTRO=T1
+  else
+    MOTIVO="cola ambigua: T1[$FOTO_T1] T2[$FOTO_T2]"; return 1
+  fi
+  ins control_liberar || { MOTIVO="el control no liberó"; return 1; }
+  terminar_par
+}
+
+# Preparación común: stock inicial, jornada J1 abierta en CAM1 (vendedor V3) y el
+# control sobre la fila de J1.
+prep_carga_base() {   # stock
+  preparar_stock "$1" || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
+  JORNADAS_CTRL=("$J1")
+}
+
+# I10-C — misma clave y mismo payload (4 de 10).
+prep_I10_C() {
+  prep_carga_base 10 || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(cargar "$IDEM_T1" "$J1" 4); EXPR_T2=$EXPR_T1
+}
+eval_I10_C() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && mismo_uuid && ok=0
+  cerrar "$@" $ok "las dos 00000 con la misma operación" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "una carga" "$(n_tipo carga 1)" \
+    "un movimiento" "$(n_mov carga 1)" "depósito 6" "$(saldo_es "$DEP" 6)" "camión 4" "$(saldo_es "$UBI1" 4)" \
+    "jornada cargada" "$(estado_es "$J1" cargada)" "sin saldos negativos" "$INV_STOCK" \
+    "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_I10_C() { repetir I10-C "1 2" prep_I10_C correr_fila_par eval_I10_C; }
+
+# I11-C — misma clave, payload distinto (4 y 5 de 10).
+prep_I11_C() {
+  prep_carga_base 10 || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(cargar "$IDEM_T1" "$J1" 4); EXPR_T2=$(cargar "$IDEM_T2" "$J1" 5)
+}
+eval_I11_C() {
+  local ok=1 q
+  [[ $DELANTE == T1 ]] && q=4 || q=5
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_conflicto_idempotencia" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "un movimiento" "$(n_mov carga 1)" \
+    "depósito sólo con la de delante" "$(saldo_es "$DEP" $(( 10 - q )))" "camión sólo con la de delante" "$(saldo_es "$UBI1" "$q")" \
+    "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_I11_C() { repetir I11-C "1 2" prep_I11_C correr_fila_par eval_I11_C; }
+
+# K8-CC-a — dos cargas de la misma jornada, claves distintas, ambas caben (4 + 5 de 10).
+prep_K8_CC_a() {
+  prep_carga_base 10 || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(cargar "$IDEM_T1" "$J1" 4); EXPR_T2=$(cargar "$IDEM_T2" "$J1" 5)
+}
+eval_K8_CC_a() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && ! mismo_uuid && ok=0
+  cerrar "$@" $ok "las dos 00000 con operaciones distintas" "$(ins invariantes \
+    "dos cargas" "$(n_tipo carga 2)" "dos movimientos" "$(n_mov carga 2)" \
+    "depósito 1" "$(saldo_es "$DEP" 1)" "camión 9" "$(saldo_es "$UBI1" 9)" \
+    "jornada cargada" "$(estado_es "$J1" cargada)" "sin saldos negativos" "$INV_STOCK" \
+    "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_K8_CC_a() { repetir K8-CC-a "1 2" prep_K8_CC_a correr_fila_par eval_K8_CC_a; }
+
+# K8-CC-b — dos cargas de la misma jornada que juntas exceden el depósito (6 + 6 de 10).
+prep_K8_CC_b() {
+  prep_carga_base 10 || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(cargar "$IDEM_T1" "$J1" 6); EXPR_T2=$(cargar "$IDEM_T2" "$J1" 6)
+}
+eval_K8_CC_b() {
+  local ok=1
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_stock_insuficiente && ok=0
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_stock_insuficiente" "$(ins invariantes \
+    "una carga" "$(n_tipo carga 1)" "un movimiento" "$(n_mov carga 1)" \
+    "la rechazada no reservó" "$(n_clave "$(idem_de "$OTRO")" 0)" \
+    "depósito 4" "$(saldo_es "$DEP" 4)" "camión 6" "$(saldo_es "$UBI1" 6)" \
+    "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_K8_CC_b() { repetir K8-CC-b "1 2" prep_K8_CC_b correr_fila_par eval_K8_CC_b; }
+
+# K8-CR — carga (T1) contra reasignación V3 → V6 (T2) de la misma jornada.
+prep_K8_CR() {
+  prep_carga_base 10 || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(cargar "$IDEM_T1" "$J1" 4); EXPR_T2=$(reasignar "$IDEM_T2" "$J1" "$V6")
+}
+eval_K8_CR() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
+  cerrar "$@" $ok "las dos 00000 (equivale a algún orden serial)" "$(ins invariantes \
+    "una carga" "$(n_tipo carga 1)" "una reasignación" "$(n_reas 1)" "un historial" "$(n_hist 1)" \
+    "vendedor V6" "$(vend_de "$J1" "$V6")" "jornada cargada" "$(estado_es "$J1" cargada)" \
+    "depósito 6" "$(saldo_es "$DEP" 6)" "camión 4" "$(saldo_es "$UBI1" 4)" \
+    "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS" "sin huérfanas de stock" "$INV_HUERFANAS_STOCK")"
+}
+caso_K8_CR() { repetir K8-CR "1 2" prep_K8_CR correr_fila_par eval_K8_CR; }
+
+# K8-CM — registrar_merma (T1, 3) contra registrar_carga (T2, 4) con la misma
+# clave y el mismo advisory de stock.
+prep_K8_CM() {
+  prep_carga_base 10 || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(mermar "$IDEM_T1" 3); EXPR_T2=$(cargar "$IDEM_T2" "$J1" 4)
+  CTRL_CLAVES=()
+  CTRL_CLAVES+=("$(ks "$DEP" "$PROD1")")
+}
+eval_K8_CM() {
+  local ok=1 inv
+  if [[ $DELANTE == T1 ]]; then
+    es_ok "$RES_T1" && es_err "$RES_T2" PT409 jornada_conflicto_idempotencia && ok=0
+    inv=$(ins invariantes "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "una merma" "$(n_tipo merma 1)" \
+      "ninguna carga" "$(n_tipo carga 0)" "depósito 7" "$(saldo_es "$DEP" 7)" "camión 0" "$(saldo_es "$UBI1" 0)" \
+      "jornada abierta" "$(estado_es "$J1" abierta)" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  else
+    es_ok "$RES_T2" && es_err "$RES_T1" PT409 stock_conflicto_idempotencia && ok=0
+    inv=$(ins invariantes "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "una carga" "$(n_tipo carga 1)" \
+      "ninguna merma" "$(n_tipo merma 0)" "depósito 6" "$(saldo_es "$DEP" 6)" "camión 4" "$(saldo_es "$UBI1" 4)" \
+      "jornada cargada" "$(estado_es "$J1" cargada)" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  fi
+  cerrar "$@" $ok "la primera 00000; la otra su propio PT409 de conflicto de idempotencia" "$inv"
+}
+caso_K8_CM() { repetir K8-CM "1 2" prep_K8_CM correr_reserva_par eval_K8_CM; }
+
+# K8-SM — registrar_merma (T1, 6) contra registrar_carga (T2, 6), claves distintas,
+# 10 en el depósito: el advisory de nivel 4 las serializa y el depósito no queda
+# negativo.
+prep_K8_SM() {
+  prep_carga_base 10 || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(mermar "$IDEM_T1" 6); EXPR_T2=$(cargar "$IDEM_T2" "$J1" 6)
+  CTRL_CLAVES=()
+  CTRL_CLAVES+=("$(ks "$DEP" "$PROD1")")
+}
+eval_K8_SM() {
+  local ok=1 inv
+  if [[ $DELANTE == T1 ]]; then
+    es_ok "$RES_T1" && es_err "$RES_T2" PT409 jornada_stock_insuficiente && ok=0
+    inv=$(ins invariantes "una merma" "$(n_tipo merma 1)" "ninguna carga" "$(n_tipo carga 0)" \
+      "la carga no reservó" "$(n_clave "$IDEM_T2" 0)" "depósito 4" "$(saldo_es "$DEP" 4)" \
+      "jornada abierta" "$(estado_es "$J1" abierta)" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  else
+    es_ok "$RES_T2" && es_err "$RES_T1" PT409 stock_insuficiente && ok=0
+    inv=$(ins invariantes "una carga" "$(n_tipo carga 1)" "ninguna merma" "$(n_tipo merma 0)" \
+      "la merma no reservó" "$(n_clave "$IDEM_T1" 0)" "depósito 4" "$(saldo_es "$DEP" 4)" "camión 6" "$(saldo_es "$UBI1" 6)" \
+      "jornada cargada" "$(estado_es "$J1" cargada)" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  fi
+  cerrar "$@" $ok "delante 00000; la otra su PT409 de saldo insuficiente" "$inv"
+}
+caso_K8_SM() { repetir K8-SM "1 2" prep_K8_SM correr_adv_par eval_K8_SM; }
+
+# K8-CLAVE-C — misma clave en dos jornadas (J1 en CAM1, 2; J2 en CAM2, 3): no
+# comparten bloqueos; la segunda queda esperando la reserva de la primera (paso 9).
+prep_K8_CLAVE_C() {
+  preparar_stock 10 || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" && ins jornada J2 "$CAM2" 30 "$V7" || return 1
+  if [[ $J1 < $J2 ]]; then JORNADAS_CTRL=("$J1" "$J2"); else JORNADAS_CTRL=("$J2" "$J1"); fi
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(cargar "$IDEM_T1" "$J1" 2); EXPR_T2=$(cargar "$IDEM_T2" "$J2" 3)
+}
+eval_K8_CLAVE_C() {
+  local ok=1 q jd jo ud uo
+  if [[ $DELANTE == T1 ]]; then q=2; jd=$J1; jo=$J2; ud=$UBI1; uo=$UBI2; else q=3; jd=$J2; jo=$J1; ud=$UBI2; uo=$UBI1; fi
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
+  cerrar "$@" $ok "primera 00000; la otra PT409 jornada_conflicto_idempotencia en el paso 9" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "un movimiento" "$(n_mov carga 1)" \
+    "depósito sólo con la primera" "$(saldo_es "$DEP" $(( 10 - q )))" "camión de la primera" "$(saldo_es "$ud" "$q")" \
+    "camión de la otra vacío" "$(saldo_es "$uo" 0)" "jornada de la primera cargada" "$(estado_es "$jd" cargada)" \
+    "jornada de la otra abierta" "$(estado_es "$jo" abierta)" "sin saldos negativos" "$INV_STOCK" \
+    "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_K8_CLAVE_C() { repetir K8-CLAVE-C "1 2" prep_K8_CLAVE_C correr_fila_indep eval_K8_CLAVE_C; }
+
+CASOS+=(I10-C I11-C K8-CC-a K8-CC-b K8-CR K8-CM K8-SM K8-CLAVE-C)
