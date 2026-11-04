@@ -1274,3 +1274,124 @@ eval_K8_CD() {
 caso_K8_CD() { repetir K8-CD "1 2" prep_K8_CD correr_fila_par eval_K8_CD; }
 
 CASOS+=(I10-D I11-D K11-d K8-CD)
+
+# =============================================================================
+# T7 — confirmar_salida (ADR-001 §18.4.9 K11 y I10/I11; §18.4.11). Casos nuevos,
+# agregados sin modificar arnes.sh ni los casos anteriores:
+#
+#   K11-a   salida (T1) contra descarga de toda la carga neta (T2): nunca las dos
+#   K11-b   salida (T1) contra carga incremental (T2)
+#   K11-c   dos salidas con claves distintas: una confirma, la otra estado_invalido
+#   I10-S   dos salidas con la misma clave: la misma operación, una sola salida
+#   I11-S   misma clave en dos jornadas: ON CONFLICT del paso 9
+#
+# confirmar_salida no toma advisory: el control retiene el FOR UPDATE de la
+# jornada (correr_fila_par de T5) y la salida se serializa con la carga y la
+# descarga de la misma jornada. Invariantes I-J2, I-J3 e I-J4 en cada repetición.
+# =============================================================================
+confirmar() { printf "public.confirmar_salida('%s', '%s')" "$1" "$2"; }
+INV_IJ4="not exists (select 1 from public.jornadas j where j.estado = 'en_reparto'
+   and not exists (select 1 from public.movimientos_stock m where m.jornada_id = j.id
+                    and m.tipo_movimiento in ('carga', 'descarga') group by m.producto_id
+                   having sum(case when m.tipo_movimiento = 'carga' then m.cantidad else -m.cantidad end) > 0))"
+INV_UNA_SALIDA="not exists (select 1 from public.operaciones where tipo = 'salida_jornada'
+   group by jornada_id having count(*) > 1)"
+
+# K11-a — salida contra descarga de toda la carga neta (8).
+prep_K11_a() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(confirmar "$IDEM_T1" "$J1"); EXPR_T2=$(descargar "$IDEM_T2" "$J1" 8 "Sin reparto")
+}
+eval_K11_a() {
+  local ok=1 inv
+  if [[ $DELANTE == T1 ]]; then
+    es_ok "$RES_T1" && es_err "$RES_T2" PT409 jornada_estado_invalido && ok=0
+    inv=$(ins invariantes "jornada en_reparto" "$(estado_es "$J1" en_reparto)" "una salida" "$(n_tipo salida_jornada 1)" \
+      "ninguna descarga" "$(n_tipo descarga 0)" "camión 8" "$(saldo_es "$UBI1" 8)" \
+      "I-J4" "$INV_IJ4" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  else
+    es_ok "$RES_T2" && es_err "$RES_T1" PT409 jornada_carga_neta_cero && ok=0
+    inv=$(ins invariantes "jornada cargada" "$(estado_es "$J1" cargada)" "ninguna salida" "$(n_tipo salida_jornada 0)" \
+      "una descarga" "$(n_tipo descarga 1)" "camión 0" "$(saldo_es "$UBI1" 0)" "depósito 10" "$(saldo_es "$DEP" 10)" \
+      "I-J4" "$INV_IJ4" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  fi
+  cerrar "$@" $ok "salida primero: en_reparto y descarga estado_invalido; descarga primero: salida carga_neta_cero" "$inv"
+}
+caso_K11_a() { repetir K11-a "1 2" prep_K11_a correr_fila_par eval_K11_a; }
+
+# K11-b — salida contra carga incremental (2).
+prep_K11_b() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(confirmar "$IDEM_T1" "$J1"); EXPR_T2=$(cargar "$IDEM_T2" "$J1" 2)
+}
+eval_K11_b() {
+  local ok=1 inv
+  if [[ $DELANTE == T2 ]]; then
+    es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
+    inv=$(ins invariantes "jornada en_reparto" "$(estado_es "$J1" en_reparto)" "dos cargas" "$(n_tipo carga 2)" \
+      "camión 10" "$(saldo_es "$UBI1" 10)" "depósito 0" "$(saldo_es "$DEP" 0)" \
+      "I-J4" "$INV_IJ4" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  else
+    es_ok "$RES_T1" && es_err "$RES_T2" PT409 jornada_estado_invalido && ok=0
+    inv=$(ins invariantes "jornada en_reparto" "$(estado_es "$J1" en_reparto)" "una carga" "$(n_tipo carga 1)" \
+      "la carga no reservó" "$(n_clave "$IDEM_T2" 0)" "camión 8" "$(saldo_es "$UBI1" 8)" "depósito 2" "$(saldo_es "$DEP" 2)" \
+      "I-J4" "$INV_IJ4" "sin saldos negativos" "$INV_STOCK" "sin huérfanas" "$INV_HUERFANAS_STOCK")
+  fi
+  cerrar "$@" $ok "carga primero: las dos 00000; salida primero: carga estado_invalido sin movimientos" "$inv"
+}
+caso_K11_b() { repetir K11-b "1 2" prep_K11_b correr_fila_par eval_K11_b; }
+
+# K11-c — dos salidas con claves distintas.
+prep_K11_c() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(confirmar "$IDEM_T1" "$J1"); EXPR_T2=$(confirmar "$IDEM_T2" "$J1")
+}
+eval_K11_c() {
+  local ok=1
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_estado_invalido && ok=0
+  cerrar "$@" $ok "delante 00000; la otra PT409 jornada_estado_invalido" "$(ins invariantes \
+    "jornada en_reparto" "$(estado_es "$J1" en_reparto)" "una salida" "$(n_tipo salida_jornada 1)" \
+    "la rechazada no reservó" "$(n_clave "$(idem_de "$OTRO")" 0)" "una salida por jornada" "$INV_UNA_SALIDA" \
+    "I-J4" "$INV_IJ4" "sin huérfanas" "$INV_HUERFANAS_STOCK")"
+}
+caso_K11_c() { repetir K11-c "1 2" prep_K11_c correr_fila_par eval_K11_c; }
+
+# I10-S — dos salidas con la misma clave (K11-c con la misma clave).
+prep_I10_S() {
+  prep_descarga_base || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(confirmar "$IDEM_T1" "$J1"); EXPR_T2=$EXPR_T1
+}
+eval_I10_S() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && mismo_uuid && ok=0
+  cerrar "$@" $ok "las dos 00000 con la misma operación" "$(ins invariantes \
+    "jornada en_reparto" "$(estado_es "$J1" en_reparto)" "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" \
+    "una salida" "$(n_tipo salida_jornada 1)" "una salida por jornada" "$INV_UNA_SALIDA" "I-J4" "$INV_IJ4")"
+}
+caso_I10_S() { repetir I10-S "1 2" prep_I10_S correr_fila_par eval_I10_S; }
+
+# I11-S — misma clave sobre dos jornadas cargadas (J1 con 8, J2 con 2).
+prep_I11_S() {
+  preparar_stock 10 || return 1
+  ins jornada J1 "$CAM1" 30 "$V3" && ins jornada J2 "$CAM2" 30 "$V7" || return 1
+  cargar_previa "$J1" 8 && cargar_previa "$J2" 2 || return 1
+  if [[ $J1 < $J2 ]]; then JORNADAS_CTRL=("$J1" "$J2"); else JORNADAS_CTRL=("$J2" "$J1"); fi
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(confirmar "$IDEM_T1" "$J1"); EXPR_T2=$(confirmar "$IDEM_T2" "$J2")
+}
+eval_I11_S() {
+  local ok=1 jd jo
+  if [[ $DELANTE == T1 ]]; then jd=$J1; jo=$J2; else jd=$J2; jo=$J1; fi
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
+  cerrar "$@" $ok "primera 00000; la otra PT409 jornada_conflicto_idempotencia en el paso 9" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "una salida" "$(n_tipo salida_jornada 1)" \
+    "jornada de la primera en_reparto" "$(estado_es "$jd" en_reparto)" "jornada de la otra cargada" "$(estado_es "$jo" cargada)" \
+    "I-J4" "$INV_IJ4")"
+}
+caso_I11_S() { repetir I11-S "1 2" prep_I11_S correr_fila_indep eval_I11_S; }
+
+CASOS+=(K11-a K11-b K11-c I10-S I11-S)

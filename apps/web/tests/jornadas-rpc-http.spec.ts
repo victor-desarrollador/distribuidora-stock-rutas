@@ -1,4 +1,4 @@
-// abrir_jornada, reasignar_vendedor, registrar_carga y registrar_descarga por la Data API real (PostgREST de
+// abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga y confirmar_salida por la Data API real (PostgREST de
 // Supabase local): método HTTP, idempotencia, permisos y concurrencia.
 //
 // Corrección extraordinaria T1/T2 (ADR-001 §6 y §16 T14; migración
@@ -722,6 +722,107 @@ test.describe("registrar_descarga por HTTP", () => {
   });
 });
 
+// confirmar_salida (T7): clave y jornada.
+function salidaParams(clave: string, jornada: string): Params {
+  return { p_idempotency_key: clave, p_jornada_id: jornada };
+}
+
+async function estadoDe(request: APIRequestContext, api: DataApi, jornada: string) {
+  const r = await request.get(`${api.url}/rest/v1/jornadas?select=estado&id=eq.${jornada}`, {
+    headers: encabezados(api, api.tokenDueno),
+  });
+  expect(r.status()).toBe(200);
+  const [fila] = (await r.json()) as { estado: string }[];
+  return fila.estado;
+}
+
+test.describe("confirmar_salida por HTTP", () => {
+  test("POST nuevo y repetido, carga neta cero y abierta; GET/HEAD siempre 405", async ({ page, request }) => {
+    const api = await dataApiDesdeApp(page);
+    const { producto, jornada } = await jornadaCargada(request, api);
+    const clave = randomUUID();
+    const params = salidaParams(clave, jornada);
+
+    // GET y HEAD con clave nueva: 405, la clave no queda reservada y la jornada sigue cargada.
+    await esperar405(await get(request, api, "confirmar_salida", params, api.tokenDueno));
+    expect((await head(request, api, "confirmar_salida", params, api.tokenDueno)).status()).toBe(405);
+    expect(await operacionesConClave(request, api, clave)).toEqual([]);
+    expect(await estadoDe(request, api, jornada)).toBe("cargada");
+
+    // POST nuevo: en_reparto; replay: mismo uuid.
+    const operacion = await esperarUuid(await post(request, api, "confirmar_salida", params, api.tokenDueno));
+    expect(await operacionesConClave(request, api, clave)).toEqual([{ id: operacion, tipo: "salida_jornada" }]);
+    expect(await estadoDe(request, api, jornada)).toBe("en_reparto");
+    expect(await esperarUuid(await post(request, api, "confirmar_salida", params, api.tokenDueno))).toBe(operacion);
+
+    // Otra clave sobre la jornada ya en reparto, y carga y descarga posteriores: 409.
+    await esperarError(
+      await post(request, api, "confirmar_salida", salidaParams(randomUUID(), jornada), api.tokenDueno),
+      409, "PT409", "jornada_estado_invalido"
+    );
+    await esperarError(
+      await postJson(request, api, "registrar_carga", cargaJson(randomUUID(), jornada, producto, 1), api.tokenDueno),
+      409, "PT409", "jornada_estado_invalido"
+    );
+    await esperarError(
+      await postJson(request, api, "registrar_descarga", descargaJson(randomUUID(), jornada, producto, 1, "x"), api.tokenDueno),
+      409, "PT409", "jornada_estado_invalido"
+    );
+
+    // GET/HEAD con la clave ya usada: 405, nunca 200.
+    await esperar405(await get(request, api, "confirmar_salida", params, api.tokenDueno));
+    expect((await head(request, api, "confirmar_salida", params, api.tokenDueno)).status()).toBe(405);
+
+    // Carga neta cero (todo descargado) y jornada abierta sin carga: 409.
+    const vacia = await jornadaCargada(request, api);
+    await esperarUuid(
+      await postJson(request, api, "registrar_descarga", descargaJson(randomUUID(), vacia.jornada, vacia.producto, 10, "Sin reparto"), api.tokenDueno)
+    );
+    await esperarError(
+      await post(request, api, "confirmar_salida", salidaParams(randomUUID(), vacia.jornada), api.tokenDueno),
+      409, "PT409", "jornada_carga_neta_cero"
+    );
+    const abierta = await abrir(request, api, await crearCamion(request, api), fechaFutura());
+    await esperarError(
+      await post(request, api, "confirmar_salida", salidaParams(randomUUID(), abierta), api.tokenDueno),
+      409, "PT409", "jornada_estado_invalido"
+    );
+    expect(await estadoDe(request, api, vacia.jornada)).toBe("cargada");
+  });
+
+  test("roles y otra empresa: POST según permisos, GET/HEAD 405 para authenticated, anon 401", async ({ page, request }) => {
+    const api = await dataApiDesdeApp(page);
+    const { jornada } = await jornadaCargada(request, api);
+    const [tokenEncargado, tokenVendedor, tokenOtra] = await Promise.all([
+      tokenDe(request, api, CUENTAS.encargado),
+      tokenDe(request, api, CUENTAS.vendedor),
+      tokenDe(request, api, CUENTAS.otraEmpresa),
+    ]);
+
+    const paramsV = salidaParams(randomUUID(), jornada);
+    await esperarError(await post(request, api, "confirmar_salida", paramsV, tokenVendedor), 403, "PT403", "jornada_no_autorizado");
+    await esperar405(await get(request, api, "confirmar_salida", paramsV, tokenVendedor));
+    expect((await head(request, api, "confirmar_salida", paramsV, tokenVendedor)).status()).toBe(405);
+
+    const paramsB = salidaParams(randomUUID(), jornada);
+    await esperarError(await post(request, api, "confirmar_salida", paramsB, tokenOtra), 404, "PT404", "jornada_no_encontrada");
+    await esperar405(await get(request, api, "confirmar_salida", paramsB, tokenOtra));
+
+    const paramsE = salidaParams(randomUUID(), jornada);
+    await esperarError(await post(request, api, "confirmar_salida", paramsE), 401, "42501");
+    await esperarError(await get(request, api, "confirmar_salida", paramsE), 401, "42501");
+    expect((await head(request, api, "confirmar_salida", paramsE)).status()).toBe(401);
+    expect(await estadoDe(request, api, jornada)).toBe("cargada");
+
+    await esperar405(await get(request, api, "confirmar_salida", paramsE, tokenEncargado));
+    const operacion = await esperarUuid(await post(request, api, "confirmar_salida", paramsE, tokenEncargado));
+    expect(await operacionesConClave(request, api, paramsE.p_idempotency_key)).toEqual([{ id: operacion, tipo: "salida_jornada" }]);
+    expect(await estadoDe(request, api, jornada)).toBe("en_reparto");
+    expect(await operacionesConClave(request, api, paramsV.p_idempotency_key)).toEqual([]);
+    expect(await operacionesConClave(request, api, paramsB.p_idempotency_key)).toEqual([]);
+  });
+});
+
 test.describe("superficie de la Data API de jornadas", () => {
   test("Content-Profile/Accept-Profile privado no alcanza las implementaciones", async ({ page, request }) => {
     const api = await dataApiDesdeApp(page);
@@ -733,6 +834,7 @@ test.describe("superficie de la Data API de jornadas", () => {
       ["reasignar_vendedor", reasignacionParams(randomUUID(), randomUUID(), ID_VENDEDOR)],
       ["registrar_carga", cargaParams(randomUUID(), randomUUID(), randomUUID(), 1)],
       ["registrar_descarga", descargaParams(randomUUID(), randomUUID(), randomUUID(), 1, "x")],
+      ["confirmar_salida", salidaParams(randomUUID(), randomUUID())],
     ] as const) {
       const rPost = await request.post(rpcUrl(api, rpc), {
         headers: encabezados(api, api.tokenDueno, { "content-profile": "privado" }),
@@ -791,6 +893,7 @@ test.describe("service_role sobre la Data API de jornadas", () => {
       ["reasignar_vendedor", reasignacion],
       ["registrar_carga", cargaParams(randomUUID(), jornada, randomUUID(), 1)],
       ["registrar_descarga", descargaParams(randomUUID(), jornada, randomUUID(), 1, "x")],
+      ["confirmar_salida", salidaParams(randomUUID(), jornada)],
     ] as const) {
       const rPost = await conClaveSecreta(clave, "POST", rpcUrl(api, rpc), p);
       expect([rPost.status, rPost.cuerpo?.code]).toEqual([403, "42501"]);

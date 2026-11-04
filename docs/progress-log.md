@@ -1,4 +1,67 @@
 ---
+## 04/11/2026 — T7: RPC `confirmar_salida` (sin commit)
+
+**Rama:** `feat/rpc-jornadas-t7-confirmar-salida`, desde `1fe6d787ae5a11fefd8cf06064b99001a855a11c` (T6), en el mismo directorio de trabajo, sin worktree nuevo (procedimiento de la fase). Toca superficies sensibles (Supabase, `SECURITY DEFINER`, idempotencia, concurrencia, RLS, `empresa_id`). La auditoría queda para la auditoría integral de la fase.
+
+**Decisiones humanas (04/11/2026):**
+- Precedencia de negocio: estado → carga neta.
+- Las regresiones de flujo real de T5 y T6 van en la suite de T7; las suites de T5 y T6 no se tocan.
+- K11-a/b/c, I10-S e I11-S se agregan al arnés.
+
+### Qué se hizo
+- **Migración `20261108120000_rpc_confirmar_salida.sql`.** Crea `public.confirmar_salida(uuid, uuid)`, una fachada `SECURITY INVOKER` de `postgres`, y `privado.confirmar_salida`, `SECURITY DEFINER` de `propietario_rpc`, con `search_path = ''`.
+  - `EXECUTE` sólo para `authenticated`; propiedad transferida con `CREATE` transitorio (O-3) y verificación fail-closed.
+  - **Sin cambios de esquema, grants ni políticas.**
+  - **Precondiciones:** exige A1 y T6.
+- **Contrato** (ADR-007 §2.2, §2.3 y §2.7; ADR-001 §18.4; E-SL1):
+  - **Orden:** paso 0 (sólo lectura → `25006`) → estructura (clave, jornada) → huella `v1|salida_jornada|<jornada>` → replay → `FOR UPDATE` de la jornada → 8a → reserva → estado `cargada` → carga neta positiva en al menos un producto (`PT409 jornada_carga_neta_cero`) → `UPDATE` a `en_reparto` verificado por `ROW_COUNT`.
+  - **Bloqueos:** sin advisory. La carga, la descarga y la salida de una misma jornada se serializan por el `FOR UPDATE`.
+  - **Efectos:** no genera movimientos ni historial y no cambia el vendedor.
+  - **Camión de baja:** se admite (§2.7).
+- **`supabase/tests/jornadas_salida.test.sql` (65 aserciones):**
+  - **Catálogo y seguridad:** roles, otra empresa, `anon`/`service_role` y DML directo sobre `jornadas` y `operaciones`.
+  - **Estructura:** I13/I14.
+  - **Casos de ADR-007:** 20, 21 (carga neta cero; desde `abierta`, con el estado antes que la carga neta), 22 y 24.
+  - **Idempotencia:** I1–I9 e I12.
+  - **Flujo real (regresión de T5/T6):** `abrir_jornada` → `registrar_carga` → `registrar_descarga` → `confirmar_salida`, todas reales. Después, la carga, la descarga y la reasignación se rechazan (`jornada_estado_invalido`); los replays de la carga, la descarga y la salida devuelven las operaciones originales; el vendedor queda fijado.
+  - **Invariantes:** I-J2, I-J4, a lo sumo una salida por jornada, sin saldos negativos y empresa B intacta.
+  - **E-SL1:** sólo lectura → `25006`.
+- **Pruebas ampliadas:**
+  - productos y camiones: 19 funciones `SECURITY DEFINER`;
+  - grants: 36 firmas;
+  - hardening: 30 firmas de negocio y 15 implementaciones;
+  - `pg_temp_jornadas`: salida y replay con los objetos hostiles presentes y 7 llamadas en sólo lectura.
+- **Arnés** (`casos.sh`, sólo agregados): `K11-a`, `K11-b`, `K11-c`, `I10-S` e `I11-S`, con los ejecutores por fila de T5 y las invariantes I-J4 y de una salida por jornada.
+- **HTTP:** bloque `confirmar_salida`:
+  - GET/HEAD 405, POST y replay;
+  - otra clave, carga y descarga después de la salida → 409;
+  - carga neta cero y jornada abierta → 409;
+  - roles, otra empresa y `anon`.
+  - También se agrega a los recorridos de `Content-Profile` y `service_role`.
+
+### Cómo se verificó (04/11/2026; laboratorio `pgtempa1-lab`, PostgreSQL 17, CLI 2.120.0)
+Evidencia en `../evidencia-t7-salida/`.
+- `supabase db reset` (`01_…`): 23 migraciones, exit 0. `supabase test db` (`02_…`): `Files=31, Tests=2048, Result: PASS`, exit 0. `db lint --level warning` (`03_…`): sin errores, exit 0.
+- **Mutantes** (`04_…`, `scripts/mutantes_salida.py`). Todos detectados; al restaurar, PASS:
+  - un tipo sin calificar;
+  - replay sin huella;
+  - sin guarda;
+  - sin el control de carga neta;
+  - estado `abierta` admitido;
+  - salida que no cambia el estado;
+  - carga neta sin filtrar por jornada.
+- **Sensibilidad del arnés:** no se ejecutó (procedimiento: sin mutantes de concurrencia costosos en esta tarea). La serialización por `FOR UPDATE` es la misma que ya se probó con mutantes en T5 y T6.
+- **Arnés completo** (`06_…`): código original, una sola corrida: `768 verificaciones, 0 fallas`, exit 0, 291 s; 23 migraciones. K11-a, K11-b, K11-c, I10-S e I11-S dan 20/20 cada uno, y los casos de T3, T5 y T6 no cambian. Deadlocks sólo en AUTO (20/20); residuos 0; sin fallos instrumentales; sin procesos ni directorios del arnés al terminar.
+- **`apps/web/`:** `typecheck`, `lint`, `test` (`31 files, 1168 tests`) y `build`, exit 0. `npx playwright test`: `110 passed`, exit 0.
+
+### Riesgos y pendientes
+- **P-2** (participación para el conteo) sigue pendiente; no se implementa.
+- **Fuera de alcance:** las transiciones posteriores a `en_reparto`.
+- **Fixtures `en_reparto` de T5/T6:** se conservan, y ahora tienen su equivalente con flujo real en T7.
+- **Siguiente tarea:** T4 `corregir_jornada`, para cerrar la fase.
+- **Auditoría:** integral, al final de la fase.
+
+---
 ## 04/11/2026 — T6: RPC `registrar_descarga` (sin commit)
 
 **Rama:** `feat/rpc-jornadas-t6-registrar-descarga`, desde `e79bf8e2191967763ae59d532c1a2b770629b123` (T5). Toca superficies sensibles (Supabase, `SECURITY DEFINER`, `movimientos_stock`, idempotencia, concurrencia, RLS, `empresa_id`).
