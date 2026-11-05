@@ -1,4 +1,73 @@
 ---
+## 04/11/2026 — ADR-009 ratificada: forward-only para validación controlada (documental, sin commit)
+
+**Rama:** `integracion/jornadas-fase1`, HEAD `05b9d8dee490080c01972dcf801ea119433b6e63`, mismo worktree. Cambio **exclusivamente documental**. No se ejecutaron rollbacks, tests, auditorías ni nada remoto.
+
+**Decisión humana (04/11/2026, 23:29, `America/Argentina/Tucuman`):** se aprueba **ADR-009 v0.3 para validación controlada**, con **F-1 a F-9**. La aprobación ratifica el procedimiento forward-only y el estado declarado de los rollbacks; **no** ejecuta rollbacks, **no** autoriza staging ni producción y **no** cierra T1-1 ni T1-2.
+
+### Qué se hizo
+- **ADR-009:** estado → `APROBADA PARA VALIDACIÓN CONTROLADA`; se registra la ratificación (fecha y hora de Tucumán). Se conservan íntegramente **F-1 a F-9** y el registro de riesgos (§6). Sólo se ajustaron el aviso de alcance, §2.9 (estado de los controles) y el encabezado de §5; no cambió el contenido normativo.
+- **`docs/decisions/README.md`:** fila 009 y nota de estado actualizadas a la ratificación.
+- **`supabase/rollback/README.md`:** se eliminó únicamente la advertencia de que la política no estaba ratificada. Se mantienen la prohibición operativa, la tabla de SHA-256 y los defectos conocidos.
+- **Esta bitácora.**
+
+### Verificaciones
+- Sólo cambiaron los cuatro documentos de este paquete; `git diff` no toca migraciones, scripts de rollback, código, CI ni configuración.
+- SHA-256 de las 24 migraciones y de los 4 scripts de rollback: **idénticos al HEAD `05b9d8d`**; los cuatro valores del README coinciden 4/4 con el árbol.
+- **T1-1 y T1-2 siguen identificados como abiertos** (ADR §6 y README de rollback).
+- **C-2 sigue registrado como propuesto/pendiente** (ADR §7); no se tocó CI.
+- El árbol Git del paquete y el SHA-256 del diff documental se informan en la entrega para autorizar el commit; no se auto-referencian en este archivo.
+
+### Pendientes
+1. Autorización humana del **commit local** de este paquete.
+2. **C-2** (guarda en CI) sin implementar; requiere tarea autorizada.
+3. **Auditoría integral de jornadas sobre el hash definitivo**: tramos 3 y 4 de Codex no emitieron dictamen, el tramo 5 no se lanzó y OpenCode no emitió dictamen. Con la ratificación, T1-1/T1-2 ya no bloquean la integración, pero siguen abiertos.
+4. Push, PR, merge y deploy: **no autorizados**.
+
+---
+## 04/11/2026 — ADR-009 v0.3: política forward-only y estado de los rollbacks (documental, sin commit)
+
+**Rama:** `integracion/jornadas-fase1`, HEAD `05b9d8dee490080c01972dcf801ea119433b6e63`, mismo worktree, sin worktree nuevo. Cambio **exclusivamente documental**: no toca migraciones, scripts de `supabase/rollback/`, código funcional, esquema ni seguridad. **No se ejecutaron rollbacks, tests, auditorías ni nada remoto.**
+
+**Decisión de dirección (humana, 04/11/2026):** alternativa B — migraciones hacia adelante, sin usar los rollbacks manuales como mecanismo normal de reversión. **ADR-009 no queda aprobada**: se prepara la v0.3 para ratificación.
+
+### Qué se hizo
+- **`docs/decisions/009-migraciones-hacia-adelante-y-rollbacks.md` (nuevo, v0.3, PROPUESTA — NO APROBADA).**
+  - Fija forward-only como procedimiento normal y prohíbe los rollbacks **D-1, D-2, T1 y T2** en staging, producción y cualquier base con datos reales o identidad no verificada.
+  - Incorpora **T1-1** (el rollback de D-2 rompe `abrir_jornada`/`reasignar_vendedor` al eliminar la vista de D-2 sin comprobar consumidores) y **T1-2** (barrido del rollback de D-1 limitado a `public`/`privado`; `476a84f` no integrado), más T1-3, M-4, N-1, B-1, H-14 y A5.
+  - **No excluye los rollbacks de la identificación de riesgos**: los defectos quedan como hallazgos técnicos **abiertos** (§6) y deben figurar en la security review y en las auditorías. «No bloquear la integración» (§2.7, F-8) no equivale a «cerrar el hallazgo»; F-9 restablece el bloqueo si se autoriza ejecutar un rollback.
+  - F-3: prohibición extendida a D-2, T1 y T2. F-5: no integrar `476a84f`.
+  - Propone controles C-1 a C-7 contra el uso accidental; C-1, C-4 y C-7 quedan verificados o preparados, C-2 (guarda en CI) queda **propuesto** y requiere tarea autorizada.
+- **`supabase/rollback/README.md` (nuevo).** Declara los cuatro scripts como no autorizados, con SHA-256, defectos conocidos, orden de dependencia entre D-1 y D-2 y la prohibición de editarlos. Se marca como parte del paquete de la ADR no aprobada.
+- **`docs/decisions/README.md`.** Se agrega la fila 009 al índice y una nota: sigue en propuesta y no modifica decisiones anteriores.
+
+### Revisión estática de CI, deploy y documentación (04/11/2026)
+- `.github/workflows/ci.yml`: único workflow; no menciona ni ejecuta migraciones ni rollbacks.
+- `apps/web/package.json` (sin scripts de base de datos) y `apps/web/vercel.json` (sólo rewrite de SPA): sin invocaciones.
+- `supabase/config.toml`: `[db.migrations]` y `[db.seed]` sólo apuntan a migraciones y `./seed.sql`; sin hooks de rollback.
+- `supabase/scripts/verificar_legado_pieza.sh`, `supabase/tests/concurrencia/arnes.sh` y `casos.sh`: sin invocaciones.
+- Las únicas menciones son comentarios en los propios scripts, en las cabeceras de las migraciones D-2/D-1 y en ADR-001 §18.4.15 (C-3).
+- **Conclusión:** hoy no hay invocación automatizada; el riesgo es operativo manual.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `docs/decisions/009-migraciones-hacia-adelante-y-rollbacks.md` | nuevo (v0.3, propuesta) |
+| `supabase/rollback/README.md` | nuevo |
+| `docs/decisions/README.md` | fila 009 en el índice + nota de estado |
+| `docs/progress-log.md` | esta entrada |
+
+### Cómo se verificó
+Revisión estática de los archivos citados y `sha256sum` de los cuatro scripts (volcado en el README). **No se ejecutaron** `db reset`, `test db`, `db lint`, suites web, Playwright, arnés ni rollbacks: el cambio no altera comportamiento y no hay artefacto ejecutable nuevo. `git diff` se limita a los cuatro archivos de la tabla; migraciones y rollbacks quedan byte a byte iguales.
+
+### Riesgos y pendientes
+1. **La ADR no está aprobada**; hasta la ratificación humana, la prohibición no es normativa y T1-1/T1-2 siguen bloqueando.
+2. **Riesgo residual:** ejecución manual pese a la prohibición. Mitigado por C-1 y C-3 a C-7; la guarda en CI (C-2) no está implementada.
+3. Los scripts conservan sus propias instrucciones «local o staging»; la ADR aclara que no prevalecen, pero no se editaron.
+4. **No cierra la cobertura de auditoría:** los tramos 3 y 4 de Codex no emitieron dictamen y el tramo 5 no se lanzó.
+
+---
 ## 04/11/2026 — T4: RPC `corregir_jornada` (sin commit)
 
 **Rama:** `feat/rpc-jornadas-t4-corregir-jornada`, desde `fd6e8598620d6714ccf97ddb30b776d06efe1531` (commit local de T7), en el mismo directorio de trabajo, sin worktree nuevo. Toca superficies sensibles (Supabase, `SECURITY DEFINER`, RLS, `empresa_id`, idempotencia, concurrencia): la security review queda dentro de la auditoría integral de la fase.
