@@ -1,4 +1,52 @@
 ---
+## 04/11/2026 — T4: RPC `corregir_jornada` (sin commit)
+
+**Rama:** `feat/rpc-jornadas-t4-corregir-jornada`, desde `fd6e8598620d6714ccf97ddb30b776d06efe1531` (commit local de T7), en el mismo directorio de trabajo, sin worktree nuevo. Toca superficies sensibles (Supabase, `SECURITY DEFINER`, RLS, `empresa_id`, idempotencia, concurrencia): la security review queda dentro de la auditoría integral de la fase.
+
+**Decisiones humanas (04/11/2026):**
+1. Precedencia del paso 10: estado → movimientos de stock → fecha final → existencia y actividad del camión final → `jornada_sin_cambios` → `jornada_duplicada` → `jornada_camion_con_jornada_abierta` → `jornada_vendedor_ocupado`.
+2. Se revalidan siempre la fecha y el camión finales, aunque alguno no cambie.
+3. No se exige que el vendedor vigente esté activo; no se lo modifica y sólo se verifica su ocupación.
+4. Se autoriza un único mutante de concurrencia H-01 (vendedor después del `FOR UPDATE`) para comprobar que K12 lo detecta.
+
+### Qué se hizo
+- **Migración `20261109120000_rpc_corregir_jornada.sql`.** Crea `public.corregir_jornada(uuid, uuid, date, uuid, text)`, una fachada `SECURITY INVOKER` de `postgres`, y `privado.corregir_jornada`, `SECURITY DEFINER` de `propietario_rpc`, con `search_path = ''`.
+  - `EXECUTE` sólo para `authenticated`; propiedad transferida con `CREATE` transitorio (O-3) y verificación fail-closed.
+  - **Sin cambios de esquema, grants ni políticas** (usa `correcciones_jornada` y los grants de D-1).
+  - **Precondiciones:** exige A1 y T7.
+- **Contrato** (ADR-007 §2.4 y §2.7; ADR-001 §18.4 con H-01 y H2-R1; E-SL1):
+  - **Orden:** paso 0 (sólo lectura → `25006`) → estructura (clave → jornada → fecha → camión → motivo) → huella `v1|correccion_jornada|<jornada>|<YYYY-MM-DD>|<camión>|+<motivo btrim>` → replay → lectura de la jornada → advisory nivel 1 (camión actual y final, en orden de uuid, sin duplicar) y nivel 2 (vendedor vigente, siempre) → `FOR UPDATE` → 8a → 8b (camión y vendedor) → reserva → negocio en la precedencia aprobada → historial + `UPDATE` de fecha y camión verificado por `ROW_COUNT`.
+  - **Efectos:** `operaciones` +1, `correcciones_jornada` +1, `jornadas.fecha` y `camion_id`; estado y vendedor intactos; sin movimientos; el par anterior queda libre.
+- **`supabase/tests/jornadas_correccion.test.sql` (105 aserciones):**
+  - **Catálogo y seguridad:** ACL, propietario, sobrecargas, E-SL1 como primera sentencia, orden estático nivel 1 → 2 → 3; `anon`/`service_role`, roles, otra empresa (jornada y camión), DML directo sobre `jornadas` y `correcciones_jornada`.
+  - **Estructura:** I13/I14.
+  - **Casos de ADR-007:** 10 (fecha y camión, sólo fecha, sólo camión, hacia el día operativo actual), 11 (par ocupado por jornada cerrada y abierta, fecha pasada y día anterior, camión inactivo, camión con otra jornada sin cerrar, vendedor ocupado), 12 (cargada, sin motivo), 22 (en reparto) y 24 (hacia un camión de baja; desde un camión de baja hacia uno activo).
+  - **Decisiones 1 a 3:** cada par de la precedencia, la revalidación de valores sin cambiar y la corrección con vendedor vigente inactivo.
+  - **Idempotencia:** I1–I9 e I12 (motivo con espacios laterales = replay; mayúsculas o espacios internos = conflicto).
+  - **Flujo real:** `abrir_jornada` → `corregir_jornada` → `registrar_carga` (los movimientos van a la ubicación del camión corregido, I-CAMION) → `confirmar_salida`; después, corrección rechazada y replay válido.
+  - **Invariantes:** I-J1, una fila de historial por operación, empresa B intacta.
+- **Pruebas ampliadas:**
+  - productos y camiones: 20 funciones `SECURITY DEFINER`;
+  - grants: 38 firmas;
+  - hardening: 32 firmas de negocio y 16 implementaciones;
+  - `pg_temp_jornadas`: vista hostil de `correcciones_jornada`, corrección (encargado) y replay con los objetos hostiles presentes (camión fixture nuevo `c6`), huella canónica y 8 llamadas en sólo lectura.
+- **Arnés** (`casos.sh`, sólo agregados): `I10-CJ`, `I11-CJ`, `K5`, `K5-v`, `K6-f`, `K6-c`, `K7-a/b/c`, `K9-C`, `K12-a/b`, `K12-v`, `O-C1/2/3`, `K8-CQ` y `K8-BAJA-CJ`, con un ejecutor nuevo (`correr_encadenado`) para las variantes en que la reasignación ya retiene sus advisory.
+- **HTTP:** bloque `corregir_jornada` (GET/HEAD 405, POST y replay, conflicto, motivo vacío, sin cambios, fecha pasada, cargada, roles, otra empresa y `anon`), más los recorridos de `Content-Profile` y `service_role`.
+
+### Cómo se verificó (04/11/2026; laboratorio `pgtempa1-lab`, PostgreSQL 17, CLI 2.120.0)
+Evidencia en `../evidencia-t4-correccion/`.
+- `supabase db reset` (`01_…`): 24 migraciones, exit 0. `supabase test db` (`02_…`): `Files=32, Tests=2153, Result: PASS`, exit 0. `db lint --level warning` (`03_…`): sin errores, exit 0.
+- **Mutantes pgTAP** (`04_…`, `scripts/mutantes_correccion.py`): 12, todos detectados; al restaurar, PASS. Un tipo sin calificar; replay sin huella; sin guarda; sin el control de movimientos; `cargada` admitida; vendedor ocupado y camión con jornada abierta sin excluir a la propia jornada; `UPDATE` sin el camión; sin revalidar la fecha o el camión cuando no cambian; precedencia invertida; vendedor después del `FOR UPDATE` (estático).
+- **Mutante de concurrencia H-01** (`05_…`; copia descartable, nunca en la rama; R = 3, sólo K12): con el advisory del vendedor después del `FOR UPDATE`, `K12-a` y `K12-b` fallan en el orden «reasignación delante» con 6 `40P01` fuera de AUTO (control `DEADLOCKS` en FAIL) y `K12-v` falla en sus 3 repeticiones (la corrección no espera al vendedor); 10 fallas de 30, exit 1, 651 s. El orden «corrección delante» no forma ciclo y pasa, como se esperaba.
+- **Arnés completo** (`06_…`): código original, una sola corrida, R = 10: `1068 verificaciones, 0 fallas`, exit 0, 375 s; 24 migraciones. Los 18 casos nuevos dan 20/20 (10/10 en los de un solo orden), y los casos de T3, T5, T6 y T7 no cambian. Deadlocks sólo en AUTO (20/20); residuos 0; sin fallos instrumentales.
+- **`apps/web/`:** `typecheck`, `lint`, `test` (`31 files, 1168 tests`) y `build`, exit 0. `npx playwright test`: `112 passed`, exit 0.
+
+### Riesgos y pendientes
+- `btrim` recorta sólo espacios, no tabuladores (igual que en `registrar_descarga`); un motivo de sólo tabuladores se acepta. No se cambia sin decisión.
+- **P-2** sigue pendiente; no se implementa.
+- **Siguiente etapa:** commit local de T4 (con autorización), verificación de cobertura de la fase, unificación de ramas y auditoría integral con Codex y OpenCode.
+
+---
 ## 04/11/2026 — T7: RPC `confirmar_salida` (sin commit)
 
 **Rama:** `feat/rpc-jornadas-t7-confirmar-salida`, desde `1fe6d787ae5a11fefd8cf06064b99001a855a11c` (T6), en el mismo directorio de trabajo, sin worktree nuevo (procedimiento de la fase). Toca superficies sensibles (Supabase, `SECURITY DEFINER`, idempotencia, concurrencia, RLS, `empresa_id`). La auditoría queda para la auditoría integral de la fase.

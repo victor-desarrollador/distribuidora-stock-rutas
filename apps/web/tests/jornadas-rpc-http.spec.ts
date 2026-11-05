@@ -1,4 +1,5 @@
-// abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga y confirmar_salida por la Data API real (PostgREST de
+// abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida y corregir_jornada por la Data API
+// real (PostgREST de
 // Supabase local): método HTTP, idempotencia, permisos y concurrencia.
 //
 // Corrección extraordinaria T1/T2 (ADR-001 §6 y §16 T14; migración
@@ -823,6 +824,131 @@ test.describe("confirmar_salida por HTTP", () => {
   });
 });
 
+// corregir_jornada (T4): clave, jornada, fecha final, camión final y motivo.
+function correccionParams(clave: string, jornada: string, fecha: string, camion: string, motivo: string): Params {
+  return { p_idempotency_key: clave, p_jornada_id: jornada, p_fecha: fecha, p_camion_id: camion, p_motivo: motivo };
+}
+
+async function jornadaDe(request: APIRequestContext, api: DataApi, jornada: string) {
+  const r = await request.get(`${api.url}/rest/v1/jornadas?select=camion_id,fecha,vendedor_id,estado&id=eq.${jornada}`, {
+    headers: encabezados(api, api.tokenDueno),
+  });
+  expect(r.status()).toBe(200);
+  const [fila] = (await r.json()) as { camion_id: string; fecha: string; vendedor_id: string; estado: string }[];
+  return fila;
+}
+
+async function correccionesDe(request: APIRequestContext, api: DataApi, jornada: string) {
+  const r = await request.get(
+    `${api.url}/rest/v1/correcciones_jornada?select=operacion_id,camion_anterior_id,camion_nuevo_id,fecha_anterior,fecha_nueva,motivo&jornada_id=eq.${jornada}`,
+    { headers: encabezados(api, api.tokenDueno) }
+  );
+  expect(r.status()).toBe(200);
+  return (await r.json()) as Record<string, string>[];
+}
+
+test.describe("corregir_jornada por HTTP", () => {
+  test("POST nuevo, repetido, con otra huella y rechazos; GET/HEAD siempre 405", async ({ page, request }) => {
+    const api = await dataApiDesdeApp(page);
+    const camion = await crearCamion(request, api);
+    const otroCamion = await crearCamion(request, api);
+    const fecha = fechaFutura();
+    const fechaNueva = fechaFutura();
+    const jornada = await abrir(request, api, camion, fecha);
+    const clave = randomUUID();
+    const params = correccionParams(clave, jornada, fechaNueva, otroCamion, "Error de carga");
+
+    // GET y HEAD con clave nueva: 405, la clave no queda reservada y la jornada no cambia.
+    await esperar405(await get(request, api, "corregir_jornada", params, api.tokenDueno));
+    expect((await head(request, api, "corregir_jornada", params, api.tokenDueno)).status()).toBe(405);
+    expect(await operacionesConClave(request, api, clave)).toEqual([]);
+    expect(await jornadaDe(request, api, jornada)).toMatchObject({ camion_id: camion, fecha, estado: "abierta" });
+
+    // POST nuevo (motivo con espacios laterales): fecha y camión nuevos, historial.
+    const operacion = await esperarUuid(
+      await post(request, api, "corregir_jornada", { ...params, p_motivo: "  Error de carga  " }, api.tokenDueno)
+    );
+    expect(await operacionesConClave(request, api, clave)).toEqual([{ id: operacion, tipo: "correccion_jornada" }]);
+    expect(await jornadaDe(request, api, jornada)).toEqual({
+      camion_id: otroCamion, fecha: fechaNueva, vendedor_id: ID_VENDEDOR, estado: "abierta",
+    });
+    expect(await correccionesDe(request, api, jornada)).toEqual([{
+      operacion_id: operacion, camion_anterior_id: camion, camion_nuevo_id: otroCamion,
+      fecha_anterior: fecha, fecha_nueva: fechaNueva, motivo: "Error de carga",
+    }]);
+
+    // Replay: mismo uuid; misma clave y otro motivo: 409.
+    expect(await esperarUuid(await post(request, api, "corregir_jornada", params, api.tokenDueno))).toBe(operacion);
+    await esperarError(
+      await post(request, api, "corregir_jornada", { ...params, p_motivo: "Otro" }, api.tokenDueno),
+      409, "PT409", "jornada_conflicto_idempotencia"
+    );
+
+    // GET/HEAD con la clave ya usada (misma huella y otra huella): 405, nunca 200 ni 409.
+    await esperar405(await get(request, api, "corregir_jornada", params, api.tokenDueno));
+    await esperar405(await get(request, api, "corregir_jornada", { ...params, p_motivo: "Otro" }, api.tokenDueno));
+    expect((await head(request, api, "corregir_jornada", params, api.tokenDueno)).status()).toBe(405);
+
+    // Rechazos sin efectos: motivo vacío, sin cambios, fecha pasada y jornada cargada.
+    const claves = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    await esperarError(
+      await post(request, api, "corregir_jornada", correccionParams(claves[0], jornada, fechaFutura(), otroCamion, "   "), api.tokenDueno),
+      400, "PT400", "jornada_motivo_invalido"
+    );
+    await esperarError(
+      await post(request, api, "corregir_jornada", correccionParams(claves[1], jornada, fechaNueva, otroCamion, "x"), api.tokenDueno),
+      409, "PT409", "jornada_sin_cambios"
+    );
+    await esperarError(
+      await post(request, api, "corregir_jornada", correccionParams(claves[2], jornada, "2000-01-01", otroCamion, "x"), api.tokenDueno),
+      400, "PT400", "jornada_fecha_invalida"
+    );
+    const cargada = await jornadaCargada(request, api);
+    await esperarError(
+      await post(request, api, "corregir_jornada", correccionParams(claves[3], cargada.jornada, fechaFutura(), cargada.camion, "x"), api.tokenDueno),
+      409, "PT409", "jornada_estado_invalido"
+    );
+    for (const c of claves) expect(await operacionesConClave(request, api, c)).toEqual([]);
+    expect(await correccionesDe(request, api, jornada)).toHaveLength(1);
+    expect(await correccionesDe(request, api, cargada.jornada)).toEqual([]);
+  });
+
+  test("roles y otra empresa: POST según permisos, GET/HEAD 405 para authenticated, anon 401", async ({ page, request }) => {
+    const api = await dataApiDesdeApp(page);
+    const camion = await crearCamion(request, api);
+    const otroCamion = await crearCamion(request, api);
+    const fecha = fechaFutura();
+    const jornada = await abrir(request, api, camion, fecha);
+    const [tokenEncargado, tokenVendedor, tokenOtra] = await Promise.all([
+      tokenDe(request, api, CUENTAS.encargado),
+      tokenDe(request, api, CUENTAS.vendedor),
+      tokenDe(request, api, CUENTAS.otraEmpresa),
+    ]);
+
+    const paramsV = correccionParams(randomUUID(), jornada, fecha, otroCamion, "Vendedor");
+    await esperarError(await post(request, api, "corregir_jornada", paramsV, tokenVendedor), 403, "PT403", "jornada_no_autorizado");
+    await esperar405(await get(request, api, "corregir_jornada", paramsV, tokenVendedor));
+    expect((await head(request, api, "corregir_jornada", paramsV, tokenVendedor)).status()).toBe(405);
+
+    const paramsB = correccionParams(randomUUID(), jornada, fecha, otroCamion, "Otra empresa");
+    await esperarError(await post(request, api, "corregir_jornada", paramsB, tokenOtra), 404, "PT404", "jornada_no_encontrada");
+    await esperar405(await get(request, api, "corregir_jornada", paramsB, tokenOtra));
+
+    const paramsE = correccionParams(randomUUID(), jornada, fecha, otroCamion, "Encargado");
+    await esperarError(await post(request, api, "corregir_jornada", paramsE), 401, "42501");
+    await esperarError(await get(request, api, "corregir_jornada", paramsE), 401, "42501");
+    expect((await head(request, api, "corregir_jornada", paramsE)).status()).toBe(401);
+    expect(await jornadaDe(request, api, jornada)).toMatchObject({ camion_id: camion, fecha });
+
+    await esperar405(await get(request, api, "corregir_jornada", paramsE, tokenEncargado));
+    const operacion = await esperarUuid(await post(request, api, "corregir_jornada", paramsE, tokenEncargado));
+    expect(await operacionesConClave(request, api, paramsE.p_idempotency_key)).toEqual([{ id: operacion, tipo: "correccion_jornada" }]);
+    expect(await jornadaDe(request, api, jornada)).toMatchObject({ camion_id: otroCamion, fecha, estado: "abierta" });
+    expect(await operacionesConClave(request, api, paramsV.p_idempotency_key)).toEqual([]);
+    expect(await operacionesConClave(request, api, paramsB.p_idempotency_key)).toEqual([]);
+  });
+});
+
 test.describe("superficie de la Data API de jornadas", () => {
   test("Content-Profile/Accept-Profile privado no alcanza las implementaciones", async ({ page, request }) => {
     const api = await dataApiDesdeApp(page);
@@ -835,6 +961,7 @@ test.describe("superficie de la Data API de jornadas", () => {
       ["registrar_carga", cargaParams(randomUUID(), randomUUID(), randomUUID(), 1)],
       ["registrar_descarga", descargaParams(randomUUID(), randomUUID(), randomUUID(), 1, "x")],
       ["confirmar_salida", salidaParams(randomUUID(), randomUUID())],
+      ["corregir_jornada", correccionParams(randomUUID(), randomUUID(), fechaFutura(), randomUUID(), "x")],
     ] as const) {
       const rPost = await request.post(rpcUrl(api, rpc), {
         headers: encabezados(api, api.tokenDueno, { "content-profile": "privado" }),
@@ -894,6 +1021,7 @@ test.describe("service_role sobre la Data API de jornadas", () => {
       ["registrar_carga", cargaParams(randomUUID(), jornada, randomUUID(), 1)],
       ["registrar_descarga", descargaParams(randomUUID(), jornada, randomUUID(), 1, "x")],
       ["confirmar_salida", salidaParams(randomUUID(), jornada)],
+      ["corregir_jornada", correccionParams(randomUUID(), jornada, fechaFutura(), camion, "x")],
     ] as const) {
       const rPost = await conClaveSecreta(clave, "POST", rpcUrl(api, rpc), p);
       expect([rPost.status, rPost.cuerpo?.code]).toEqual([403, "42501"]);

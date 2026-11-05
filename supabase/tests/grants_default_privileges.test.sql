@@ -178,6 +178,7 @@ select is(
         'cambiar_estado_cliente(uuid,boolean)',
         'cambiar_estado_producto(uuid,boolean)',
         'confirmar_salida(uuid,uuid)',
+        'corregir_jornada(uuid,uuid,date,uuid,text)',
         'crear_camion(text,text)',
         'crear_cliente(text,text,text,text)',
         'crear_producto(text,text,text,text,numeric,integer)',
@@ -190,6 +191,7 @@ select is(
         'privado.cambiar_estado_cliente(uuid,boolean)',
         'privado.cambiar_estado_producto(uuid,boolean)',
         'privado.confirmar_salida(uuid,uuid)',
+        'privado.corregir_jornada(uuid,uuid,date,uuid,text)',
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
@@ -206,7 +208,7 @@ select is(
         'registrar_ingreso(uuid,uuid,integer,text)',
         'registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las treinta y seis firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga y confirmar_salida (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las treinta y ocho firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida y corregir_jornada (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)

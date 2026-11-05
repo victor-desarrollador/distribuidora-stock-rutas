@@ -1395,3 +1395,355 @@ eval_I11_S() {
 caso_I11_S() { repetir I11-S "1 2" prep_I11_S correr_fila_indep eval_I11_S; }
 
 CASOS+=(K11-a K11-b K11-c I10-S I11-S)
+
+# =============================================================================
+# T4 — corregir_jornada (ADR-001 §18.4.9 I10, I11, K5–K9, K12 y O; §18.4.5 H-01;
+# §18.4.11). Casos nuevos, agregados sin modificar arnes.sh ni los casos anteriores:
+#
+#   I10-CJ      misma clave y mismo payload; la segunda leyó en el paso 6 el camión
+#               previo, así que sin el paso 8a la reverificación 8b la rechazaría
+#   I11-CJ      misma clave y payload distinto (la primera cambia el camión)
+#   K5          I-3: corrección con cambio de fecha contra reasignación de la misma J
+#   K5-v        variante: la reasignación ya tiene el vigente y espera el nuevo; la
+#               corrección, con su camión, espera al vigente (a la reasignación)
+#   K6-f/K6-c   I-3b: corrección de J1 (fecha / sólo camión) contra reasignación de
+#               J2 hacia el vigente de J1: se serializan en el nivel 2
+#   K7-a/b/c    correcciones cruzadas de camión (C1 → C2 y C2 → C1): vendedores
+#               distintos; con el orden de uuid inverso; el mismo vendedor
+#   K9-C        el camión vigente cambia entre los pasos 6 y 8b por otra corrección
+#               con distinta clave (sólo de camión): PT409 y reintento
+#   K12-a/b     I-3c: corrección sólo de camión contra reasignación de la misma J,
+#               con el vendedor nuevo mayor (a) y menor (b) que el vigente
+#   K12-v       variante: la reasignación ya tiene sus advisory (espera la fila); la
+#               corrección tiene los camiones y espera al vendedor
+#   O-C1..C3    observación: camiones (nivel 1, en orden de uuid, sin duplicar)
+#               antes que el vendedor (nivel 2); O2′ y O5
+#   K8-CQ       corrección contra mover_a_cuarentena: sin esperas espurias
+#   K8-BAJA-CJ  baja del camión destino mientras la corrección espera su advisory
+#
+# corregir_jornada toma advisory de nivel 1 (camión actual y final) y de nivel 2
+# (vendedor vigente, siempre: H-01) y después el FOR UPDATE de la jornada: el
+# control retiene esas claves (correr_par) o, en K12-v, la fila (nivel 3).
+# =============================================================================
+corregir() { printf "public.corregir_jornada('%s', '%s', current_date + %s, '%s', '%s')" "$1" "$2" "$3" "$4" "$5"; }
+n_hcorr() { printf "(select count(*) from public.correcciones_jornada) = %s" "$1"; }
+jor_es() {  # jornada camion dias vendedor
+  printf "(select camion_id = '%s' and fecha = current_date + %s and vendedor_id = '%s' from public.jornadas where id = '%s')" "$2" "$3" "$4" "$1"
+}
+INV_HUERFANAS_CORR="not exists (select 1 from public.operaciones o where o.tipo = 'correccion_jornada'
+   and not exists (select 1 from public.correcciones_jornada c where c.operacion_id = o.id))
+ and not exists (select 1 from public.correcciones_jornada c
+   where not exists (select 1 from public.operaciones o where o.id = c.operacion_id and o.tipo = 'correccion_jornada'))"
+
+# Reintento con la misma clave y el mismo payload (como en K9-R): deja el resultado
+# en REINT. Cada paso instrumental se comprueba.
+REINT=""
+reintentar() {   # sesión
+  REINT=""
+  ins ses_lanzar "$1" "$ACTOR" "$(expr_de "$1")" || { MOTIVO="no se lanzó el reintento"; return 1; }
+  REINT=$(ins ses_resultado "$1") || { MOTIVO="el reintento no respondió"; return 1; }
+  ins ses_fin "$1" || { MOTIVO="no se cerró la transacción del reintento"; return 1; }
+}
+
+# Cola encadenada (K5-v, K12-v), orden de lanzamiento fijo: T2 (reasignación) primero.
+# T2 retiene ENC_G2 y espera al control (advisory ENC_W2, o la fila si ENC_MODO=fila);
+# T1 (corrección) retiene ENC_G1 y espera ENC_W1, bloqueada sólo por T2.
+ENC_MODO="" ENC_G1="" ENC_W1="" ENC_G2="" ENC_W2=""
+correr_encadenado() {
+  local c p2
+  MOTIVO=""; DELANTE=T2; OTRO=T1; RES_T1=""; RES_T2=""
+  abrir_sesiones || return 1
+  if [[ $ENC_MODO == fila ]]; then
+    control_fila_tomar || return 1
+  else
+    ins control_tomar || return 1
+  fi
+  ins ses_lanzar T2 "$ACTOR" "$EXPR_T2" || { MOTIVO="no se lanzó T2"; return 1; }
+  if [[ $ENC_MODO == fila ]]; then
+    foto_estable pred_fila_abcd "${S_PID[T2]}" "$IDEM_T2" || { MOTIVO="T2 no llegó a la espera de la fila: $FOTO"; return 1; }
+  else
+    foto_estable pred_abcd "${S_PID[T2]}" "$IDEM_T2" || { MOTIVO="T2 no llegó a la espera del advisory: $FOTO"; return 1; }
+  fi
+  FOTO_T2=$FOTO
+  c=${S_PID[C]}
+  [[ $(campo "$FOTO_T2" 5) == "$c" && $(campo "$FOTO_T2" 6) == "$ENC_G2" && $(campo "$FOTO_T2" 7) == "$ENC_W2" ]] \
+    || { MOTIVO="T2 no retiene [$ENC_G2] esperando [$ENC_W2] del control: $FOTO_T2"; return 1; }
+  ins ses_lanzar T1 "$ACTOR" "$EXPR_T1" || { MOTIVO="no se lanzó T1"; return 1; }
+  foto_estable pred_abcd "${S_PID[T1]}" "$IDEM_T1" || { MOTIVO="T1 no llegó a la espera del advisory: $FOTO"; return 1; }
+  FOTO_T1=$FOTO
+  p2=${S_PID[T2]}
+  [[ $(campo "$FOTO_T1" 5) == "$p2" && $(campo "$FOTO_T1" 6) == "$ENC_G1" && $(campo "$FOTO_T1" 7) == "$ENC_W1" ]] \
+    || { MOTIVO="T1 no retiene [$ENC_G1] esperando [$ENC_W1] de T2: $FOTO_T1"; return 1; }
+  if [[ $ENC_MODO == fila ]]; then
+    ins ses_revertir C || { MOTIVO="el control no liberó"; return 1; }
+  else
+    ins control_liberar || { MOTIVO="el control no liberó"; return 1; }
+  fi
+  terminar_par
+}
+
+# Corrección (T1) contra reasignación (T2) de la misma J (K5, K5-v, K12): corrección
+# delante → las dos confirman; reasignación delante → la corrección PT409
+# jornada_estado_invalido (8b: el vigente cambió), sin reserva ni historial, y el
+# reintento con la misma clave confirma. CR_FINAL: el estado final, igual en ambos.
+CR_FINAL=""
+eval_cor_reas() {
+  local ok=1 inv_rech=""
+  if [[ $DELANTE == T1 ]]; then
+    es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
+  else
+    es_ok "$RES_T2" && es_err "$RES_T1" PT409 jornada_estado_invalido && ok=0
+    inv_rech=$(ins invariantes "la corrección rechazada no reservó" "$(n_clave "$IDEM_T1" 0)" \
+      "sin historial de corrección" "$(n_hcorr 0)")
+    if ! reintentar T1 || ! es_ok "$REINT"; then
+      ok=1
+      echo "    reintento=$(res_corto "$REINT") fallo=[$MOTIVO]" | tee -a "$SALIDA"
+    fi
+  fi
+  cerrar "$@" $ok "corrección delante: las dos 00000; reasignación delante: corrección PT409 jornada_estado_invalido y reintento 00000" "${inv_rech}$(ins invariantes \
+    "una corrección" "$(n_tipo correccion_jornada 1)" "un historial de corrección" "$(n_hcorr 1)" \
+    "una reasignación" "$(n_reas 1)" "un historial de reasignación" "$(n_hist 1)" \
+    "estado final" "$CR_FINAL" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS" \
+    "sin huérfanas de corrección" "$INV_HUERFANAS_CORR")"
+}
+
+# I10-CJ — misma clave, J1 (CAM1, +30, V3) → CAM2.
+prep_I10_CJ() {
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 30 "$CAM2" "Error"); EXPR_T2=$EXPR_T1
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kc "$CAM1")")
+  CTRL_CLAVES+=("$(ins kc "$CAM2")")
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+}
+eval_I10_CJ() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && mismo_uuid && ok=0
+  cerrar "$@" $ok "las dos 00000 con la misma operación" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "una corrección" "$(n_tipo correccion_jornada 1)" \
+    "un historial" "$(n_hcorr 1)" "J1 en CAM2" "$(jor_es "$J1" "$CAM2" 30 "$V3")" \
+    "I-J1" "$INV_IJ1" "sin huérfanas de corrección" "$INV_HUERFANAS_CORR")"
+}
+caso_I10_CJ() { repetir I10-CJ "1 2" prep_I10_CJ correr_par eval_I10_CJ; }
+
+# I11-CJ — misma clave, T1 → CAM2 y T2 → CAM3.
+prep_I11_CJ() {
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 30 "$CAM2" "Error"); EXPR_T2=$(corregir "$IDEM_T2" "$J1" 30 "$CAM3" "Error")
+  CTRL_CLAVES=()   # un elemento por orden: SIGUSR1 nunca llega con otra $(…) pendiente
+  CTRL_CLAVES+=("$(ins kc "$CAM1")")
+  CTRL_CLAVES+=("$(ins kc "$CAM2")")
+  CTRL_CLAVES+=("$(ins kc "$CAM3")")
+  CTRL_CLAVES+=("$(ins kv "$V3")")
+}
+eval_I11_CJ() {
+  local ok=1 dest
+  [[ $DELANTE == T1 ]] && dest=$CAM2 || dest=$CAM3
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_conflicto_idempotencia && ok=0
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_conflicto_idempotencia" "$(ins invariantes \
+    "una operación con la clave" "$(n_clave "$IDEM_T1" 1)" "un historial" "$(n_hcorr 1)" \
+    "J1 en el camión de delante" "$(jor_es "$J1" "$dest" 30 "$V3")" "I-J1" "$INV_IJ1" \
+    "sin huérfanas de corrección" "$INV_HUERFANAS_CORR")"
+}
+caso_I11_CJ() { repetir I11-CJ "1 2" prep_I11_CJ correr_par eval_I11_CJ; }
+
+# K5 — corrección de fecha J1 (CAM1, +30, V3) → +31 (T1) contra reasignación J1 → V6 (T2).
+prep_K5() {
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 31 "$CAM1" "Fecha"); EXPR_T2=$(reasignar "$IDEM_T2" "$J1" "$V6")
+  CTRL_CLAVES=("$(ins kv "$V3")")
+  CR_FINAL=$(jor_es "$J1" "$CAM1" 31 "$V6")
+}
+caso_K5() { repetir K5 "1 2" prep_K5 correr_par eval_cor_reas; }
+
+# K5-v — la reasignación retiene V3 y espera V6 (control); la corrección retiene CAM1
+# y espera V3 (la reasignación).
+prep_K5_v() {
+  prep_K5 || return 1
+  ENC_MODO=adv
+  CTRL_CLAVES=("$(ins kv "$V6")")
+  ENC_G2=$(ins kv "$V3") && ENC_W2=$(ins kv "$V6") && ENC_G1=$(ins kc "$CAM1") && ENC_W1=$(ins kv "$V3")
+}
+caso_K5_v() { repetir K5-v "-" prep_K5_v correr_encadenado eval_cor_reas; }
+
+# K6 — corrección de J1 (CAM1, +30, V3) contra reasignación de J2 (CAM2, +31, V7) → V3.
+prep_K6() {   # dias_final camion_final
+  ins jornada J1 "$CAM1" 30 "$V3" && ins jornada J2 "$CAM2" 31 "$V7" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" "$1" "$2" "Corrección"); EXPR_T2=$(reasignar "$IDEM_T2" "$J2" "$V3")
+  CTRL_CLAVES=("$(ins kv "$V3")")
+}
+# K6-f: con cambio de fecha a +31, el vendedor V3 queda disputado en +31.
+prep_K6_f() { prep_K6 31 "$CAM1"; }
+eval_K6_f() {
+  local ok=1 inv
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_vendedor_ocupado && ok=0
+  if [[ $DELANTE == T1 ]]; then
+    inv=$(ins invariantes "J1 en +31" "$(jor_es "$J1" "$CAM1" 31 "$V3")" "J2 conserva V7" "$(jor_es "$J2" "$CAM2" 31 "$V7")" \
+      "una corrección" "$(n_hcorr 1)" "sin reasignaciones" "$(n_reas 0)" "I-J1" "$INV_IJ1" "sin huérfanas de corrección" "$INV_HUERFANAS_CORR")
+  else
+    inv=$(ins invariantes "J1 sin cambios" "$(jor_es "$J1" "$CAM1" 30 "$V3")" "J2 → V3" "$(jor_es "$J2" "$CAM2" 31 "$V3")" \
+      "sin correcciones" "$(n_hcorr 0)" "una reasignación" "$(n_reas 1)" "I-J1" "$INV_IJ1" "sin huérfanas" "$INV_HUERFANAS")
+  fi
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_vendedor_ocupado" "$inv"
+}
+caso_K6_f() { repetir K6-f "1 2" prep_K6_f correr_par eval_K6_f; }
+# K6-c: sólo de camión (CAM1 → CAM3, misma fecha): las dos confirman en cualquier orden.
+prep_K6_c() { prep_K6 30 "$CAM3"; }
+eval_K6_c() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
+  cerrar "$@" $ok "las dos 00000, serializadas en adv(V3)" "$(ins invariantes \
+    "J1 en CAM3" "$(jor_es "$J1" "$CAM3" 30 "$V3")" "J2 → V3" "$(jor_es "$J2" "$CAM2" 31 "$V3")" \
+    "una corrección" "$(n_hcorr 1)" "una reasignación" "$(n_reas 1)" "I-J1" "$INV_IJ1" \
+    "sin huérfanas" "$INV_HUERFANAS" "sin huérfanas de corrección" "$INV_HUERFANAS_CORR")"
+}
+caso_K6_c() { repetir K6-c "1 2" prep_K6_c correr_par eval_K6_c; }
+
+# K7 — correcciones cruzadas: J1 (CAM1, +30) → CAM2 y J2 (CAM2, +31) → CAM1. Cada
+# camión destino tiene la otra jornada sin cerrar: las dos PT409, en cualquier orden.
+prep_K7() {   # vendedor_J1 vendedor_J2
+  ins jornada J1 "$CAM1" 30 "$1" && ins jornada J2 "$CAM2" 31 "$2" || return 1
+  K7_V1=$1; K7_V2=$2
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 30 "$CAM2" "Cruzada"); EXPR_T2=$(corregir "$IDEM_T2" "$J2" 31 "$CAM1" "Cruzada")
+  CTRL_CLAVES=("$(ins kc "$CAM1")")
+}
+K7_V1="" K7_V2=""
+eval_K7() {
+  local ok=1
+  es_err "$RES_T1" PT409 jornada_camion_con_jornada_abierta && es_err "$RES_T2" PT409 jornada_camion_con_jornada_abierta && ok=0
+  cerrar "$@" $ok "las dos PT409 jornada_camion_con_jornada_abierta" "$(ins invariantes \
+    "J1 sin cambios" "$(jor_es "$J1" "$CAM1" 30 "$K7_V1")" "J2 sin cambios" "$(jor_es "$J2" "$CAM2" 31 "$K7_V2")" \
+    "sin correcciones" "$(n_tipo correccion_jornada 0)" "sin historial" "$(n_hcorr 0)" "I-J1" "$INV_IJ1")"
+}
+prep_K7_a() { prep_K7 "$V3" "$V6"; }   # vendedores distintos, mismo orden que los camiones
+prep_K7_b() { prep_K7 "$V6" "$V3"; }   # vendedores con el orden de uuid inverso al de los camiones
+prep_K7_c() { prep_K7 "$V3" "$V3"; }   # el mismo vendedor en fechas distintas
+caso_K7_a() { repetir K7-a "1 2" prep_K7_a correr_par eval_K7; }
+caso_K7_b() { repetir K7-b "1 2" prep_K7_b correr_par eval_K7; }
+caso_K7_c() { repetir K7-c "1 2" prep_K7_c correr_par eval_K7; }
+
+# K9-C — dos correcciones sólo de camión de J1 (CAM1) con claves distintas: T1 → CAM2,
+# T2 → CAM3. La de atrás leyó CAM1 en el paso 6: 8b la rechaza; el reintento confirma.
+prep_K9_C() {
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 30 "$CAM2" "Camión"); EXPR_T2=$(corregir "$IDEM_T2" "$J1" 30 "$CAM3" "Camión")
+  CTRL_CLAVES=("$(ins kc "$CAM1")")
+}
+eval_K9_C() {
+  local ok=1 inv_rech dest_otro dest_del
+  if [[ $OTRO == T1 ]]; then dest_otro=$CAM2; dest_del=$CAM3; else dest_otro=$CAM3; dest_del=$CAM2; fi
+  es_ok "$(res_de "$DELANTE")" && es_err "$(res_de "$OTRO")" PT409 jornada_estado_invalido && ok=0
+  inv_rech=$(ins invariantes "el rechazo no reservó la clave" "$(n_clave "$(idem_de "$OTRO")" 0)" \
+    "un historial" "$(n_hcorr 1)" "J1 en el camión de delante" "$(jor_es "$J1" "$dest_del" 30 "$V3")")
+  if ! reintentar "$OTRO" || ! es_ok "$REINT"; then
+    ok=1
+    echo "    reintento=$(res_corto "$REINT") fallo=[$MOTIVO]" | tee -a "$SALIDA"
+  fi
+  cerrar "$@" $ok "delante 00000; el otro PT409 jornada_estado_invalido; reintento 00000" "${inv_rech}$(ins invariantes \
+    "dos correcciones tras el reintento" "$(n_tipo correccion_jornada 2)" "dos historiales" "$(n_hcorr 2)" \
+    "J1 en el camión del reintento" "$(jor_es "$J1" "$dest_otro" 30 "$V3")" "I-J1" "$INV_IJ1" \
+    "sin huérfanas de corrección" "$INV_HUERFANAS_CORR")"
+}
+caso_K9_C() { repetir K9-C "1 2" prep_K9_C correr_par eval_K9_C; }
+
+# K12 — corrección sólo de camión J1 → CAM2 (T1) contra reasignación de J1 (T2).
+prep_K12() {   # vigente nuevo
+  ins jornada J1 "$CAM1" 30 "$1" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 30 "$CAM2" "Camión"); EXPR_T2=$(reasignar "$IDEM_T2" "$J1" "$2")
+  CTRL_CLAVES=("$(ins kv "$1")")
+  CR_FINAL=$(jor_es "$J1" "$CAM2" 30 "$2")
+}
+prep_K12_a() { prep_K12 "$V3" "$V6"; }   # nuevo mayor que el vigente
+prep_K12_b() { prep_K12 "$V6" "$V3"; }   # nuevo menor: la reasignación ya tiene V3 y espera V6
+caso_K12_a() { repetir K12-a "1 2" prep_K12_a correr_par eval_cor_reas; }
+caso_K12_b() { repetir K12-b "1 2" prep_K12_b correr_par eval_cor_reas; }
+
+# K12-v — la reasignación (V3 → V6) tiene sus dos advisory y espera la fila de J1, que
+# retiene el control; la corrección tiene CAM1 y CAM2 y espera V3 (la reasignación).
+prep_K12_v() {
+  prep_K12 "$V3" "$V6" || return 1
+  ENC_MODO=fila
+  JORNADAS_CTRL=("$J1")
+  ENC_G2=$(lista "$(ins kv "$V3")" "$(ins kv "$V6")") && ENC_W2="" \
+    && ENC_G1=$(lista "$(ins kc "$CAM1")" "$(ins kc "$CAM2")") && ENC_W1=$(ins kv "$V3")
+}
+caso_K12_v() { repetir K12-v "-" prep_K12_v correr_encadenado eval_cor_reas; }
+
+# O-C — una corrección observada (se revierte).
+prep_O_C() {   # camion_actual camion_final dias_final clave_retenida
+  ins jornada JO "$1" 30 "$V3" || return 1
+  nueva_clave; IDEM_T1=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$JO" "$3" "$2" "Observada")
+  CTRL_CLAVES=("$4")
+}
+# O-C1: control con V3: concedidos CAM1 y CAM2, espera V3; al volver, CAM1, CAM2 y V3.
+prep_O_C1() {
+  prep_O_C "$CAM1" "$CAM2" 30 "$(ins kv "$V3")" || return 1
+  OBS_G=$(lista "$(ins kc "$CAM1")" "$(ins kc "$CAM2")") && OBS_W=$(ins kv "$V3") \
+    && OBS_RET=$(lista "$(ins kc "$CAM1")" "$(ins kc "$CAM2")" "$(ins kv "$V3")")
+}
+# O-C2: jornada en CAM2 corregida hacia CAM1 (final < actual): toma CAM1 primero.
+prep_O_C2() {
+  prep_O_C "$CAM2" "$CAM1" 30 "$(ins kc "$CAM2")" || return 1
+  OBS_G=$(ins kc "$CAM1") && OBS_W=$(ins kc "$CAM2") \
+    && OBS_RET=$(lista "$(ins kc "$CAM1")" "$(ins kc "$CAM2")" "$(ins kv "$V3")")
+}
+# O-C3: sólo fecha (mismo camión): un solo advisory de camión, sin duplicar.
+prep_O_C3() {
+  prep_O_C "$CAM1" "$CAM1" 31 "$(ins kv "$V3")" || return 1
+  OBS_G=$(ins kc "$CAM1") && OBS_W=$(ins kv "$V3") \
+    && OBS_RET=$(lista "$(ins kc "$CAM1")" "$(ins kv "$V3")")
+}
+caso_O_C1() { repetir O-C1 "-" prep_O_C1 correr_observado eval_O; }
+caso_O_C2() { repetir O-C2 "-" prep_O_C2 correr_observado eval_O; }
+caso_O_C3() { repetir O-C3 "-" prep_O_C3 correr_observado eval_O; }
+
+# K8-CQ — corrección de camión (T1) contra mover_a_cuarentena del depósito (T2): con la
+# primera devuelta y su transacción abierta, la otra termina sin esperarla.
+CUA='aaaaaaaa-2100-4000-8000-0000000000d2'
+prep_K8_CQ() {
+  preparar_stock 10 || return 1
+  ins sql_pg "$BASE" "insert into public.ubicaciones (id, empresa_id, tipo, camion_id)
+    values ('$CUA', '$EMPRESA_A', 'cuarentena', null);" >/dev/null || { MOTIVO="no se preparó la cuarentena"; return 1; }
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; nueva_clave; IDEM_T2=$CLAVE
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 30 "$CAM2" "Camión")
+  EXPR_T2="public.mover_a_cuarentena('$IDEM_T2', '$PROD1', '$DEP', 2, 'Golpe')"
+}
+eval_K8_CQ() {
+  local ok=1
+  es_ok "$RES_T1" && es_ok "$RES_T2" && ok=0
+  cerrar "$@" $ok "las dos 00000 sin esperarse" "$(ins invariantes \
+    "J1 en CAM2" "$(jor_es "$J1" "$CAM2" 30 "$V3")" "una corrección" "$(n_hcorr 1)" \
+    "una cuarentena" "$(n_tipo a_cuarentena 1)" "depósito 8" "$(saldo_es "$DEP" 8)" \
+    "sin saldos negativos" "$INV_STOCK" "sin huérfanas de corrección" "$INV_HUERFANAS_CORR")"
+}
+caso_K8_CQ() { repetir K8-CQ "1 2" prep_K8_CQ correr_secuencial eval_K8_CQ; }
+
+# K8-BAJA-CJ — baja de CAM3 mientras la corrección J1 (CAM1) → CAM3 espera adv(CAM3)
+# con CAM1 concedido: la baja no espera y la corrección, que lee camiones.activo
+# después de los bloqueos, recibe PT409 jornada_camion_inactivo.
+prep_K8_BAJA_CJ() {
+  ins jornada J1 "$CAM1" 30 "$V3" || return 1
+  nueva_clave; IDEM_T1=$CLAVE; IDEM_T2=""
+  EXPR_T1=$(corregir "$IDEM_T1" "$J1" 30 "$CAM3" "Camión"); EXPR_T2=$(baja_camion "$CAM3")
+  CTRL_CLAVES=("$(ins kc "$CAM3")")
+}
+eval_K8_BAJA_CJ() {
+  local ok=1
+  es_ok "$RES_T2" && es_err "$RES_T1" PT409 jornada_camion_inactivo && ok=0
+  cerrar "$@" $ok "baja 00000; corrección PT409 jornada_camion_inactivo" "$(ins invariantes \
+    "J1 sin cambios" "$(jor_es "$J1" "$CAM1" 30 "$V3")" "sin correcciones" "$(n_hcorr 0)" \
+    "la corrección no reservó" "$(n_clave "$IDEM_T1" 0)" \
+    "camión inactivo" "(select not activo from public.camiones where id = '$CAM3')")"
+}
+caso_K8_BAJA_CJ() { repetir K8-BAJA-CJ "-" prep_K8_BAJA_CJ correr_baja_en_espera eval_K8_BAJA_CJ; }
+
+CASOS+=(I10-CJ I11-CJ K5 K5-v K6-f K6-c K7-a K7-b K7-c K9-C K12-a K12-b K12-v O-C1 O-C2 O-C3 K8-CQ K8-BAJA-CJ)
