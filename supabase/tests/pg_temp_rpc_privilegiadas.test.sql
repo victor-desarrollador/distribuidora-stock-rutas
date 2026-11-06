@@ -134,8 +134,47 @@ select ok(
        and p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
        and (p.pronamespace <> 'privado'::regnamespace
             or p.proowner <> 'propietario_rpc'::regrole
-            or p.proconfig is distinct from array['search_path=""'])),
-  'P8: toda función SECURITY DEFINER de public/privado vive en privado, es de propietario_rpc y tiene search_path vacío');
+            or p.proconfig is distinct from array['search_path=""'])
+       -- Única excepción: O-4.
+       --   * VIGENTE — ADR-001 §18.2: la función y ensure_rls se conservan,
+       --     sin EXECUTE para PUBLIC/anon/authenticated/service_role.
+       --   * HISTÓRICO — B.1.2b/B.1.2c (06/11/2026): el cuerpo de staging
+       --     325ae266… con search_path=pg_catalog; vulnerable (O4-PGTEMP), ya
+       --     no se exime.
+       --   * PROPUESTO, NO APROBADO — contrato RB + RA (hash e1b231fb… y
+       --     search_path=pg_catalog, pg_temp): es el que se exige abajo.
+       -- Se exime sólo public.rls_auto_enable(), identificada por OID y con el
+       -- contrato completo de la función y de ensure_rls. Fuera de contrato no
+       -- se exime y la aserción falla. En local la función no existe y la
+       -- excepción no se usa. coalesce: un término NULL (p. ej. un elemento
+       -- NULL en evttags) nunca exime.
+       and not coalesce((
+         p.oid = to_regprocedure('public.rls_auto_enable()')
+         and p.prokind = 'f'
+         and p.proowner = 'postgres'::regrole
+         and p.prorettype = 'event_trigger'::regtype
+         and p.proconfig = array['search_path=pg_catalog, pg_temp']
+         and p.prolang = (select l.oid from pg_language l where l.lanname = 'plpgsql')
+         and p.prosqlbody is null and p.probin is null
+         and encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex')
+             = 'e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e'
+         and not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                          where a.grantee = 0)
+         and not has_function_privilege('anon', p.oid, 'EXECUTE')
+         and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+         and not has_function_privilege('service_role', p.oid, 'EXECUTE')
+         and not exists (select 1 from pg_trigger tg where tg.tgfoid = p.oid)
+         and (select count(*) from pg_event_trigger t
+               where t.evtfoid = p.oid or t.evtname = 'ensure_rls') = 1
+         and exists (select 1 from pg_event_trigger t
+                      where t.evtname = 'ensure_rls' and t.evtfoid = p.oid
+                        and t.evtowner = 'postgres'::regrole
+                        and t.evtevent = 'ddl_command_end'
+                        and t.evtenabled = 'O'
+                        and array_ndims(t.evttags) = 1
+                        and array(select u.tag from unnest(t.evttags) u(tag) order by u.tag collate "C")
+                            = array['CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO']::text[])), false)),
+  'P8: toda función SECURITY DEFINER de public/privado vive en privado, es de propietario_rpc y tiene search_path vacío (única excepción: public.rls_auto_enable() con el contrato O-4 completo)');
 
 select ok(
   (select not prosecdef from pg_proc where oid = 'privado.usuario_actual()'::regprocedure)

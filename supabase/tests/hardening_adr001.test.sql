@@ -16,7 +16,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(58);
+select plan(59);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -363,8 +363,9 @@ select case when (select f from o4) is null
           'postgres', 'O-4: rls_auto_enable() sigue siendo de postgres') end;
 select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
-  else is((select array_to_string(proconfig, ',') from pg_proc where oid = (select f from o4)),
-          'search_path=pg_catalog', 'O-4: rls_auto_enable() conserva search_path=pg_catalog') end;
+  else is((select proconfig::text from pg_proc where oid = (select f from o4)),
+          '{"search_path=pg_catalog, pg_temp"}',
+          'O-4 (O4-PGTEMP, RA): proconfig exacto {search_path=pg_catalog, pg_temp}') end;
 select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
   else ok(not exists (select 1 from pg_proc p,
@@ -387,8 +388,31 @@ select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
   else ok(exists (select 1 from pg_event_trigger
                    where evtname = 'ensure_rls' and evtfoid = (select f from o4)
-                     and evtenabled <> 'D'),
-          'O-4: ensure_rls sigue habilitado y apunta a rls_auto_enable()') end;
+                     and evtowner = 'postgres'::regrole
+                     and evtevent = 'ddl_command_end'
+                     and evtenabled = 'O'
+                     and array_ndims(evttags) = 1
+                     and array(select u.tag from unnest(evttags) u(tag) order by u.tag collate "C")
+                         = array['CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO']::text[])
+          and (select count(*) from pg_event_trigger
+                where evtname = 'ensure_rls' or evtfoid = (select f from o4)) = 1
+          and not exists (select 1 from pg_trigger where tgfoid = (select f from o4)),
+          'O-4: ensure_rls es el único event trigger de rls_auto_enable(): owner postgres, ddl_command_end, evtenabled O y exactamente las 3 tags, sin duplicados') end;
+-- Identidad exacta de la función remediada (O4-PGTEMP, RB: cuerpo de staging
+-- con 3 referencias calificadas; PROPUESTA NO APROBADA). El cuerpo anterior
+-- 325ae266… es vulnerable y queda rechazado. El hash identifica el cuerpo; no
+-- certifica su seguridad funcional (F7/F8 siguen abiertos).
+select case when (select f from o4) is null
+  then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
+  else ok(exists (select 1 from pg_proc p join pg_language l on l.oid = p.prolang
+                   where p.oid = (select f from o4)
+                     and p.prokind = 'f'
+                     and p.prorettype = 'event_trigger'::regtype
+                     and l.lanname = 'plpgsql'
+                     and p.prosqlbody is null and p.probin is null
+                     and encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex')
+                         = 'e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e'),
+          'O-4: rls_auto_enable() tiene la identidad remediada (plpgsql, event_trigger, SHA-256 de prosrc e1b231fb…)') end;
 
 -- Coherencia sin falsos positivos: la función y su trigger existen juntos o
 -- faltan juntos.

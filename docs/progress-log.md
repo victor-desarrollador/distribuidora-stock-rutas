@@ -1,4 +1,202 @@
 ---
+## 06/11/2026 — T3-01: ejecución oficial de `supabase test db` en un stack local independiente (PASS) y consolidación en un commit local (T3-01 Fase 1 NO aprobada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, base `d2d4ae262964a73cafd37e3e811354ba9e10948b`. Superficie sensible (SECURITY DEFINER, event triggers, RLS, Supabase): **corresponde security review**. Este registro forma parte del commit local de consolidación autorizado por el humano. El hash del commit se informa en la entrega y en la evidencia externa (no se autorreferencia aquí).
+
+### Corrección de un error documental previo
+En la entrada «corrección de H-01, H-02 y H-03» se afirmó que la CLI del repo era la 3.0.0 y que `supabase test db` no tenía `--local`. **Era falso.** El binario del proyecto, `apps/web/node_modules/.bin/supabase` → `supabase/dist/supabase.js` → `@supabase/cli-linux-x64`, es la **2.120.0** (fijada en `apps/web/package.json`). Su `test db`, `db dump` y `db reset` aceptan `--local`. El dato erróneo salió de `npx supabase` ejecutado desde la raíz, que resolvió una copia en la caché de npx. La línea errónea quedó tachada y anotada.
+
+### Contexto de la corrida (06/11/2026, local)
+- El stack local existente (`project_id` `distribuidora-stock-rutas`) lo comparte la copia `distribuidora-d2-prueba`: su contenedor de base se inició desde esa copia y tiene 12 migraciones y datos ficticios. No estaba autorizado detenerlo ni resetearlo.
+- Por eso se preparó un **stack independiente**:
+  - copia descartable fuera del repo (`../distribuidora-stock-rutas-pruebas-local/`) con `project_id` `distribuidora-stock-rutas-pruebas` y puertos 58xxx;
+  - sin `supabase/.temp`, así que no queda vinculada a ningún remoto (`linked_project: null`);
+  - 25 migraciones, 32 tests, seed y scripts idénticos al repo;
+  - script `../evidencias-t3-01/stack-local-independiente/01-scripts/stack_pruebas.sh` (acciones `verificar`, `iniciar`, `probar` y `eliminar`, con controles de entorno, binario, copia, destino y del original antes y después).
+- CLI **2.120.0**. Imagen `supabase/postgres:17.11.0.004` (PostgreSQL 17.11), el valor por defecto de la CLI. Base `supabase_db_distribuidora-stock-rutas-pruebas` en `127.0.0.1:58322`, `system_identifier` `7705063311795060773`, distinto del original.
+
+### Resultados (evidencia: `../evidencias-t3-01/ejecucion-oficial-stack-independiente/`, MANIFIESTO de 38 archivos verificado)
+- `verificar`, `iniciar`, `probar` y `eliminar`: rc 0.
+- **Migraciones: 25/25** aplicadas en orden (`20261022120000` … `20261110120000`), exactamente las de la copia. GoTrue aplicó 82 migraciones de auth. La migración RB + RA fue un no-op (O-4 no existe en local).
+- **Seed aplicado:** 6 usuarios de auth, 2 empresas, 5 perfiles, 4 productos, 4 ubicaciones y 1 cliente.
+- **`supabase test db --local`: `All tests successful`, `Files=33, Tests=2163`, `Result: PASS`.**
+  - Los 32 `*.test.sql` dan `ok`. El archivo 33, `concurrencia/00_bootstrap_descartable.sql`, emite `1..0 # SKIP` por diseño.
+  - **2147 aprobadas, 0 fallidas y 16 omitidas.** Las 16 omisiones **no se ejecutaron**: son los únicos `skip()` del código (9 en `hardening_adr001` y 7 en `o4_pgtemp`) y dependen de que `public.rls_auto_enable()` no exista localmente. La CLI no informa los SKIP por aserción; el número sale del código fuente, y 2163 coincide con la suma de los `plan()`.
+  - **Las 37 fallas de los laboratorios anteriores ahora pasan.** Se confirma la causa: `auth.uid()` sin las migraciones de GoTrue.
+  - `o4_pgtemp`, `hardening_adr001`, `pg_temp_rpc_privilegiadas` y `pg_temp_jornadas` (P7): `ok`. El arnés de explotación no forma parte de la suite.
+- **Preflight READ ONLY** sobre el stack nuevo (`434632cb…`):
+  - rc 0, `transaction_read_only=on` y **`ESTADO_A`**;
+  - 40 firmas con contrato completo, inventario SECURITY DEFINER exhaustivo de 20 firmas y manifiesto exacto de 33 políticas;
+  - catálogo idéntico antes y después.
+
+  Es la primera corrida sobre una base construida por la CLI oficial. Sin O-4, la excepción O-4 no se ejerce.
+- **El stack original no cambió:** contenedores, IDs, estado, inicio, workdir, volúmenes, red, `system_identifier`, migraciones y conteos de filas idénticos antes y después.
+- **El stack independiente se eliminó** (`stop --project-id distribuidora-stock-rutas-pruebas --no-backup`, con la confirmación del script). No quedan contenedores, volúmenes ni redes suyos.
+
+### Commit local de consolidación (autorizado)
+Incluye los cambios de T3-01 B.1.2c, O4-PGTEMP (RB + RA) y H-01 a H-03, sin push, PR, merge ni deploy:
+- `supabase/scripts/validar_topologia_propietario_rpc.sql` (`434632cb…`);
+- `supabase/migrations/20261110120000_o4_pgtemp_remediacion.sql` (`51d21935…`);
+- `supabase/tests/o4_pgtemp.test.sql` (`ded684d4…`), `hardening_adr001.test.sql` (`4a0880fc…`) y `pg_temp_rpc_privilegiadas.test.sql` (`032c2dfd…`);
+- `supabase/laboratorio/o4-pgtemp/` (`ejecutar.sh`, `guardia.sql`, `vector.sql` y `cuerpo_original_325ae266.txt`);
+- este archivo.
+
+Las 24 migraciones previas no cambian. Quedan fuera los `AUDIT_REPORT_*.md`, las evidencias, los respaldos y la copia descartable.
+
+### Pendientes
+1. **La enmienda de ADR-001 §18.2 (contrato RB + RA) sigue NO APROBADA.** ADR-001 no se modificó.
+2. **F7** (`WHEN OTHERS` absorbe la falla al habilitar RLS) y **F8** (supautils omite `ensure_rls` para los roles reservados y el superusuario) siguen abiertos y bloquean producción.
+3. **Falta la validación en staging:**
+   - inventario read-only de roles con LOGIN;
+   - aplicación de la migración, sólo con autorización explícita;
+   - preflight con la O-4 alojada;
+   - paridad de imagen: `.004` en local frente a `.003`, la registrada para el remoto vinculado.
+4. H-04 (baja) sin evaluar; tests `pg_temp_*` preexistentes con objetos hostiles pendientes de decisión humana.
+5. Security review y auditoría independiente del hash del commit.
+6. **T3-01 Fase 1 NO aprobada.**
+
+---
+## 06/11/2026 — T3-01 O4-PGTEMP: corrección de H-01, H-02 y H-03 de la auditoría de Codex (sin commit; NO aprobada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, HEAD `d2d4ae262964a73cafd37e3e811354ba9e10948b`, sin cambios. El dictamen de Codex no está en disco: los hallazgos se tomaron del pedido humano. La enmienda RB + RA sigue siendo una **PROPUESTA NO APROBADA**. La migración `20261110120000` **no se modificó** (`51d21935…`). Superficie sensible: **corresponde security review**.
+
+### H-01 — separación entre el test rutinario y la explotación
+- **`supabase/tests/o4_pgtemp.test.sql`** (`471571ad…` → `ded684d4…`), ahora **rutinario y de sólo lectura**: 9 aserciones.
+  - Válidas en cualquier entorno: coherencia función/trigger; ninguna otra SECURITY DEFINER en `public`.
+  - SKIP donde la función no existe: hash RB `e1b231fb…`; rechazo explícito de `325ae266…`; `proconfig` RA; referencias calificadas; atributos; privilegios; contrato de `ensure_rls`.
+  - Sin objetos hostiles, sin `SET ROLE`, sin reemplazar la función y sin DDL propio (sólo `create extension pgtap`). La revisión estática lo confirma.
+- **Nuevo arnés de explotación fuera de `supabase/tests/`**: `supabase/laboratorio/o4-pgtemp/` (`ejecutar.sh`, `guardia.sql`, `vector.sql`, `cuerpo_original_325ae266.txt`). `config.toml` no lo referencia y `supabase test db` no lo ejecuta.
+  - **No acepta destino de conexión:** crea su propio contenedor con la imagen fijada por digest (`sha256:b15d8621…`) y una etiqueta con nonce aleatorio. Antes de cualquier SQL verifica `--network none`, sin puertos, sin montajes, ID, etiqueta e imagen, y sólo se conecta con `docker exec` dentro de ese contenedor.
+  - **Guardia SQL** antepuesta a toda sesión peligrosa: exige nonce y `system_identifier` registrados en `zz_laboratorio.identidad` y una conexión local; si no, aborta. Se autoverifica: un nonce erróneo, la falta de nonce o un `system_identifier` erróneo abortan con rc 3 sin llegar a ejecutar nada.
+  - Elimina el contenedor al salir.
+
+### H-02 — cobertura dinámica, con una aserción por vector y estado
+El arnés corrió en un laboratorio propio (rc 0, `fallas=0`):
+
+| Vector | Cuerpo original (`325ae266…`) | Remediado (RB + RA, migración real) |
+|---|---|---|
+| dominio `pg_temp."record"` | **escala** (priv=2) | 0 |
+| dominio `pg_temp."name"` | **escala** (priv=1) | 0 |
+| función `pg_temp.format()` (rama de tablas de `public`, alcanzada: LOG `failed to enable RLS`) | 0 | 0 |
+| operador `pg_temp.=` | 0 | 0 |
+
+Además, la RLS de `public` no cambia en ninguno de los dos estados.
+- **Demostrados dinámicamente** (control positivo y negativo): `record` y `name`.
+- **`format` y `=`:** sólo está demostrado que la sonda funciona si se la invoca explícitamente y que el trigger no la invoca en ninguno de los dos estados. PostgreSQL nunca busca funciones ni operadores en `pg_temp`, así que **no hay control positivo posible**. No se declaran como vectores remediados por RB + RA.
+
+### H-03 — gobernanza (sólo comentarios)
+Los comentarios de `validar_topologia_propietario_rpc.sql` (`3dccd4b3…` → `434632cb…`) y de `pg_temp_rpc_privilegiadas.test.sql` (`48926aba…` → `032c2dfd…`) ahora distinguen tres niveles:
+1. ADR-001 §18.2 **vigente**, que no fija hash ni `proconfig`;
+2. la evidencia **histórica** de B.1.2b/B.1.2c (`325ae266…`, ya rechazada);
+3. el contrato RB + RA **propuesto, no aprobado**.
+
+El código sin comentarios es **idéntico** antes y después (SHA-256 `d99d3f2b…` y `c8238513…`). No cambió ningún valor ni control.
+
+### Validación (laboratorio descartable `.004`, `--network none`)
+
+| Estado de O-4 | `o4_pgtemp` | `hardening` | `pg_temp_rpc_privilegiadas` | P7 | Preflight |
+|---|---|---|---|---|---|
+| Sin O-4 | 9/9 (7 SKIP) | 59/59 (9 SKIP) | 42/42 | 26/26 | READ ONLY `ESTADO_A` |
+| Original | fallan 2–5 | fallan 48 y 54 | falla 9 | falla 8 | rechaza `[O4_RLS_AUTO_ENABLE]` |
+| Remediada | 9/9 | 59/59 | 42/42 | 26/26 | READ ONLY y P04 `ESTADO_A`; B.1.2c 22/22; P04 13/13 |
+
+Todas las corridas READ ONLY dejaron el catálogo idéntico. typecheck, lint, Vitest, Playwright y build: no aplican (no se tocó frontend).
+
+### Observaciones y pendientes
+- **H-04:** observación de **baja** severidad del dictamen. **No se abordó** y queda pendiente de evaluación.
+- Los 8 tests `pg_temp_*` preexistentes (A1–B1, ya commiteados) crean dominios, operadores y vistas hostiles en `pg_temp` para endurecer las RPC. No reemplazan funciones por cuerpos vulnerables, y quedan fuera del alcance de H-01. Se registran para decisión humana.
+- **`supabase test db` completo no se ejecutó.** El comando quedó preparado y sin ejecutar en `../evidencias-t3-01/o4-pgtemp-correccion-auditoria/comandos_supabase_test_db_local.sh`. Hechos verificados:
+  - ~~la CLI 3.0.0 **no tiene `--local` en `test db`** (local es el destino por defecto; `--remote` va a remoto);~~ **ERRÓNEO**, corregido en la entrada «ejecución oficial de `supabase test db`» del 06/11/2026: la CLI del repo es la **2.120.0** y su `test db` **sí** tiene `--local`. El «3.0.0» salió de `npx supabase` ejecutado desde la raíz, que resolvió una copia en la caché de npx;
+  - `db reset` sí tiene `--local`;
+  - el repo tiene un proyecto remoto vinculado.
+
+  El script comprueba que `DB_URL` sea `127.0.0.1:54322` y que el contenedor local exista, respalda datos y esquema, pide confirmación escrita y recién entonces ejecuta `db reset --local` y `test db`. Requiere autorización humana porque borra la base local.
+- F7 y F8 siguen abiertos. Los pendientes de la entrada anterior no cambian. Commit, push, merge y deploy: **no autorizados**.
+
+---
+## 06/11/2026 — T3-01 O4-PGTEMP: remediación RB + RA de `public.rls_auto_enable()` implementada y validada en laboratorio (sin commit; NO aprobada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, HEAD `d2d4ae262964a73cafd37e3e811354ba9e10948b`, sin cambios. Implementación **local** del diseño `../evidencias-t3-01/o4-pgtemp-diseno/`. La enmienda de ADR-001 §18.2 que la respalda sigue siendo una **PROPUESTA NO APROBADA**: no se modificó la ADR y nada autoriza staging ni producción. Superficie sensible (SECURITY DEFINER, event triggers, RLS, Supabase): **corresponde security review**.
+
+### Problema (ya demostrado en `../evidencias-t3-01/o4-pgtemp/DICTAMEN.md`)
+El cuerpo de staging de O-4 (`325ae266…`) declara `cmd record` y `tbl name` sin esquema. Con `search_path=pg_catalog`, PostgreSQL busca primero en `pg_temp` los nombres de tipo. Un rol con LOGIN no reservado y con TEMP pudo ejecutar código como `postgres` y deshabilitar la RLS de forma persistente. Clasificación C: no es explotable con los roles verificados en la réplica de laboratorio.
+
+### Qué se hizo
+- **Nueva migración `supabase/migrations/20261110120000_o4_pgtemp_remediacion.sql`** (forward-only, un único `DO` atómico). Las 24 existentes no cambiaron.
+  - Función ausente (local): no hace nada (NOTICE).
+  - `ensure_rls` u homónimos sin la función: ERROR.
+  - Contrato remediado ya presente: no hace nada.
+  - Contrato original **exacto** (función y trigger completos): aplica RB (`cmd pg_catalog.record`, `tbl pg_catalog.name`, `FROM pg_catalog.pg_event_trigger_ddl_commands()`) y RA (`search_path = pg_catalog, pg_temp`) con `CREATE OR REPLACE`, y verifica después OID, hash, `proconfig`, ACL y el contrato completo.
+  - Cualquier otro estado: ERROR sin cambios.
+  - Exige `current_user = postgres` y no toca tablas, grants, roles ni `service_role`.
+  - Corrige dos defectos del borrador de diseño: el cast de `"char"` en `prokind` y la verificación del contrato completo después del reemplazo.
+- **Preflight** `validar_topologia_propietario_rpc.sql` (`88c1baae…` → `3dccd4b3…`): hash O-4 `e1b231fb…` y `proconfig` `{search_path=pg_catalog, pg_temp}`. El resto, sin cambios.
+- **`hardening_adr001.test.sql`:** `proconfig` exacto RA e identidad `e1b231fb…` (plan 59 sin cambio). **`pg_temp_rpc_privilegiadas.test.sql`:** la exención P8 exige hash y `proconfig` remediados (plan 42).
+- **Nuevo `supabase/tests/o4_pgtemp.test.sql`** (8 aserciones). Es autovalidante:
+  - corre el ataque real con un rol no reservado (dominios `pg_temp."name"`/`"record"`, `pg_temp.format()` y operador `pg_temp.=`) contra el cuerpo **original** como control, que debe escalar, y contra el remediado, que no debe escalar;
+  - verifica OID, ACL y el trigger, que la RLS de `public` no cambie y los tres DDL;
+  - en local crea una réplica remediada dentro de la transacción.
+- `pg_temp_jornadas.test.sql` **sin cambios**.
+
+### Verificación (laboratorio descartable `supabase/postgres:17.11.0.004`, `--network none`; evidencia en `../evidencias-t3-01/o4-pgtemp-implementacion/`)
+- **Migración.**
+  - Función ausente: NOTICE y nada más, dos veces.
+  - Sobre el original: rc 0; hash `e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e` observado en `pg_catalog`; `proconfig {"search_path=pg_catalog, pg_temp"}`; **OID, ACL `{postgres=X/postgres}` y `evtfoid` idénticos**.
+  - Segunda aplicación: idempotente y sin cambios.
+  - **15/15 negativos** (cuerpo desconocido, configuración extra, EXECUTE, tags, `evtenabled`, owner, RB sin RA, RA sin RB, rol distinto de postgres, trigger sin función, homónimos, trigger adicional, SECURITY INVOKER, cuerpo sin LF): ERROR de la migración, sin reemplazo y con el catálogo de O-4 idéntico.
+- **Ataques sobre RB+RA** con un rol LOGIN que sólo tiene TEMP: `record`, `name` con acción `rls_off`, `SELECT INTO`, `CREATE TABLE AS`, y `format()` y operador `=` hostiles. **0 ejecuciones privilegiadas**, y la RLS de las 11 tablas de `public` queda idéntica.
+- **Funcional:** `CREATE TABLE`, `CREATE TABLE AS` y `SELECT INTO` dejan RLS=true.
+- **Preflight:** P04 da rc 0 y `ESTADO_A` (postgres y supabase_admin; 20 SD + O-4; 33 políticas). READ ONLY da `ESTADO_A` y el catálogo idéntico, con y sin O-4. El **cuerpo antiguo se rechaza** con `[O4_RLS_AUTO_ENABLE] proconfig …; cuerpo distinto (325ae266…)`. Batería B.1.2c adaptada **22/22** (incluye cuerpo antiguo, RB sin RA, RA sin RB y orden de `search_path` invertido); P04 adaptada 13/13; Bloque A sin diferencias con B.1.2c.
+- **pgTAP:**
+
+  | Estado de O-4 | `o4_pgtemp` | `hardening` | `pg_temp_rpc_privilegiadas` | **P7 `pg_temp_jornadas`** |
+  |---|---|---|---|---|
+  | Remediada | 8/8 | 59/59 | 42/42 | **26/26** |
+  | Sin O-4 (local) | 8/8 | 59/59, 9 SKIP | 42/42 | 26/26 |
+  | Original sin remediar | falla 1 | fallan 48 y 54 | falla 9 | falla P7 |
+
+  Las otras suites no cambian respecto de B.1.2c: las mismas 37 fallas de entorno (`auth.uid()` sin GoTrue).
+- **Intento 1 (conservado):** `o4_pgtemp` abortó porque el `DROP` de los objetos hostiles disparó el event trigger de plataforma `extensions.pgrst_drop_watch()`, que declara `record` sin esquema. Se midió que todos los event triggers de la plataforma son SECURITY INVOKER: el CHECK hostil corre como el propio atacante (0 ejecuciones privilegiadas), así que no hay escalada. El test se corrigió con un CREATE/DROP inocuo previo, la misma técnica que ya usan los tests del repo, y toda la validación se repitió desde un laboratorio nuevo.
+- typecheck, lint, Vitest, Playwright y build: **no aplican** (no se tocó frontend).
+
+### Riesgos y pendientes
+1. **F7** (`WHEN OTHERS`) y **F8** (supautils omite el trigger para roles reservados y superusuario) **siguen abiertos**. Deben resolverse (alternativa B o C) antes de producción.
+2. Sin verificar todavía: la combinación con la imagen `.006` del stack local, **`supabase test db` completo** (requiere `supabase start` y `db reset` local autorizados), el comportamiento de la plataforma frente a un objeto alojado modificado, y el inventario de roles con LOGIN de staging.
+3. Decisiones humanas D1–D8 del diseño (aprobación de la enmienda, aplicación en staging, etc.). La migración **no debe aplicarse** en staging ni en producción sin autorización explícita.
+4. Security review, revisión humana y auditoría independiente del hash que se autorice. Commit, push, merge y deploy: **no autorizados**.
+
+---
+## 06/11/2026 — T3-01 B.1.2c: cierre técnico de B12B-01 (tags exactas de `ensure_rls`) y alineación pgTAP con O-4 (sin commit; T3-01 NO aprobada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, HEAD `d2d4ae262964a73cafd37e3e811354ba9e10948b`, sin cambios. Responde al dictamen de Codex sobre B.1.2b («FAVORABLE CON OBSERVACIONES»; el dictamen no está en disco y su contenido se tomó del pedido humano). Superficie sensible (SECURITY DEFINER, event triggers, RLS, Supabase): **corresponde security review**.
+
+### Qué se hizo
+- **`supabase/scripts/validar_topologia_propietario_rpc.sql`** (sin seguimiento en Git): SHA-256 `0fcfe37e…` → `88c1baae0777ae94619828925df6dbe909ef072d31428345aca05971627fa429`. Sólo cambió el control de `evttags` en el bloque O-4 de la sección 3.7, y su comentario. Ahora exige un array 1-D que, ordenado (collation C), sea igual a `{CREATE TABLE, CREATE TABLE AS, SELECT INTO}`: rechaza tags duplicadas, faltantes o sobrantes, NULL (array o elemento), array vacío y arrays 2-D, sin depender del orden. El mensaje `tags {…}` no cambia. Secciones 1, 4 y 5 y las 33 políticas tienen el mismo hash; el NOTICE confirma 40 firmas y 20 SD.
+- **`supabase/tests/pg_temp_rpc_privilegiadas.test.sql`** (P8, plan 42 sin cambio): la aserción «toda SD de public/privado vive en privado…» exime **sólo** a `public.rls_auto_enable()` por OID y con el contrato O-4 completo (atributos, hash de `prosrc`, sin EXECUTE, `ensure_rls` único con owner `postgres`, `ddl_command_end`, `evtenabled = 'O'` y tags exactas). `coalesce(…, false)` impide que un término NULL exima. Resuelve C-2.
+- **`supabase/tests/hardening_adr001.test.sql`** (plan 58 → 59): la aserción de `ensure_rls` pasa de `evtenabled <> 'D'` a `evtenabled = 'O'`, con owner, evento, tags exactas, unicidad y sin trigger de tabla. Se agrega una aserción sobre la identidad de la función (plpgsql, `event_trigger`, SHA-256 `325ae266…`). Ambas se informan como SKIP donde la función no existe (local).
+- Propuesta normativa de actualización de ADR-001 §18.2 (contrato verificable de O-4): **NO APROBADA y no aplicada a la ADR**; está en `../evidencias-t3-01/b1-2c/PROPUESTA_ADR001_18_2_O4.md`.
+
+### Verificación (laboratorio descartable `supabase/postgres:17.11.0.004`, `--network none`; 24 migraciones con rc 0; evidencia en `../evidencias-t3-01/b1-2c/`)
+- **P04 auténtico** (cuerpo `325ae266…`, 1055 bytes, hash confirmado en `pg_catalog`): con `postgres` y con `supabase_admin` da rc 0 y `ESTADO_A`. En READ ONLY también da rc 0 y `ESTADO_A`, con `transaction_read_only=on` y el catálogo idéntico antes y después. Sin O-4, READ ONLY da `ESTADO_A`.
+- **Batería B.1.2c, base auténtica:** 18/18 PASA con el preflight final. El inicial `0fcfe37e` **acepta** 6 casos (duplicadas N30–N32, elemento NULL N37/N38 y array 2-D N40), lo que reproduce B12B-01. Permutar el orden (P05/P06) sigue aceptándose. Los negativos esenciales (SD extra en public, homónimo en otro esquema, `evtenabled D`) dan PASA.
+- **Regresión:** los 13 casos P04 de B.1.2b y el Bloque A (48) no difieren entre el inicial y el final. El Bloque A coincide con la referencia con O-4 de B.1.2b. En B.1.2a (29) no hay diferencias. En B.1.2b (26) cambia **sólo N21d** (duplicadas), que pasa de aceptarse a rechazarse con `tags`: es el cambio buscado.
+- **pgTAP:** los archivos modificados dan sin O-4 `hardening` 59/59 (9 SKIP) y `pg_temp_rpc_privilegiadas` 42/42; con O-4 auténtica, 59/59 y 42/42. La versión de HEAD de `pg_temp_rpc_privilegiadas` **falla P8** con O-4 (C-2 reproducido). Para los negativos se aplicaron mutaciones dentro de la transacción del test. Con `evtenabled` R o A, tags duplicadas, tags faltantes o un trigger adicional fallan P8 y la aserción de `ensure_rls`. Con un cuerpo no-op fallan P8 y la de identidad. Con EXECUTE a authenticated fallan P8 y las de EXECUTE. Con una SD extra en public falla P8. Con el orden permutado no falla ninguna. Una mutación de catálogo con un elemento NULL en `evttags` invalida el arnés (`expected 1-D text array`: PostgreSQL rechaza todo DDL posterior); queda cubierta por el preflight.
+- **Sin cambios en el resto del árbol de pgTAP:** las 37 fallas de 11 archivos no modificados (lecturas RLS como `authenticated`) aparecen igual con y sin O-4. Son una limitación de este laboratorio sin el stack de `supabase test db`, no de este cambio. **No se ejecutó `supabase test db`.**
+- typecheck, lint, Vitest, Playwright y build: **no aplican** (no se tocó frontend).
+
+### Riesgos abiertos (deben resolverse antes de producción)
+- **F7:** el cuerpo auténtico tiene `EXCEPTION WHEN OTHERS THEN RAISE LOG`. Si habilitar RLS falla, la tabla de `public` queda **sin RLS** y el DDL termina bien, con una señal sólo de nivel LOG y sin `SQLERRM` (demostrado en B.1.2b P04).
+- **F8:** en el laboratorio, un DDL de `supabase_admin` no disparó `ensure_rls`. La causa no está demostrada.
+- **Nuevo (O4-PGTEMP):** con O-4 presente, `pg_temp_jornadas.test.sql` P7 (test 8; archivo no modificado, fuera del alcance) falla: el detector encuentra 3 referencias resolubles por `pg_temp` en el cuerpo auténtico (SD con `search_path=pg_catalog`, sin `pg_temp` al final). No se analizó su explotabilidad ni se cambió el test.
+- Compensación diferida: el preflight T3P-05 (`[RLS_DESHABILITADA]`) y la habilitación explícita de RLS en las migraciones.
+
+### Pendientes
+1. Revisión humana del diff; security review; revisión independiente acotada (Codex) sobre el commit que se autorice.
+2. Decisiones humanas PB12C-1..5 (propuesta §18.2, endurecimiento de tags que reemplaza la ratificación «como conjunto», F7, F8 y ACL exacta) y tratamiento de O4-PGTEMP y de `pg_temp_jornadas` P7.
+3. C-2 queda resuelto por la exención en P8, pendiente de revisión. El borrador §18.5 sigue NO APROBADO.
+4. Commit, push, merge y deploy: **no autorizados**.
+
+---
 ## 04/11/2026 — ADR-009 ratificada: forward-only para validación controlada (documental, sin commit)
 
 **Rama:** `integracion/jornadas-fase1`, HEAD `05b9d8dee490080c01972dcf801ea119433b6e63`, mismo worktree. Cambio **exclusivamente documental**. No se ejecutaron rollbacks, tests, auditorías ni nada remoto.
