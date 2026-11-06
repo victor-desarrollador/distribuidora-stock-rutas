@@ -1,4 +1,78 @@
 ---
+## 06/11/2026 — ADR-010 v1.0: cierre de las observaciones documentales de Codex (documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230`; ADR-010 inicial SHA-256 `cbf7b2a1…1f29`. Dictamen de Codex: **FAVORABLE CON OBSERVACIONES** (cuatro hallazgos documentales). Correcciones en `docs/decisions/010-intenciones-persistidas-de-operacion.md`:
+- **G-01:** §5.13 «Listado»: «mínimo 30 días» → ventana máxima de 30 días; los valores anteriores se recortan al límite permitido (7 días por defecto y 100 filas, sin cambios).
+- **G-02:** §8.2.1 f: N-COL pasa de «se propone agregar» a obligación normativa con `has_any_column_privilege(rol, 'public.intenciones_operacion', 'SELECT')` para `anon` y `authenticated`; se mantiene explícito que no está implementado ni probado.
+- **G-03:** §7 y §8.3: `BLUEPRINT.md` v2.6 ya incorpora la entidad y la excepción a P15, y el README ya registra ADR-010 aprobada; la implementación actualizará migraciones, RPC, preflight, tests y código sin volver a aprobar estas decisiones.
+- **G-04:** terminología fuera del historial («si alguna vez se aprueba», «esta propuesta», «se propone») → «cuando se autorice su implementación», «con esta ADR implementada», «esta ADR exige probar». El historial v0.1–v0.3 no se tocó.
+
+**Sin cambios funcionales:** las 16 decisiones aprobadas, los valores, las firmas y los contratos técnicos no cambian; Blueprint y ADR-001 no requieren cambios. Sin cambios en `apps/web` ni en `supabase/`. **La implementación de ADR-010 sigue sin autorizar.**
+---
+## 06/11/2026 — ADR-010 v1.0 APROBADA (normativa): formalización de la decisión humana (documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230` (verificado); cambios B-01 sin commit y los tres `AUDIT_REPORT_*.md` preservados.
+
+**Decisión humana (06/11/2026).** El responsable del proyecto aprobó ADR-010 con el paquete completo: C-mínima; excepción acotada a P15 de ADR-001; alternativa A (sin `SELECT` ni otro acceso directo de `authenticated` a `intenciones_operacion`); rechazos definitivos de negocio como `rechazada` con HTTP 200, solo lista cerrada; vencimiento de 24 h como límite de admisión; retención indefinida sin purga; ≤ 20 pendientes por actor; ≤ 120 creaciones por actor por hora; listado de 100 filas, 7 días por defecto y 30 días como máximo; `motivo` ≤ 500 caracteres; visibilidad exclusiva del actor; aceptación temporal del bypass por RPC directas de stock en la Fase 1; implementación después del cierre de T3-01; numeración 010; B-01 abierta hasta completar la recuperación; payload ≤ 4096 bytes con `octet_length(p_payload::text)`. **La autorización es exclusivamente normativa.**
+
+**Cambios:**
+1. `docs/decisions/010-intenciones-persistidas-de-operacion.md` → **v1.0, APROBADA**: §0.2 (registro de la aprobación y diferencia entre aprobación normativa y aceptación técnica), §0.3 (obligaciones de implementación), §5.4 (`octet_length(p_payload::text) <= 4096`), §5.10 (política de `UPDATE` con `USING` y **`WITH CHECK` explícitos**: `WITH CHECK (actor_id = usuario_actual AND estado IN ('confirmada','rechazada','cancelada'))`, porque sin `WITH CHECK` PostgreSQL aplicaría `USING (estado = 'pendiente')` a la fila nueva e impediría toda transición), §5.13 y §12 con valores aprobados (D-IDEM-16 nuevo: tamaño del payload; D-IDEM-13 sigue pendiente). El texto aclara que nada está implementado.
+2. `BLUEPRINT.md` → **v2.6**: excepción a P15 en §7.9.1, entidad `intenciones_operacion` en §8, pruebas en §12, historial §17 (y pie corregido, decía v2.3).
+3. `docs/decisions/001-rpc-privilegiadas.md`: nota de **remisión** a ADR-010 al final de §18.3 (excepción P15 y su relación con P13/P16 en la vía de intenciones) y fila de historial. No cambia ninguna decisión ni el estado de ADR-001.
+4. `docs/decisions/README.md`: ADR-010 1.0 APROBADA (normativa).
+
+**No se tocaron** migraciones, SQL, RPC, RLS, permisos, el preflight, tests ni frontend; no se ejecutó ninguna base ni operación remota.
+
+**Pendiente:** implementación (tarea propia, autorizada, después del cierre de T3-01), con pgTAP, concurrencia, Vitest y Playwright (ADR-010 §0.3 y §10.B), security review, auditoría independiente sobre un hash y aceptación técnica humana. Revisión independiente de este cambio documental y autorización de commit.
+---
+## 06/11/2026 — ADR-010 v0.3: incorporación del laboratorio PR-01 a PR-13 y correcciones C-1 a C-8 (PROPUESTA NO APROBADA; documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230` (verificado); los cambios B-01 sin commit y los tres `AUDIT_REPORT_*.md` se preservan. Evidencia del laboratorio verificada con `sha256sum -c MANIFIESTO.sha256` (74 archivos, 0 discrepancias); la copia del preflight usada como línea base es idéntica al archivo del repo (`e9d49e09…ed6b`). ADR-010 sigue en **PROPUESTA — NO APROBADA**.
+
+**Cambios en `docs/decisions/010-intenciones-persistidas-de-operacion.md` (v0.2 → v0.3):**
+1. **C-1 (§5.1 R-13, §5.5.1, §5.8, §5.13).** `crear` serializa con `pg_advisory_xact_lock(hashtextextended('intenciones:<empresa>:<actor>',0))` (nivel 0) después de validar y antes del replay y de los conteos; `VOLATILE` y `READ COMMITTED` obligatorio (`PT500` si no); orden actor → intención → stock; argumento de ausencia de deadlocks; liberación transaccional. PR-11/H-LM: sin lock, exceso en 10/10 rondas; con lock, exactamente el tope. Los valores 20 y 120 siguen pendientes.
+2. **C-2 (§8.1).** 20 `SECURITY DEFINER` = 20 funciones en `privado` (19 implementaciones con fachada + `empresa_gestion_actual()`); `public.rls_auto_enable()` no integra la cifra ni existe en el laboratorio; +4 → 24.
+3. **C-3 (§5.10, §8.2.1).** Inventario completo del preflight: 7 bloques con la lista de relaciones, manifiestos de funciones y políticas, lista 3.4, inventario 3.7, conteos 40→48 / 20→24 / 11→12 / 33→36, `NOTICE` y comentarios, hashes con `search_path = pg_catalog, pg_temp`, pruebas negativas. **Alternativa A propuesta** (sin `SELECT` de `authenticated`) con excepción por nombre literal. **Hallazgo nuevo, deducido de la lectura del preflight y no probado:** el bloque de columnas no controla `SELECT` por columna de `authenticated`; la excepción A necesita ese complemento solo para la tabla nueva (negativo N-COL). Brechas N12/N13 → pgTAP ES-02.
+4. **C-4 (§5.9).** Identidad solo por `privado.usuario_actual()`; `auth.uid()` falla en definer de `propietario_rpc`; validación de usuario, empresa, rol y actividad según `privado.mover_a_cuarentena`.
+5. **C-5 a C-8 (§5.4, §5.12).** Contrato numérico de `jsonb`; `p_payload jsonb` obligatorio (R-11); sin normalización Unicode; `22P05`/`PGRST102`/`22003`; mapeo SQLSTATE → HTTP observado.
+6. **§10.A** con resultados y **§10.A.1** con los límites (prototipo invoker, no se probaron CC-02, CC-03, PL-11, PW-05, NG-04, N-COL, RC-01; deadlocks simulados). **§10.B** suma ES-09, SD-01, LM-05 a LM-07, NG-09, NG-10, RC-01 y amplía ES-02, ES-05, ES-06, NG-05, CC-02. **§11** suma R-17 a R-22. **§12** tabla de 16 decisiones pendientes (nueva D-IDEM-15: alternativa A/B; D-IDEM-5d: creaciones por hora separada de 5b).
+
+**Archivos modificados:** `docs/decisions/010-intenciones-persistidas-de-operacion.md`, `docs/decisions/README.md` (versión 0.3 en el índice), `docs/progress-log.md`; evidencia externa: nota `../evidencias-entrega-b/d-idem-supabase/ADR010_v0.3_INCORPORACION.md` (no altera el laboratorio ni su manifiesto). **No se tocaron** Blueprint, ADR aprobadas, migraciones, SQL, RPC, RLS, permisos, preflight, código ni tests. No se ejecutó ninguna base ni se levantó ningún stack.
+
+**Pendiente (decisión humana):** ADR-010 §12. Para pedir aprobación falta la decisión humana de D-IDEM-1, -2, -7, -10 y -15, y la revisión independiente de v0.3.
+---
+## 06/11/2026 — ADR-010 v0.2: corrección de los hallazgos de Codex (PROPUESTA NO APROBADA; documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230`; los cambios B-01 sin commit y los tres `AUDIT_REPORT_*.md` se preservan. El dictamen «APTA CON CORRECCIONES» **no está en el repositorio ni en `~/Documentos`**: los ocho hallazgos se tomaron del pedido. ADR-010 sigue en **PROPUESTA — NO APROBADA**; no autoriza SQL, migraciones, RPC, tablas ni pruebas que la asuman vigente.
+
+**Cambios en `docs/decisions/010-intenciones-persistidas-de-operacion.md` (v0.1 → v0.2):**
+1. **Vencimiento (§5.3, 5.6, 5.8, 5.13, 6).** Es el límite para **admitir** nuevas ejecuciones, no para completarlas. Con la fila bloqueada por `FOR UPDATE` se compara `clock_timestamp()` (no `now()`, que es el inicio de la transacción). Una ejecución admitida antes puede completar después. Se eliminaron «nunca se ejecutará» tras vencer y «tras cancelar/vencer no se ejecuta».
+2. **Referencia a `operaciones` (§5.2, 5.11).** FK compuesta `(empresa_id, operacion_id, tipo, actor_id)` → `operaciones (empresa_id, id, tipo, actor_id)`. **La UNIQUE ya existe**: `operaciones_referencia_apertura` (`20261030120000_jornadas_esquema.sql:447`, inventariada en `stock_ingreso.test.sql:167`, ya usada por una FK en `:483`). **No se modifica `operaciones`.** Límite explícito: la FK no puede expresar `idempotency_key = id`; se garantiza por `ejecutar` y se comprueba con pruebas.
+3. **P15 (§7, 7.1).** Se reconoce la **segunda representación durable** de la clave; se propone una **excepción acotada** con justificación y cambios normativos, y se retira la afirmación de compatibilidad plena.
+4. **Payload (§5.4).** Conjunto exacto de claves por tipo, tipos PostgreSQL, enteros estrictos 1…2147483647, normalización de `motivo`, tope de tamaño y **reconstrucción con `jsonb_build_object`**; nunca se almacena `p_payload`. Validación en línea (sin auxiliar `SECURITY DEFINER`).
+5. **Concurrencia y errores (§5.6–5.8).** Sin cambios de fondo: locks intención → stock, transición atómica a `confirmada`, lista cerrada de rechazos, relanzamiento de errores de identidad y transitorios, sin `WHEN OTHERS`, RPC de stock reutilizadas.
+6. **T3-01 (§8).** Impacto cuantificado con líneas del preflight: firmas 40→48 (`:879`), `SECURITY DEFINER` 20→24 (`:1041`, `:1050`), relaciones RLS 11→12 (`:1411`), políticas 33→36 (retención indefinida) o 37 (con purga) (`:1406`); más ACL, owner, `proconfig`, hashes de `USING`/`WITH CHECK`, grants y pruebas negativas. **Preflight sin modificar.**
+7. **Decisiones (§12).** Tabla compacta con valores **propuestos, no aprobados**. **La retención recomendada pasó de «purga perezosa» a «indefinida»** (menos superficie, sin `DELETE`, 36 políticas); la purga queda como variante.
+8. **Pruebas (§10).** Separadas en 10.A (premisas PR-01 a PR-13, **antes** de aprobar, laboratorio descartable) y 10.B (**después** de implementar), con casos de vencimiento, FK, payload, límites, P15, inventarios y seguridad negativa.
+
+**Archivos modificados:** `docs/decisions/010-intenciones-persistidas-de-operacion.md`, `docs/progress-log.md`; evidencia externa en `../evidencias-entrega-b/d-idem-supabase/` (notas de supremacía). **No se tocaron** Blueprint, ADR aprobadas, migraciones, SQL, RPC, tablas, RLS, permisos, código, tests ni el preflight. No se ejecutó ningún comando SQL ni se levantó ningún stack.
+
+**Pendiente (decisión humana):** ver ADR-010 §12. La ADR no autoriza nada; B-01 sigue bloqueada por la idempotencia tras recarga.
+---
+## 06/11/2026 — ADR-010 redactada como PROPUESTA NO APROBADA: intenciones persistidas (C-mínima) para D-IDEM (documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230`; los cambios B-01 sin commit se preservan y los tres `AUDIT_REPORT_*.md` siguen intactos.
+
+**Qué se hizo.** Se redactó `docs/decisions/010-intenciones-persistidas-de-operacion.md` (v0.1, estado **PROPUESTA — NO APROBADA**) y se agregó su fila al índice de `docs/decisions/README.md`. **Número:** 010; el 008 no está libre porque ADR-009 lo cita como propuesta de rollback (fuera del repo) y el 010 no figuraba en ningún archivo. La ADR define: el problema de la respuesta perdida con clave no recuperable; las alternativas descartadas (A0, B0, D1, D2, A, B, C3) con su razón; el modelo de intenciones con payload canónico; estados y transiciones atómicas; `crear`/`ejecutar`/`cancelar`/`listar`; el orden de locks intención → stock; la serialización de `ejecutar` y `cancelar`; empresa, actor, rol y sesión; permisos y RLS; la relación con `operaciones` e `idempotency_key`; los reintentos P13; la separación de errores de negocio frente a transitorios e identidad; vencimiento, retención y limpieza; la compatibilidad con ADR-001 y T3-01; la compatibilidad futura con ventas y cobros (sin implementarla); pruebas y criterios de aceptación; riesgos residuales y decisiones abiertas.
+
+**Restricciones técnicas fijadas en la propuesta.** Sin SQL dinámico (`CASE` estático); sin `WHEN OTHERS` (solo SQLSTATE nombrados `PT400/PT404/PT409` y lista cerrada de códigos `stock_*`; todo lo demás se relanza); `PT401`, `PT403` y `42501` nunca se convierten en HTTP 200; RPC de stock, permisos y RLS vigentes sin cambios; sin acceso directo del frontend a tablas; sin `localStorage`, `sessionStorage` ni IndexedDB.
+
+**Hecho verificado relevante para T3-01.** El preflight `supabase/scripts/validar_topologia_propietario_rpc.sql` exige una cardinalidad de funciones `SECURITY DEFINER` de **exactamente 20** (líneas 1041 y 1050; 19 privadas del manifiesto + `public.rls_auto_enable()` de O-4). Las 4 funciones privadas de esta propuesta la llevarían a 24 y las 8 funciones nuevas deberían figurar en el manifiesto; sin ese ajuste el preflight fallaría con `[SD_INVENTARIO]`. T3-01 no se modificó (su Fase 1 sigue sin aprobación).
+
+**Archivos modificados:** `docs/decisions/010-intenciones-persistidas-de-operacion.md` (nuevo), `docs/decisions/README.md` (una fila de índice), `docs/progress-log.md`. **No se tocaron** `BLUEPRINT.md`, ADR aprobadas, migraciones, SQL, RPC, tablas, RLS, permisos, código ni tests. No se ejecutó ningún comando SQL ni se levantó ningún stack.
+
+**Pendiente (decisión humana):** D-IDEM-0, -1, -2, -3, -5, -7, -10, -11, -12, -13 y -14 (ver ADR-010 §12). La ADR no autoriza nada hasta que el dueño del proyecto la apruebe; B-01 sigue bloqueada por la idempotencia tras recarga.
+---
 ## 06/11/2026 — B-01: integración real y Playwright en stack descartable (sin commit; NO aprobada)
 
 **Rama/HEAD:** `feat/b-01-stock-real`, `a1d29640a67d1846673f794bed2a754d98c229e5`; AUDIT_REPORT_* intactos. Reglas respetadas: Blueprint v2.5 §7.1 y ADR-005 (unidad entera; peso en kg con hasta 3 decimales de entrada, gramos enteros persistidos, `p_cantidad integer`).

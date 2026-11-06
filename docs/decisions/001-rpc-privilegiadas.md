@@ -1,6 +1,6 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 04/11/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 06/11/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
 **Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15; enmienda E-SL1 en 18.4.16, **aprobada para validación controlada el 04/11/2026**)
 
@@ -32,6 +32,7 @@
 | v1.5 + anexo §18.4 (cierre D-2) | Claude Code | Registra el cierre de D-2 (18.4.15): commit auditado `e826d308aab9a0b108ece17128c5c3448d7729ae`, PASS de Codex y de OpenCode, aceptación humana de esos informes como security review sólo para D-2, merge del PR #33 (`4654a95fb478c7b118dca4f67368ccd6a9b331b7`), CI en verde y el despliegue automático de Vercel a Production. Registra las aclaraciones C-1 y C-2 sobre el texto de 18.4.2.1 sin editarlo, y C-3 y C-4. No modifica 18.4.1 a 18.4.12, no cambia el estado de la ADR, no autoriza D-1, el arnés, las seis RPC ni producción. |
 | v1.5 + anexo §18.4 (E-SL1 propuesta) | Claude Code | Agrega 18.4.16: enmienda E-SL1 (paso 0 de rechazo de transacciones de sólo lectura en `abrir_jornada` y `reasignar_vendedor`, código `25006 jornada_metodo_no_permitido`), como **PROPUESTA TÉCNICA NO APROBADA**, con la dirección técnica humana del 03/11/2026 registrada sin aprobarla. No modifica 18.4.1 a 18.4.15 ni el estado de la ADR; no autoriza producción. |
 | v1.5 + anexo §18.4 (E-SL1 aprobada) | Claude Code | Registra la decisión humana del 04/11/2026: E-SL1 (18.4.16) queda **APROBADA PARA VALIDACIÓN CONTROLADA**, con el texto presentado y sin cambios, como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006 jornada_metodo_no_permitido`) y §16 T14. El punto 4 de la dirección técnica rige para `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida` en sus tareas autorizadas. No modifica 18.4.1 a 18.4.15, no cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. |
+| v1.5 + remisión ADR-010 | Claude Code | Registra, por decisión humana del 06/11/2026, una nota de remisión al final de §18.3 hacia ADR-010 (APROBADA, normativa): excepción acotada a P15-stock para las intenciones persistidas de stock y su relación con P13-stock y P16-stock. No modifica ninguna decisión de §18.1–§18.4, no cambia el estado de la ADR ni autoriza implementación ni producción. |
 
 ---
 
@@ -537,6 +538,8 @@ Implementación y evidencia local: `supabase/migrations/20261024232059_hardening
 | P17-stock | La auditoría de operaciones exitosas de Stock es `operaciones` (actor, empresa, tipo, clave, huella, `creado_en`) + `movimientos_stock` (operación, actor, motivo, producto, cantidad, origen, destino, `creado_en`); sin tabla genérica `auditoria` (Blueprint §10). `jornada_id` se agrega en la Etapa 3 con FK real. Append-only por grants y RLS, sin trigger. | P17 global pendiente |
 
 Implementación y evidencia: `supabase/migrations/20261025021032_stock_operaciones_ingreso.sql`, `supabase/tests/stock_ingreso.test.sql` y la entrada «Etapa 2 — Stock, slice 1: stock-ingreso» de `docs/progress-log.md`.
+
+> **Remisión a [ADR-010](010-intenciones-persistidas-de-operacion.md) (APROBADA, decisión humana del 06/11/2026; aprobación normativa, sin implementación).** ADR-010 aprueba una **excepción acotada a P15-stock**: la `idempotency_key` de una operación de stock de los tipos `ingreso`, `a_cuarentena` y `merma` puede persistirse además como `id` de su intención en `public.intenciones_operacion` (ADR-010 §7.1). `operaciones.idempotency_key` sigue siendo la **única** barrera de unicidad e idempotencia (P12-stock) y sigue prohibido copiar la clave a `movimientos_stock` o a cualquier documento hijo. Para la vía de intenciones, ADR-010 §5.8 antepone al lock de stock de P13-stock un lock por actor (solo en `crear`) y el bloqueo de la fila de la intención, y §5.7 devuelve los rechazos de negocio de una lista cerrada como estado `rechazada` (HTTP 200) en lugar del `PTxyz` de P16-stock. **Esta remisión no modifica** ninguna fila de la tabla anterior, las RPC de Stock ni sus contratos, ni el estado de esta ADR; no autoriza implementación, staging ni producción.
 
 #### Slice 2 `stock-cuarentena-merma` (25/10/2026)
 

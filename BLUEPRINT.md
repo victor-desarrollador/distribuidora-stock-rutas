@@ -1,8 +1,8 @@
 # BLUEPRINT — Sistema de Control para Distribuidora de Lácteos y Fiambres
 
 **Proyecto:** VM Digital Studio
-**Versión:** 2.5 (documento de trabajo controlado; propuestas no aprobadas identificadas)
-**Fecha:** 29/10/2026 (hora local Argentina)
+**Versión:** 2.6 (documento de trabajo controlado; propuestas no aprobadas identificadas)
+**Fecha:** 06/11/2026 (hora local Argentina)
 **Estado:** Apto para inventario técnico, planificación y validación controlada de ADR-001 exclusivamente en local/staging. No autoriza implementar decisiones pendientes ni ejecutar migraciones productivas. Entregas 1A/1B pendientes de aprobación comercial.
 
 > Este documento es la fuente de referencia del proyecto. Todo agente (Claude Code, OpenCode, Codex) y toda persona que trabaje en el repositorio debe leerlo antes de escribir código. Si algo del código contradice este documento, el documento manda hasta que se registre una decisión que lo cambie (ver sección 13: ADR).
@@ -313,6 +313,7 @@ Reglas:
 - **Todos los efectos creados atómicamente por esa ejecución referencian `operaciones.id`.**
 - Una acción posterior independiente crea **otra** operación.
 - **No se duplica `idempotency_key` en los documentos hijos** salvo necesidad concreta que aparezca en el diseño SQL/RPC.
+- **Excepción aprobada (ADR-010, 06/11/2026):** para las operaciones de stock `ingreso`, `a_cuarentena` y `merma` ejecutadas mediante **intenciones persistidas**, la `idempotency_key` se persiste además como `id` de su intención en `intenciones_operacion`, para recuperar operaciones con resultado desconocido tras recargar, cerrar o cambiar de dispositivo. `operaciones.idempotency_key` sigue siendo la única barrera de unicidad e idempotencia; la clave sigue sin copiarse a `movimientos_stock` ni a documentos hijos. Excepción a P15-stock de ADR-001 §18.3 (remisión allí). **Aprobación normativa: no implementada.**
 
 La operación aporta identidad, actor, fecha/hora e idempotencia. No lleva cantidades de producto ni importes por sí misma.
 
@@ -470,6 +471,7 @@ Como el número, la fecha/hora del servidor y los snapshots los debe fijar el se
 | `clientes` | [APROBADA CONCEPTUALMENTE] | nombre, comercio, direccion, telefono, activo, creado_por, validado_por, estado_validacion; contraparte comercial, **no** ubicación de stock. **DNI y cuenta:** requeridos para mostrar en presupuestos (§7.10), pero **no existen** en el modelo actual; agregarlos y definir su obligatoriedad, formato y unicidad son **decisiones pendientes** (§15) |
 | `ubicaciones` | [APROBADA CONCEPTUALMENTE] | internas: `deposito`, `cuarentena`, `camion` (camion_id). **`merma` no es ubicación interna** (salida terminal) |
 | `operaciones` | [APROBADA CONCEPTUALMENTE] | empresa_id, tipo, actor, jornada_id (opcional), idempotency_key, creado_en; ejecución lógica idempotente (§7.9) |
+| `intenciones_operacion` | [APROBADA — ADR-010, 06/11/2026; no implementada] | id (= `idempotency_key` de la operación), empresa_id, actor_id, tipo (`ingreso`/`a_cuarentena`/`merma`), payload canónico reconstruido en PostgreSQL (≤ 4096 bytes, `octet_length(p_payload::text)`), estado (`pendiente`/`confirmada`/`rechazada`/`cancelada`), operacion_id (FK compuesta empresa + operación + tipo + actor), codigo_rechazo, creado_en, vence_en (admisión: 24 h), resuelto_en. Intención **previa** a la operación; no es auditoría ni ledger. Solo el actor creador la ve y solo por RPC (sin acceso directo de `authenticated`); retención indefinida. Contrato completo en ADR-010 |
 | `movimientos_stock` | [APROBADA CONCEPTUALMENTE] | operacion_id, tipo_movimiento, producto_id, cantidad (entero, unidad mínima), ubicacion_origen_id (nullable), ubicacion_destino_id (nullable), jornada_id, actor, motivo, creado_en. **Sin `saldo_actual`.** Append-only |
 | `saldos_stock` | [DERIVADA] | **No es fuente de verdad en Fase 1.** El saldo se deriva de `movimientos_stock`. Caché/materialización = optimización futura |
 | `jornadas` | [APROBADA CONCEPTUALMENTE] | fecha, camion_id, vendedor_id, estado, ventas_finalizadas_at, abierta_por, contada_por, cerrada_por, cerrada_at, observaciones. Reglas de apertura, carga y salida en ADR-007 |
@@ -650,6 +652,14 @@ No se considera terminado un módulo sin estas pruebas (tests SQL sobre las RPC 
 - [ ] Vendedor puede crear cliente pero no editar clientes existentes, incluso usando directamente la API.
 - [ ] Solo dueño/encargado pueden iniciar un retiro; solo ambos participantes lo confirman.
 
+**Intenciones persistidas de stock (ADR-010; se exigen al implementarla)**
+- [ ] Tras perder la respuesta y recargar, cerrar o cambiar de dispositivo, el mismo usuario recupera la intención y el stock se mueve **una sola vez**.
+- [ ] `ejecutar` y `cancelar` concurrentes: gana exactamente uno; tras `cancelar` o tras el vencimiento (24 h) no se admite una ejecución nueva.
+- [ ] Los límites por actor (20 pendientes, 120 creaciones por hora) se cumplen exactamente bajo concurrencia.
+- [ ] `anon` y `authenticated` no acceden directamente a `intenciones_operacion` (ni por tabla ni por columna); otro actor u otra empresa reciben un error indistinguible de inexistente.
+- [ ] Solo los rechazos de negocio de la lista cerrada se devuelven como `rechazada` (HTTP 200); los errores de autenticación, autorización y transitorios siguen siendo errores.
+- [ ] La `idempotency_key` no aparece en `movimientos_stock` ni en documentos hijos. Detalle completo en ADR-010 §10.B.
+
 ---
 
 ## 13. Organización del repositorio y documentación
@@ -819,7 +829,8 @@ Estado: abierto | resuelto (solo con prueba)
 | 2.3 | 26/10/2026 | **Estado de implementación, sin cambio de reglas:** Slice A del modelo por peso (`20261027001542_modelo_peso_gramos.sql`, validado sólo en local) deja el SQL en `unidad`/`peso` con enteros en unidad mínima (unidades o gramos), sin cambiar tipos ni firmas de RPC de stock y con falla cerrada ante datos `pieza` (D-R4). La pantalla Productos se adapta al contrato `unidad | peso` por compatibilidad inmediata. Se actualizan las notas de estado de §7.1 y §8; el resto del prototipo sigue pendiente (Slice B). |
 | 2.4 | 29/10/2026 | **ADR-006 aprobada — Una línea por producto en cada venta nueva** (formaliza la decisión humana del 28/10/2026, hallazgo AUD-B3-01; complementa ADR-005 sin modificar D-R1): en una venta nueva, `productoId` es único dentro de los ítems, cualquiera sea su unidad, y las líneas repetidas invalidan la venta. Los históricos con líneas repetidas no se ven afectados: se leen sin recalcular ni migrar. §7.5 incorpora la regla y §12, sus 6 pruebas normativas. |
 | 2.5 | 29/10/2026 | **ADR-007 aprobada — Jornadas y carga de camiones** (decisiones humanas del 29/10/2026), para el tramo `abierta → cargada → en_reparto`: **apertura** por dueño o encargado con fecha operativa actual o futura en la zona `America/Argentina/Tucuman`, camión activo y sin otra jornada sin cerrar; **vendedor** con perfil activo y rol `dueno`, `encargado` o `vendedor_piloto`, una jornada por persona y fecha aunque esté cerrada, reasignable antes de la salida con historial append-only; **corrección** de fecha o camión de una jornada `abierta` sin movimientos, con motivo, revalidación completa e historial propio; **carga incremental**, con la primera carga como evento de `abierta → cargada` y stock del camión en cero; **descarga** compensatoria antes de la salida; **salida** con carga neta positiva. §7.4 (tipo `descarga`), §7.5, §8 (dos historiales y unicidad por vendedor y fecha), §12 (pruebas normativas de ADR-007 §7) y §15 («Fechas»: zona horaria resuelta, corte de jornada pendiente). **Sin SQL, migraciones ni pruebas en este cambio**; el contrato técnico (anexo §18.4 de ADR-001) sigue PROPUESTA TÉCNICA NO APROBADA. |
+| 2.6 | 06/11/2026 | **ADR-010 aprobada (normativa) — Intenciones persistidas de stock** (decisión humana del 06/11/2026): §7.9.1 incorpora la excepción acotada a P15 (la `idempotency_key` de `ingreso`, `a_cuarentena` y `merma` se persiste además como `id` de su intención); §8 agrega la entidad `intenciones_operacion`; §12, sus pruebas obligatorias. **Sin SQL, migraciones, RPC, permisos ni frontend**: la implementación se hará después del cierre de T3-01, con autorización y aceptación técnica propias. B-01 sigue abierta. |
 
 ---
 
-*Fin de BLUEPRINT.md v2.3*
+*Fin de BLUEPRINT.md v2.6*
