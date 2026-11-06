@@ -24,6 +24,7 @@ import {
 
 import Dashboard from "./pages/Dashboard";
 import Productos from "./pages/Productos";
+import Stock from "./pages/Stock";
 import Clientes from "./pages/Clientes";
 import Camiones from "./pages/Camiones";
 import Jornadas from "./pages/Jornadas";
@@ -83,6 +84,15 @@ function RutasPrivadas() {
           element={
             <ProtectedRoute roles={gestion}>
               <Productos />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/stock"
+          element={
+            <ProtectedRoute roles={gestion}>
+              <Stock />
             </ProtectedRoute>
           }
         />

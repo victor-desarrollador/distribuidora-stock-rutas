@@ -1,4 +1,75 @@
 ---
+## 06/11/2026 — B-01: integración real y Playwright en stack descartable (sin commit; NO aprobada)
+
+**Rama/HEAD:** `feat/b-01-stock-real`, `a1d29640a67d1846673f794bed2a754d98c229e5`; AUDIT_REPORT_* intactos. Reglas respetadas: Blueprint v2.5 §7.1 y ADR-005 (unidad entera; peso en kg con hasta 3 decimales de entrada, gramos enteros persistidos, `p_cantidad integer`).
+
+**Corrección a la entrada anterior.** Allí se dijo que no había un stack de este repo corriendo. Era falso: `distribuidora-stock-rutas` (puerto 54321) estaba activo; el `docker ps | head -20` lo había cortado. No se tocó.
+
+**Aislamiento.** Inventario previo: 65 recursos Docker (contenedores, redes, volúmenes) y puertos 54321–54327, 55321–55324, 56322–56324, 57321–57324, 59221–59222 ocupados. Se creó una copia de trabajo **fuera del repo** (`…/scratchpad/b01/stack-b01-e2e/supabase`: `config.toml`, `seed.sql` y las 25 migraciones copiadas, sin modificar el repo) con `project_id = "b01-e2e-lab"`, puertos 58320–58329, y studio, analytics y edge runtime desactivados. `supabase start --workdir <copia>` (nunca desde el repo, sin `db reset`, sin `link`). Resultado comprobado: 4 contenedores, 1 volumen y 1 red nuevos, todos `*_b01-e2e-lab`; ningún recurso preexistente cambió. Fin: `supabase stop --no-backup --workdir <copia>` (sólo ese `project_id`); el inventario final es **idéntico** al previo (`diff` vacío), sin contenedores ni puertos 58xxx residuales. El servidor Vite se levantó con `VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY` del stack descartable pasadas por entorno (no se leyeron ni modificaron `.env*`). Sin staging ni producción. Los logs, manifiestos y la copia están fuera del repo.
+
+**Spec nuevo:** `apps/web/tests/b01-stock.spec.ts` (16 pruebas con la `setup`). Cada prueba crea su propio producto vía `crear_producto` y verifica con lecturas reales a la Data API (`stock_actual`, `movimientos_stock`), no con mocks: dueño consulta; ingreso con saldo y persistencia tras recargar; peso 1,250 kg → un movimiento de 1250 g y saldo 1250; cuarentena (15/5) y merma (12/5, `vencido`) desde el depósito; cuarentena por más del depósito → error de negocio y sin efectos; unidad rechaza `1,5`, `1.5`, `0`, `-3` y vacío sin llamar a la RPC; peso rechaza `1,2345`, `1.250`, `0,000`; cuarentena sin motivo y merma «Otro» sin detalle; doble clic con respuesta lenta → una sola llamada y un movimiento; respuesta perdida + reintento → un solo movimiento (misma clave); encargado opera ingreso/cuarentena/merma en peso (saldo 7250 g/2500 g); vendedor: «Acceso no permitido», sin menú Stock y la RPC lo rechaza sin efectos; dueño de otra empresa no ve ni mueve el stock; PC 1280×800 (tabla) y Android 412×915 (tarjetas, sin scroll horizontal, botón ≥ 44 px, operación completa).
+
+**Defecto de frontend encontrado y corregido.** Con la respuesta perdida, `supabase-js` no lanza: devuelve `error` con `code` vacío, y B-01 lo mostraba como «No se pudo registrar… Intentá de nuevo» (engañoso: la operación pudo registrarse). `mensajeErrorStock` (`lib/stock.ts`) ahora trata un error sin código como **resultado desconocido** (mensaje «revisá el stock o reintentá con los mismos datos»); los errores con código de PostgREST siguen siendo genéricos. Regresión en `lib/stock.test.ts`. El reintento ya era seguro (misma clave, `operaciones` sin claves duplicadas); sólo era el texto.
+
+**Resultados.** Playwright `tests/b01-stock.spec.ts --project=chromium`: primera corrida 15 aprobadas / 1 fallida (el defecto anterior); tras la corrección, **16 aprobadas, 0 fallidas, 0 omitidas, dos corridas seguidas** (exit 0). `npm run typecheck` 0; `npm run lint` 0; `npm test` 35 archivos / 1246 pruebas, exit 0; `npm run build` 0. Evidencia de la base tras 3 corridas: 48 movimientos, todos `cantidad > 0` y de tipo `integer`; 3 ingresos de peso de exactamente 1250 g; 0 claves de idempotencia duplicadas en `operaciones`.
+
+**Fuera de esta verificación.** No se ejecutó la suite Playwright completa del repo ni se repitió pgTAP (la suite oficial anterior de T3-01 es evidencia histórica, no corrida de nuevo). La validación móvil usa viewport de Chromium, no un dispositivo Android real.
+
+**Riesgos pendientes.** Security review formal de B-01 (Supabase, roles, `movimientos_stock`, idempotencia) y auditoría independiente del hash. El spec depende de `crear_producto` y de las cuentas del seed local; no es apto para staging. Un test no cubre la sesión vencida durante la operación.
+---
+## 06/11/2026 — B-01: revisión previa al E2E y contradicción de unidades (sin commit; NO aprobada)
+
+**Rama/HEAD:** `feat/b-01-stock-real`, `a1d29640a67d1846673f794bed2a754d98c229e5` (sin cambios; AUDIT_REPORT_* intactos).
+
+**Contradicción planteada y resolución.** Se pidió quitar de B-01 toda entrada en kg, por supuesta prohibición del Blueprint, y respetar «pieza = 2 medias piezas». **No se aplicó:** esa regla es la del Blueprint v1.2–v2.0, superada. El Blueprint vigente (v2.5, §7.1) y la ADR-005 (aprobada) establecen que no existen pieza ni media pieza; el fiambre (`peso`) se ingresa en kg con hasta 3 decimales, se muestra con 3 decimales fijos y se guarda como **gramos enteros**; más de 3 decimales se rechaza sin redondear (§12: `1,250 kg` → `1250` g). Las RPC reciben `p_cantidad integer` en unidad mínima (gramos en `peso`), por lo que no contradicen el Blueprint. B-01 ya cumple: el kg es sólo texto de entrada/presentación; la conversión usa BigInt, nunca float. Si el humano quiere cambiar esa regla, corresponde una ADR en estado `propuesta`.
+
+**Contratos RPC verificados** (migraciones `20261025021032`, `20261025033454`): `registrar_ingreso(uuid, uuid, integer, text)`, `mover_a_cuarentena(uuid, uuid, uuid, integer, text)`, `registrar_merma(uuid, uuid, uuid, integer, text, text)`; sólo dueño/encargado activos (`stock_no_autorizado`); empresa y actor desde `perfiles`; `stock_actual` es `security_invoker`.
+
+**Cambios:** sólo `apps/web/src/pages/stock_formulario.test.ts` (+3 pruebas: toda cantidad enviada es entero positivo en unidad mínima, sin «1/2» ni decimales en `unidad`, `peso` rechaza punto, notación científica, >3 decimales y signos). No se tocó código de producción, SQL, RLS ni permisos.
+
+**Verificación** (logs fuera del repo): typecheck exit 0; lint exit 0; `npm test` 35 archivos / 1245 pruebas; build exit 0. Playwright **no ejecutado**.
+
+**Revisión de seguridad B-01 (frontend; no reemplaza el security review formal):**
+- Autorización: ruta sólo `ROLES_GESTION` + ítem de menú oculto al vendedor; la autoridad real es la RPC (`stock_no_autorizado`/`42501`). El cliente nunca envía `empresa_id` ni actor.
+- Idempotencia: una clave por intento (misma firma → misma clave hasta el éxito); fallo de red/respuesta sin id = «resultado desconocido», no se asume éxito; reintento no duplica (P12).
+- Doble envío: guarda en el controlador (independiente del render) y botones deshabilitados.
+- Cantidades: enteros seguros ≤ `integer`; sin float; origen de cuarentena/merma fijado al depósito.
+- Aislamiento: lectura sólo por RLS; saldos de ubicaciones/productos desconocidos invalidan la lectura (falla cerrado).
+- Escrituras: ninguna directa a `movimientos_stock` ni `operaciones`; sólo `rpc()`.
+- Errores: sólo códigos `stock_*` conocidos; el resto, mensaje genérico.
+- Límite: nada de esto se probó contra una base real.
+
+**Preparación E2E (no ejecutada).** Escenarios Playwright: 1) dueño consulta stock; 2) dueño registra ingreso; 3) encargado opera; 4) cuarentena y merma modifican depósito/cuarentena y el saldo esperado (incluye `stock_insuficiente`); 5) vendedor no accede a `/stock`; 6) saldos persisten tras recargar; 7) PC y móvil (viewport Android). Requisitos de entorno aislado: stack propio del repo (`npx supabase start --workdir ../..`, `project_id` `distribuidora-stock-rutas`, puertos 54321+), seed con dueño, encargado y vendedor de prueba, y `VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY` de ese stack. Antes de levantarlo hay que confirmar que ningún stack ajeno ocupa esos puertos y no resetear bases compartidas. No se inició ningún stack.
+
+**Estado:** B-01 **no** está terminada: falta integración real y revisión favorable.
+---
+## 06/11/2026 — B-01: pantalla real de stock (sin commit; NO aprobada)
+
+**Rama:** `feat/b-01-stock-real`, desde `a1d29640a67d1846673f794bed2a754d98c229e5` (HEAD verificado; rama original `feat/t3-01-preflight-migraciones` intacta). Los tres `AUDIT_REPORT_*.md` siguen sin trackear y fuera de todo commit.
+
+**Alcance implementado.** Nueva ruta `/stock` (sólo dueño y encargado, igual que las RPC) con: saldo por producto y ubicación (depósito, cuarentena, camiones, total), ingreso, paso a cuarentena y merma. Estados de carga, error de lectura con reintento, error de operación, confirmación y refresco del saldo desde la base después de cada éxito. Responsive: tabla en PC y tarjetas en móvil, controles de 44 px.
+- Lectura: `SELECT` con RLS sobre `ubicaciones`, `productos`, `camiones` y la vista `stock_actual`. Falla cerrado ante una fila inesperada.
+- Escritura: sólo `registrar_ingreso`, `mover_a_cuarentena`, `registrar_merma` (contratos verificados contra `20261025021032_stock_operaciones_ingreso.sql` y `20261025033454_stock_cuarentena_merma.sql`). `empresa_id` y actor no se envían. Sin escrituras directas a `movimientos_stock`, sin edición de saldos.
+- Cantidades en unidad mínima (unidades o gramos enteros, ADR-005), entradas validadas con `kg_a_gramos` (BigInt, coma decimal, hasta 3 decimales); sin float, sin redondeo, tope `integer`.
+- Idempotencia (P12): una clave por intento, reutilizada en reintentos del mismo intento tras un error, renovada tras un éxito o al cambiar los datos. Guarda de doble envío independiente del render.
+- Cuarentena y merma salen siempre del depósito (origen no editable).
+- Errores `stock_*` traducidos a español; cualquier otro error se reemplaza por un mensaje genérico (nunca detalle de SQL/PostgREST).
+
+**Archivos.** Nuevos: `apps/web/src/lib/stock.ts`, `hooks/useStock.ts`, `pages/Stock.tsx`, `pages/StockVista.tsx`, `pages/stock_controlador.ts`, `pages/stock_formulario.ts` y sus tests `lib/stock.test.ts`, `pages/stock_formulario.test.ts`, `pages/stock_controlador.test.ts`, `pages/StockVista.test.tsx`. Modificados: `App.tsx` (ruta), `components/layout/Sidebar.tsx` (ítem «Stock»). No se tocaron migraciones, SQL, RLS, permisos, ADR, preflight T3-01, ventas ni rendición; no se agregaron dependencias. La pantalla demo `Movimientos` y sus datos no se tocaron.
+
+**Verificación** (desde `apps/web/`, log en el scratchpad de la sesión, fuera del repo): `npm run typecheck` exit 0; `npm run lint` exit 0; `npm test` 35 archivos / 1242 pruebas pasan (74 nuevas de stock); `npm run build` exit 0.
+
+**NO verificado.**
+- `npx playwright test` **no se ejecutó**: requiere un stack Supabase local propio de este repo (puerto 54321, seed y variables del stack). No estaba levantado; los stacks activos en la máquina son laboratorios de otras tareas y no se reutilizaron. Sin stack no se probó de punta a punta ninguna operación contra la base ni se hizo validación real de escritorio/móvil.
+- No se agregó spec E2E de stock: no se versiona un spec que no se pudo ejecutar.
+- Las pruebas de vista usan `renderToStaticMarkup` (no hay jsdom ni testing-library y no se agregaron dependencias): verifican marcado y clases responsive, no interacción en un navegador.
+
+**Pendientes y riesgos.**
+- Correr `supabase start` + seed y un spec Playwright de stock (ingreso, cuarentena, merma, permisos de encargado, vendedor sin acceso) antes de dar B-01 por probado.
+- Superficie sensible (Supabase, roles, `movimientos_stock`, idempotencia): corresponde **security review**; B-01 no está cerrada sin ella. El cambio es sólo frontend y no altera la seguridad de la base.
+- No se marca stock bajo mínimo: no hay regla aprobada para ello; sólo se muestra el stock mínimo.
+- El stock de la jornada/camión y los demás módulos siguen con datos demo hasta sus propias tareas.
+---
 ## 06/11/2026 — T3-01 G-01: cierre de la aclaración textual (mensaje ESTADO_B; commit local; T3-01 Fase 1 NO aprobada)
 
 **Rama:** `feat/t3-01-preflight-migraciones`, base `9384b7d4211d3e50bfb59dc1e93ef33901c995a3`. Completa G-01.
