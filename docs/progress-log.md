@@ -1,4 +1,24 @@
 ---
+## 06/11/2026 — T3-01 G-01: aclaración textual del estado normativo en el preflight (commit local; T3-01 Fase 1 NO aprobada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, base `af148a13bcdec22268f55afe4b1c3bdc3f74159f`. **Dictamen independiente de Codex sobre `af148a1`: favorable con observaciones**. El dictamen no está en disco: se registra según la comunicación humana. Esta entrada corrige **sólo G-01**.
+
+### G-01 — mensajes que sugerían un contrato aprobado
+`supabase/scripts/validar_topologia_propietario_rpc.sql` (`434632cb…` → `f8e4fbc8…`). Cambian únicamente dos literales de diagnóstico:
+- línea 1095, detalle de `[O4_RLS_AUTO_ENABLE]`: «cuerpo distinto del aprobado» → «cuerpo distinto del **contrato RB + RA propuesto**»;
+- línea 1474, aviso de `[ESTADO_A]`: «invariantes aprobados verificados» → «invariantes **exigidos por este preflight** verificados».
+
+**Sin cambios funcionales:** el diff tiene 2 líneas y, a nivel de palabra, sólo cambia texto dentro de literales. El resto del archivo es idéntico byte a byte (lógica, `v_o4_sha256_prosrc`, `v_o4_proconfig`, controles y códigos de invariante). Ningún archivo del repo depende de esos textos (`git grep`). No cambian RPC, migraciones, tests ni ADR-001. `git diff --check` da OK. La suite oficial **no se repitió**, porque la diferencia es sólo de texto de diagnóstico.
+
+**Observación no corregida (fuera del alcance de G-01):** la línea 1476, el aviso de `[ESTADO_B]`, conserva «invariantes aprobados verificados». Queda para decisión humana.
+
+### Estado que se mantiene
+- La enmienda de ADR-001 §18.2 (contrato RB + RA) sigue como **PROPUESTA NO APROBADA**. ADR-001 no se modificó.
+- **F7** y **F8** siguen abiertos.
+- **No hay autorización para staging**: no se aplicaron migraciones ni se ejecutó SQL remoto.
+- **T3-01 Fase 1 no está aprobada.**
+
+---
 ## 06/11/2026 — T3-01: ejecución oficial de `supabase test db` en un stack local independiente (PASS) y consolidación en un commit local (T3-01 Fase 1 NO aprobada)
 
 **Rama:** `feat/t3-01-preflight-migraciones`, base `d2d4ae262964a73cafd37e3e811354ba9e10948b`. Superficie sensible (SECURITY DEFINER, event triggers, RLS, Supabase): **corresponde security review**. Este registro forma parte del commit local de consolidación autorizado por el humano. El hash del commit se informa en la entrega y en la evidencia externa (no se autorreferencia aquí).

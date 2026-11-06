@@ -1092,7 +1092,7 @@ BEGIN
              CASE WHEN p.prosqlbody IS NOT NULL OR p.probin IS NOT NULL THEN 'prosqlbody/probin no nulos' END,
              CASE WHEN pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc, 'UTF8')), 'hex')
                        IS DISTINCT FROM v_o4_sha256_prosrc
-                  THEN 'cuerpo distinto del aprobado (sha256 '
+                  THEN 'cuerpo distinto del contrato RB + RA propuesto (sha256 '
                        || pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc, 'UTF8')), 'hex') || ')' END
            ), '')
       INTO v_o4_funcion
@@ -1471,7 +1471,7 @@ BEGIN
   RAISE NOTICE 'Políticas RLS: manifiesto exacto de 33 políticas sobre 11 relaciones; políticas de otras relaciones no verificadas (T3P-06).';
   RAISE NOTICE '---';
   IF v_pendientes = 0 THEN
-    RAISE NOTICE '=== validar_topologia: [ESTADO_A] invariantes aprobados verificados; ninguna superficie pendiente detectada. Esto no equivale a una verificación completa de seguridad. ===';
+    RAISE NOTICE '=== validar_topologia: [ESTADO_A] invariantes exigidos por este preflight verificados; ninguna superficie pendiente detectada. Esto no equivale a una verificación completa de seguridad. ===';
   ELSE
     RAISE WARNING '=== validar_topologia: [ESTADO_B] invariantes aprobados verificados, pero hay % grupo(s) de relaciones, owners o políticas sin contrato auditado (ver PENDIENTE_DECISION_*). Topología NO declarada conforme. ===', v_pendientes;
   END IF;
