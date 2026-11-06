@@ -1473,7 +1473,7 @@ BEGIN
   IF v_pendientes = 0 THEN
     RAISE NOTICE '=== validar_topologia: [ESTADO_A] invariantes exigidos por este preflight verificados; ninguna superficie pendiente detectada. Esto no equivale a una verificación completa de seguridad. ===';
   ELSE
-    RAISE WARNING '=== validar_topologia: [ESTADO_B] invariantes aprobados verificados, pero hay % grupo(s) de relaciones, owners o políticas sin contrato auditado (ver PENDIENTE_DECISION_*). Topología NO declarada conforme. ===', v_pendientes;
+    RAISE WARNING '=== validar_topologia: [ESTADO_B] invariantes exigidos por este preflight verificados, pero hay % grupo(s) de relaciones, owners o políticas sin contrato auditado (ver PENDIENTE_DECISION_*). Topología NO declarada conforme. ===', v_pendientes;
   END IF;
 
 END$$;

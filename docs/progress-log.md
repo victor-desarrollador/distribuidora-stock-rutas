@@ -1,4 +1,14 @@
 ---
+## 06/11/2026 — T3-01 G-01: cierre de la aclaración textual (mensaje ESTADO_B; commit local; T3-01 Fase 1 NO aprobada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, base `9384b7d4211d3e50bfb59dc1e93ef33901c995a3`. Completa G-01.
+- `supabase/scripts/validar_topologia_propietario_rpc.sql` (`f8e4fbc8…` → `e9d49e09a76e3a456af0df967d8b5707e7c55f5d1b5d329f4e183d293239ed6b`). Línea 1476, aviso de `[ESTADO_B]`: «invariantes aprobados verificados» → «invariantes **exigidos por este preflight** verificados».
+- Con esto, G-01 queda corregido en los mensajes **`ESTADO_A` y `ESTADO_B`** y en el detalle de `[O4_RLS_AUTO_ENABLE]`. **No cambia la lógica SQL:** se modificó una palabra dentro de un literal y el resto del archivo es idéntico byte a byte. Hashes esperados, controles, códigos de invariante, migraciones, tests y ADR-001 no cambian.
+- Revisión léxica de todos los mensajes del preflight: ningún otro literal atribuye aprobación al contrato RB + RA. Los inventarios y contratos «aprobados» restantes se refieren a decisiones vigentes (las 20 SECURITY DEFINER de negocio, la existencia de O-4 según §18.2, los auxiliares B1 y las políticas RLS). Las demás coincidencias son negaciones («sin contrato aprobado», «no autorizado»).
+- No se repitió la suite oficial: el cambio es sólo de texto de diagnóstico.
+- **Se mantiene:** la enmienda de ADR-001 §18.2 (RB + RA) como **PROPUESTA NO APROBADA**; **F7 y F8 abiertos**; sin autorización de staging; **T3-01 sin aprobación final**.
+
+---
 ## 06/11/2026 — T3-01 G-01: aclaración textual del estado normativo en el preflight (commit local; T3-01 Fase 1 NO aprobada)
 
 **Rama:** `feat/t3-01-preflight-migraciones`, base `af148a13bcdec22268f55afe4b1c3bdc3f74159f`. **Dictamen independiente de Codex sobre `af148a1`: favorable con observaciones**. El dictamen no está en disco: se registra según la comunicación humana. Esta entrada corrige **sólo G-01**.
