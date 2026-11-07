@@ -182,6 +182,7 @@ select is(
         'crear_camion(text,text)',
         'crear_cliente(text,text,text,text)',
         'crear_producto(text,text,text,text,numeric,integer)',
+        'listar_vendedores_jornada()',
         'mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.abrir_jornada(uuid,uuid,date,uuid)',
         'privado.actualizar_camion(uuid,text,text)',
@@ -195,6 +196,7 @@ select is(
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.listar_vendedores_jornada()',
         'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.reasignar_vendedor(uuid,uuid,uuid)',
         'privado.registrar_carga(uuid,uuid,uuid[],integer[])',
@@ -208,7 +210,7 @@ select is(
         'registrar_ingreso(uuid,uuid,integer,text)',
         'registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las treinta y ocho firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida y corregir_jornada (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las cuarenta firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida, corregir_jornada y listar_vendedores_jornada (E-PL1; Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)
