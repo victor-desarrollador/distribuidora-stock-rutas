@@ -1,4 +1,18 @@
 ---
+## 07/11/2026 — B-02b.1: segunda corrida E2E sobre `a59de2e` (135/135 PASS; sólo documentación)
+
+**Laboratorio aislado:** `b02b1-e2e2-a59de2ee`, en una worktree descartable desde `a59de2eedafde9c9a91981d80a67bd6245bde96f`. Puertos: API 61521, PostgreSQL 61522 y Vite 61573. Sólo cambió la configuración de esa copia (`config.toml`, y `playwright.config.ts` con `env -u E2E_SUPABASE_SECRET_KEY` en el `webServer`). Las dependencias se copiaron de la worktree B-02b porque el lockfile es idéntico; no hubo descargas de dependencias, imágenes ni navegadores.
+
+**Resultados:** 25/25 migraciones y seed, sin errores. Playwright con Chromium, 1 worker y 0 reintentos: **135 PASS, 0 FAIL, 0 omitidos, 0 intermitentes** (1,4 min, exit 0). Los cuatro fallos de la primera corrida quedan **confirmados**: dos del arnés (`b01-stock:172` con sus 14 omitidos, y `example:3`) y dos de aserciones E2E (`b02b:230` y `b02b:420`, ahora en `:424`). **Ningún defecto de aplicación.** Vite y su proceso padre no recibieron `E2E_SUPABASE_SECRET_KEY`; sí el runner. El escaneo de los reportes sanitizados dio 0 JWT y 0 claves.
+
+**Evidencias** (fuera del repo, `../evidencias-entrega-b/b02b1-e2e/`): `reportes/corrida-02-playwright/` (`SHA256SUMS` `99fb909b…9669`) y `reportes/corrida-02/` (inventarios y arranque, `SHA256SUMS` `1ef2e515…894c`), ambos verificados. Hay además `INFORME_CONSOLIDADO.md` y `PAQUETE_REVISION.md`.
+
+**Limpieza:** `supabase stop --no-backup` sólo del `project_id` del laboratorio, previa verificación de las etiquetas de sus 6 contenedores. Se borraron la salida cruda, `playwright/.auth`, `test-results` y la worktree. Los inventarios Docker (contenedores, volúmenes y redes) son idénticos antes y después. Los cinco proyectos preexistentes no se tocaron. El volumen huérfano `supabase_db_b02b1-e2e-0208a359` se conserva.
+
+**Cobertura RLS (detalle en `INFORME_CONSOLIDADO.md` §2):** el E2E contra PostgREST real cubre el SELECT de `jornadas` para dueño, encargado, vendedor asignado y dueño de otra empresa, con ids exactos, además de las 6 RPC y `camiones`. Los controles negativos de `anon`, `service_role`, inactivo y escrituras directas los cubre pgTAP (`jornadas_esquema`, `camiones_catalogo`). La última ejecución de pgTAP es la oficial T3-01 (`Files=33, Tests=2163, PASS`), sobre `supabase/migrations` y `supabase/tests` idénticos a los de `a59de2e`; **esta corrida no ejecutó pgTAP**. **Hueco:** ninguna prueba cubre el SELECT de `jornadas` de una cuenta sin perfil.
+
+**Limitaciones y riesgos:** (1) la CLI publica los puertos en `0.0.0.0`/`[::]` (laboratorio y proyectos preexistentes): la base local queda accesible desde la red mientras el stack está activo; las mitigaciones están en el informe y requieren decisión; (2) `-x inbucket` no excluyó mailpit y `pg_meta` también arrancó; (3) pendientes: security review, auditoría independiente de `a59de2e` y del hash que incluya esta entrada, y la decisión sobre el hueco «sin perfil».
+---
 ## 07/11/2026 — B-02b.1: primera corrida E2E y corrección de aserciones (sólo tests)
 
 **Rama:** `feat/b-02b-jornadas-lectura`, desde `0208a35`, en la worktree `distribuidora-b02a-jornadas-datos`. B-01 (worktree principal) no se tocó.
