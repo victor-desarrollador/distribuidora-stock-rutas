@@ -123,8 +123,11 @@ function Detalle({
         ))}
       </dl>
       <p className="mt-4 text-xs text-slate-500">
-        La carga, las ventas y los retornos de la jornada todavía no se
-        muestran en esta pantalla.
+        {/* S3-0: con acciones de gestión, el detalle incluye el historial de
+            cargas y descargas (sólo lectura); el vendedor/piloto todavía no. */}
+        {puedeAdministrar && acciones
+          ? "Las ventas y los retornos de la jornada todavía no se muestran en esta pantalla."
+          : "La carga, las ventas y los retornos de la jornada todavía no se muestran en esta pantalla."}
       </p>
       {puedeAdministrar && acciones?.(jornada)}
     </section>

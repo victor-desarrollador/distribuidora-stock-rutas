@@ -5,9 +5,11 @@ import { ROLES_GESTION } from "../auth/roles";
 import { useCatalogoCamiones } from "../hooks/useCatalogoCamiones";
 import { useJornadasLectura } from "../hooks/useJornadasLectura";
 import { useCorreccionJornada } from "../hooks/useCorreccionJornada";
+import { useHistorialJornada } from "../hooks/useHistorialJornada";
 import { useSalidaJornada } from "../hooks/useSalidaJornada";
 import { AvisoSalidaJornada } from "./AvisoSalidaJornada";
 import { JornadaCorreccionPanel } from "./JornadaCorreccionPanel";
+import { JornadaHistorialPanel } from "./JornadaHistorialPanel";
 import { JornadaSalidaPanel } from "./JornadaSalidaPanel";
 import { JornadasVista } from "./JornadasVista";
 import { fechaOperativaHoy } from "./jornadas_correccion";
@@ -27,6 +29,9 @@ import { idCorto } from "./jornadas_presentacion";
 // confirma, envía, verifica o tiene resultado desconocido sobre una jornada, la
 // otra no puede iniciarse sobre esa jornada (S2 M-02). Abrir, reasignar, cargar
 // y descargar siguen sin habilitarse.
+// B-02b.2 / S3-0: dueño y encargado ven, en el detalle, el historial de cargas
+// y descargas registradas (SÓLO LECTURA; hooks/useHistorialJornada.ts,
+// pages/jornadas_historial.ts). No participa del árbitro: no opera.
 export default function Jornadas() {
   const jornadas = useJornadasLectura();
   // Un árbitro por montaje de la pantalla, compartido por ambas operaciones.
@@ -47,6 +52,11 @@ export default function Jornadas() {
   // quién puede confirmar la salida, el servidor.
   const puedeAdministrar =
     usuario !== null && ROLES_GESTION.includes(usuario.rol);
+  // Historial sólo para gestión: para el vendedor/piloto no se lee nada
+  // (RLS tampoco le devolvería movimientos, ADR-007 §2.8).
+  const historial = useHistorialJornada(
+    puedeAdministrar ? jornadas.estado.seleccionadaId : null
+  );
 
   // Nombre del camión del catálogo real; si el catálogo no se pudo leer o el
   // camión no figura, se muestra un identificador corto (nunca un dato inventado).
@@ -99,6 +109,12 @@ export default function Jornadas() {
                   onConfirmar={correccion.confirmar}
                   onReintentar={correccion.reintentar}
                   onVerificar={correccion.verificarEstado}
+                />
+                <JornadaHistorialPanel
+                  jornada={jornada}
+                  estado={historial.estado}
+                  usuarioId={usuario?.usuarioId ?? null}
+                  onActualizar={historial.actualizar}
                 />
               </>
             )
