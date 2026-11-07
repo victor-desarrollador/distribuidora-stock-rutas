@@ -1,11 +1,21 @@
 ---
-## 07/11/2026 — B-02b.1: M-01, negativo pgTAP «authenticated sin perfil» (escrito, NO ejecutado; sin commit)
+## 07/11/2026 — B-02b.1: M-01, negativo pgTAP «authenticated sin perfil» (commit `23b50ef`; pgTAP PASS)
 
 **Origen:** hallazgo M-01 de la auditoría de Codex sobre `94e44d9`: ninguna prueba demostraba que una cuenta `authenticated` sin perfil no lee `public.jornadas`.
 
 **Cambio (sólo test):** en `supabase/tests/jornadas_esquema.test.sql`, `plan(123)` pasa a `plan(124)`, se agrega la cuenta de prueba `aaaaaaaa-0000-4000-8000-000000000009` en `auth.users` **sin** fila en `perfiles` (su metadata dice «dueño de A», como fixture adversarial) y una única aserción `ok()`. Esa aserción exige cuatro condiciones: la precondición medida como owner (hay jornadas, la cuenta existe en Auth y no tiene perfil); `current_user = 'authenticated'`; `auth.uid()` igual a la cuenta; y `count(*) = 0` sobre `public.jornadas`. Reutiliza `pg_temp.como_usuario`. **Sin cambios en RLS, migraciones, grants, funciones ni esquemas.**
 
-**Estado de ejecución:** **NO ejecutado.** `supabase test db` requiere un stack local autorizado. Sólo hubo validación estática: el conteo de aserciones del archivo pasa de 123 a 124 y coincide con el plan, y `git diff --check` está limpio. No se afirma PASS.
+**Validación estática previa al commit:** el conteo de aserciones pasa de 123 a 124 y coincide con el plan; `git diff --check` está limpio.
+
+**Ejecución pgTAP (07/11/2026, una única corrida autorizada, commit de pruebas `23b50efa055923346790c6a013d051719af820f6`, árbol `9b77fdf6c1bf67a08d463561af786ff845c0fc98`):**
+- **Laboratorio** `b02b1-pgtap-23b50ef`: una worktree descartable en ese commit, en la que sólo cambió `supabase/config.toml` (`project_id` y puertos 6162x). Las migraciones, los tests y el seed son idénticos al commit, y el blob de `jornadas_esquema.test.sql` (`50b94173…`) coincide en git y en disco. La copia no tiene vínculo remoto.
+- **Aislamiento de red:** una red exclusiva `b02b1-pgtap-23b50ef-net` con `com.docker.network.bridge.host_binding_ipv4=127.0.0.1`, pasada con `supabase start --network-id` y `supabase test db --network-id`. Sólo arrancaron `db` y `auth` (CLI 2.120.0, imágenes locales, sin descargas). El único puerto publicado fue `127.0.0.1:61622`; **ningún puerto se publicó en `0.0.0.0` ni en `[::]`**. No se modificaron el daemon de Docker ni el firewall.
+- **25/25 migraciones y seed aplicados**, sin errores.
+- **`supabase test db --local`: `All tests successful`, `Files=33, Tests=2164`, `Result: PASS`, rc 0.** 32 archivos aprobados y 1 omitido por diseño (`concurrencia/00_bootstrap_descartable.sql`, que no es un test pgTAP). El total es el de T3-01 (2163) más la aserción nueva.
+- **`jornadas_esquema.test.sql`: `ok` con `plan(124)`.** El negativo M-01 (identidad `authenticated` sin perfil) forma parte de ese archivo aprobado. La CLI corre `pg_prove` sin `--verbose`, así que el resultado individual se deduce de que el archivo dio `ok`; no hay una línea propia.
+- **No se ejecutó una prueba de mutación** que relaje la política.
+- **Limpieza selectiva completada:** se verificó la etiqueta `com.supabase.cli.project` de los 2 contenedores y del volumen y la etiqueta `lab.id` de la red; luego `supabase stop --no-backup` filtrado al proyecto y `docker network rm` por nombre exacto con 0 contenedores; se quitaron la worktree y la carpeta del laboratorio. Los inventarios Docker (contenedores, volúmenes y redes) son idénticos antes y después: **los cinco proyectos preexistentes quedaron intactos**, y el volumen huérfano `supabase_db_b02b1-e2e-0208a359` también.
+- **Evidencias persistentes:** `../evidencias-entrega-b/b02b1-pgtap/` (20 archivos, sanitizados, 0 secretos). `MANIFIESTO.sha256` = `7cc06933a2dc508c2df0ab2added58e4f21260989fb5662438dc3ecca1b39c73`, verificado.
 
 **Observaciones bajas atendidas:** el comentario de cabecera de `tests/b02b-jornadas-lectura.spec.ts` ya no dice «NO ejecutados»: registra la corrida 135/135 PASS sobre `a59de2e`. El README del paquete externo de evidencias ya no presenta loopback como aislamiento de red.
 ---
