@@ -91,10 +91,16 @@ test('vendedor/piloto no accede a rutas de dueño/encargado (su user_metadata di
   await expect(page).toHaveURL('/autoventa')
   await expect(page.getByText('Vendedor/Piloto').first()).toBeVisible()
 
-  for (const ruta of ['/rendicion', '/productos', '/jornadas']) {
+  // B-02b.1 (Blueprint §9, ADR-007 §2.8): /jornadas ya es accesible al vendedor
+  // (sólo lee su jornada; la RLS decide las filas). La pantalla demo y las
+  // rutas de gestión siguen vedadas.
+  for (const ruta of ['/rendicion', '/productos', '/demo/jornadas']) {
     await page.goto(ruta)
     await expect(page.getByRole('heading', { name: 'Acceso no permitido' })).toBeVisible()
   }
+
+  await page.goto('/jornadas')
+  await expect(page.getByRole('heading', { name: 'Mi jornada' })).toBeVisible()
 
   await page.goto('/configuracion-demo')
   await expect(page.getByRole('heading', { name: 'Acceso no permitido' })).toBeVisible()

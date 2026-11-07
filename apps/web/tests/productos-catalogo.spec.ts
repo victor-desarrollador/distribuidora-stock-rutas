@@ -291,7 +291,7 @@ test.describe("UI del catálogo (dueño)", () => {
 test.describe("Convivencia temporal con el catálogo demo (DE-12)", () => {
   // Jornadas y Movimientos siguen con los productos de prueba del navegador:
   // el aviso evita creer que un cambio en /productos los afecta.
-  for (const ruta of ["/jornadas", "/movimientos"]) {
+  for (const ruta of ["/demo/jornadas", "/movimientos"]) {
     test(`${ruta} avisa que usa el catálogo de demostración`, async ({
       page,
     }) => {

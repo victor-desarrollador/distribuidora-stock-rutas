@@ -205,6 +205,7 @@ async function sinRastrosLegacy(page: Page) {
 
 const rutas = [
   "/jornadas",
+  "/demo/jornadas",
   "/autoventa",
   "/movimientos",
   "/retornos",
@@ -234,7 +235,7 @@ test("D-R4: la preparación muestra los fixtures nuevos en kg y unidades, no el 
   page,
 }) => {
   await sembrarSoloV4(page);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
 
   // Abrir el formulario no guarda nada.
   await page.getByRole("button", { name: "Nueva jornada" }).click();

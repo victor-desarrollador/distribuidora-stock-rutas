@@ -120,7 +120,7 @@ test("H-1 invertido (B2): una jornada v5 en preparación con ítem peso confirma
   page,
 }) => {
   await sembrar(page, [jornadaConPeso]);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
 
   const card = tarjeta(page);
   const boton = card.getByRole("button", { name: "Confirmar salida" });
@@ -151,7 +151,7 @@ test("H-1 invertido (B2): si después del montaje la jornada vigente pasa a tene
   page,
 }) => {
   await sembrar(page, [jornadaUnidad]);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
 
   const card = tarjeta(page);
   const boton = card.getByRole("button", { name: "Confirmar salida" });
@@ -193,7 +193,7 @@ test("H-1 regresión: una jornada sólo unidad confirma la salida como antes", a
   page,
 }) => {
   await sembrar(page, [jornadaUnidad]);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
 
   const card = tarjeta(page);
   const boton = card.getByRole("button", { name: "Confirmar salida" });

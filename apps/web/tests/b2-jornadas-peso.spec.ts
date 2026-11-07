@@ -110,7 +110,7 @@ test("B2 Jornadas: 1,250 kg se guarda como 1250 g, sale a reparto y la rendició
   page,
 }) => {
   await sembrar(page);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
   await abrirFormulario(page);
 
   await expect(page.getByText("Disponible: 18,000 kg")).toBeVisible();
@@ -159,7 +159,7 @@ test("B2 Jornadas: una jornada mixta guarda unidades y gramos y no muestra subto
   page,
 }) => {
   await sembrar(page);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
   await abrirFormulario(page);
 
   // Sólo unidad: se valoriza como antes.
@@ -193,7 +193,7 @@ test("B2 Jornadas: exceder el disponible por 1 g o usar punto decimal se rechaza
   page,
 }) => {
   await sembrar(page);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
   await abrirFormulario(page);
   const escriturasIniciales = await escriturasJornadas(page);
 

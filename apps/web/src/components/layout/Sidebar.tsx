@@ -3,45 +3,17 @@ import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import {
-  LayoutDashboard,
-  Package,
-  Boxes,
-  Users,
-  Truck,
-  ShoppingCart,
-  Wallet,
   ClipboardList,
-  RefreshCw,
-  ClipboardCheck,
-  Warehouse,
   LogOut,
   UserCircle,
-  Settings,
   Menu,
   X,
 } from "lucide-react";
 
 import { useAuth } from "../../auth/useAuth";
 import { nombreRol } from "../../auth/roles";
-
-const menu = [
-  { nombre: "Inicio", icono: LayoutDashboard, ruta: "/" },
-  { nombre: "Productos", icono: Package, ruta: "/productos" },
-  { nombre: "Stock", icono: Boxes, ruta: "/stock" },
-  { nombre: "Clientes", icono: Users, ruta: "/clientes" },
-  { nombre: "Camiones", icono: Truck, ruta: "/camiones" },
-  { nombre: "Jornadas", icono: ClipboardList, ruta: "/jornadas" },
-  { nombre: "Autoventa", icono: ShoppingCart, ruta: "/autoventa" },
-  { nombre: "Movimientos", icono: RefreshCw, ruta: "/movimientos" },
-  { nombre: "Rendición", icono: ClipboardCheck, ruta: "/rendicion" },
-  { nombre: "Retornos", icono: Warehouse, ruta: "/retornos" },
-  { nombre: "Cuentas corrientes", icono: Wallet, ruta: "/cuentas" },
-  {
-    nombre: "Configuración",
-    icono: Settings,
-    ruta: "/configuracion-demo",
-  },
-];
+import { RUTA_JORNADAS_DEMO } from "../../demo/entorno";
+import { itemsMenuPorRol } from "./menu";
 
 export default function Sidebar() {
   const { usuario, cerrarSesion } = useAuth();
@@ -65,26 +37,20 @@ export default function Sidebar() {
     };
   }, [menuAbierto]);
 
-  const menuVisible = menu.filter((item) => {
-    if (usuario?.rol === "dueno") {
-      return true;
-    }
-
-    if (usuario?.rol === "encargado") {
-      return item.ruta !== "/configuracion-demo";
-    }
-
-    if (usuario?.rol === "vendedor_piloto") {
-      return [
-        "/clientes",
-        "/autoventa",
-        "/movimientos",
-        "/cuentas",
-      ].includes(item.ruta);
-    }
-
-    return false;
-  });
+  // El acceso a la pantalla demo sólo existe en desarrollo (D2). Debe usar
+  // `import.meta.env.DEV` en línea para que se elimine del build de producción.
+  const menuVisible = itemsMenuPorRol(
+    usuario?.rol,
+    import.meta.env.DEV
+      ? [
+          {
+            nombre: "Jornadas (demo)",
+            icono: ClipboardList,
+            ruta: RUTA_JORNADAS_DEMO,
+          },
+        ]
+      : []
+  );
 
   const rolVisible = usuario ? nombreRol(usuario.rol) : "Sin sesión";
 

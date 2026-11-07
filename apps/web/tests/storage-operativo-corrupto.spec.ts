@@ -6,7 +6,7 @@ const casos = [
     // dañado se sigue detectando en las pantallas operativas que lo usan.
     nombre: "productos",
     clave: "distribuidora_productos_demo_v5",
-    ruta: "/jornadas",
+    ruta: "/demo/jornadas",
     aviso: "Los datos de productos guardados están dañados.",
     accion: "Nueva jornada",
     semilla: null,
@@ -16,7 +16,7 @@ const casos = [
     // dañado se sigue detectando en las pantallas operativas que lo usan.
     nombre: "camiones",
     clave: "distribuidora_camiones_demo_v5",
-    ruta: "/jornadas",
+    ruta: "/demo/jornadas",
     aviso: "Los datos de camiones guardados están dañados.",
     accion: "Nueva jornada",
     semilla: null,
@@ -35,7 +35,7 @@ const casos = [
   {
     nombre: "jornadas",
     clave: "distribuidora_jornadas_demo_v5",
-    ruta: "/jornadas",
+    ruta: "/demo/jornadas",
     aviso: "Los datos de jornadas guardados están dañados.",
     accion: "Nueva jornada",
     semilla: null,
