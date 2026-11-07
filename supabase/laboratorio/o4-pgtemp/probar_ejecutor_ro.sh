@@ -1,68 +1,137 @@
 #!/usr/bin/env bash
-# Pruebas NEGATIVAS del ejecutor ejecutar_inventario_ro.sh y de la guardia Q00, sin Docker y sin red:
-# crea un clúster PostgreSQL 17 descartable SOLO por socket Unix (listen_addresses vacío, directorio
-# 700 propio, puerto ≠ 5432), corre los casos y lo elimina. No se conecta a staging ni a producción.
-# Uso: probar_ejecutor_ro.sh
+# Pruebas del ejecutor ejecutar_inventario_ro.sh, de la guardia Q00 y de vinculo_evidencia.sh, SIN Docker y SIN
+# red: crea un clúster PostgreSQL 17 descartable SOLO por socket Unix (listen_addresses vacío, directorio 700
+# propio, puerto ≠ 5432), con los roles mínimos y la O-4 remediada instalada, y un rol LOGIN de lectura (zz_ro) que
+# NO es postgres ni superusuario. Corre los casos y lo elimina. No se conecta a staging ni a producción.
+# Uso: probar_ejecutor_ro.sh [dir_evidencia_nuevo_fuera_del_repo]
 set -uo pipefail
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EJ="$DIR/ejecutar_inventario_ro.sh"; B=/usr/lib/postgresql/17/bin
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; REPO="$(cd "$DIR/../../.." && pwd)"
+. "$DIR/vinculo_evidencia.sh"
+EJ="$DIR/ejecutar_inventario_ro.sh"; B=/usr/lib/postgresql/17/bin; MIG="$REPO/supabase/migrations/20261110120000_o4_pgtemp_remediacion.sql"
 [ -x "$B/initdb" ] && [ -x "$B/pg_ctl" ] && [ -x "$B/psql" ] || { echo "abortado: faltan binarios de PostgreSQL 17" >&2; exit 2; }
 [ -d /run/user/1000 ] || { echo "abortado: falta /run/user/1000" >&2; exit 2; }
-T="$(mktemp -d /run/user/1000/o4ej.XXXXXX)"; chmod 700 "$T"; PORT=54998; USR=lab_admin
+SALIDA_EV="${1:-}"
+if [ -n "$SALIDA_EV" ]; then dir_evidencia_seguro "$SALIDA_EV" || exit 2; vinculo_git "$SALIDA_EV" || exit 5; exec > >(tee "$SALIDA_EV/salida_consola.txt") 2>&1; fi
+T="$(mktemp -d /run/user/1000/o4ej.XXXXXX)"; chmod 700 "$T"; mkdir -m 700 "$T/ev"; PORT=54998; ADM=lab_admin
 cleanup() { "$B/pg_ctl" -D "$T/data" -m immediate stop >/dev/null 2>&1; rm -rf "$T"; }; trap cleanup EXIT
-"$B/initdb" -D "$T/data" -U "$USR" --auth=trust --locale=C.UTF-8 --encoding=UTF8 >"$T/initdb.log" 2>&1 || { echo "abortado: initdb" >&2; exit 3; }
+"$B/initdb" -D "$T/data" -U "$ADM" --auth=trust --locale=C.UTF-8 --encoding=UTF8 >"$T/initdb.log" 2>&1 || { echo "abortado: initdb" >&2; exit 3; }
 "$B/pg_ctl" -D "$T/data" -o "-c listen_addresses='' -c unix_socket_directories='$T' -c port=$PORT -c fsync=off" -l "$T/pg.log" -w start >/dev/null 2>&1 || { echo "abortado: pg_ctl start" >&2; exit 3; }
-env -i "$B/psql" -X -h "$T" -p $PORT -U "$USR" -d postgres -Atc "select current_setting('listen_addresses') = '' and current_setting('port') = '$PORT'" | grep -q '^t$' || { echo "abortado: el clúster no es solo-socket" >&2; exit 3; }
-SYSID="$(env -i "$B/psql" -X -h "$T" -p $PORT -U "$USR" -d postgres -Atc "select system_identifier from pg_control_system()")"
-REF=abcdefghij0123456789
-base=(--laboratorio --sin-clave --host "$T" --port $PORT --dbname postgres --user "$USR" --ref "$REF" --estado remediado)
+adm() { env -i "$B/psql" -X -q -v ON_ERROR_STOP=1 -h "$T" -p $PORT -U "$ADM" -d postgres "$@"; }
+adm -Atc "select current_setting('listen_addresses') = '' and current_setting('port') = '$PORT'" | grep -q '^t$' || { echo "abortado: el clúster no es solo-socket" >&2; exit 3; }
+SYSID="$(adm -Atc "select system_identifier from pg_control_system()")"
+# Roles mínimos, O-4 remediada (cuerpo original + migración real) y el rol de lectura zz_ro (LOGIN, sin privilegios).
+{ printf "create role postgres superuser nologin; create role anon nologin; create role authenticated nologin; create role service_role nologin; create role zz_ro login;\nset role postgres;\n"
+  printf 'create function public.rls_auto_enable() returns event_trigger language plpgsql security definer set search_path = pg_catalog as $o4$'; cat "$DIR/cuerpo_original_325ae266.txt"
+  printf '$o4$;\nrevoke all on function public.rls_auto_enable() from public, anon, authenticated, service_role;\ncreate event trigger ensure_rls on ddl_command_end when tag in (%s) execute function public.rls_auto_enable();\n' "'CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO'"
+  cat "$MIG"; } | adm >/dev/null 2>"$T/inst.err" || { echo "abortado: instalar O-4 en el clúster de prueba: $(head -c 200 "$T/inst.err")" >&2; exit 3; }
+
+REF=abcdefghij0123456789; n=0
 FALLAS=0; TOTAL=0
 chk() { TOTAL=$((TOTAL+1)); if [ "$1" = ok ]; then echo "PASA   $2"; else echo "FALLA  $2"; FALLAS=$((FALLAS+1)); fi; }
-run() { SAL="$("$EJ" "$@" 2>&1)"; RC=$?; }   # SAL = stdout+stderr, RC = código
+mkficha() { # mkficha <nombre> [CLAVE=valor ...]  → $T/<nombre>.ficha ; imprime la ruta
+  local f="$T/$1.ficha"; shift
+  printf 'FICHA_VERSION=1\nMODO=laboratorio\nHOST=%s\nPORT=%s\nPROJECT_REF=%s\nSYSTEM_IDENTIFIER=%s\nDBNAME=postgres\nDBUSER=zz_ro\nCA_SHA256=na\n' "$T" "$PORT" "$REF" "$SYSID" > "$f"
+  local kv k v; for kv in "$@"; do k="${kv%%=*}"; v="${kv#*=}"; sed -i "s|^$k=.*|$k=$v|" "$f"; done; echo "$f"; }
+hsh() { sha256sum "$1" | cut -d' ' -f1; }
+ev() { echo "$T/ev/e$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"; }
+ejecuta() { # ejecuta <ficha> <evidencia> [args extra]  (usa el ejecutor del repo)
+  local f="$1" e="$2"; shift 2; SAL="$("$EJ" --ficha "$f" --ficha-sha256 "$(hsh "$f")" --estado remediado --evidencia "$e" --sin-clave "$@" 2>&1)"; RC=$?; }
 has() { printf '%s' "$SAL" | grep -qF -- "$1"; }
+F0="$(mkficha ok)"
 
-echo "# 1. Identidad fail-closed"
-run "${base[@]}"; chk "$([ $RC -eq 2 ] && has 'falta --sysid' && ! has GUARDIA && echo ok)" "sin --sysid: aborta antes de conectar (rc=$RC)"
-run "${base[@]}" --sysid 1234567890123; chk "$([ $RC -eq 3 ] && has 'system_identifier distinto' && ! has 'GUARDIA|OK' && ! has rolname && echo ok)" "sysid incorrecto: la guardia aborta antes de Q0–Q6 (rc=$RC)"
-run "${base[@]}" --sysid "$SYSID"; chk "$([ $RC -eq 4 ] && has 'GUARDIA|OK' && has rolname && has 'ABORTAR' && echo ok)" "sysid correcto: pasa la guardia y Q6 aborta por falta de O-4 (rc=$RC)"
-run "${base[@]}" --sysid "12ab"; chk "$([ $RC -eq 2 ] && has 'formato inválido' && echo ok)" "sysid con formato inválido: rc=$RC"
-out="$(printf 'select 1;\n' | env -i "$B/psql" -X -v ON_ERROR_STOP=1 -v "esperado_sysid=$SYSID" -v esperado_base=postgres -v estado_esperado=remediado -h "$T" -p $PORT -U "$USR" -d postgres -f "$DIR/consultas_ro/Q00_guardia.sql" 2>&1)"; rc=$?
-chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'no es de solo lectura' && echo ok)" "Q00 fuera de READ ONLY: aborta (rc=$rc)"
-out="$({ printf 'BEGIN READ ONLY;\n'; cat "$DIR/consultas_ro/Q00_guardia.sql"; printf 'ROLLBACK;\n'; } | env -i "$B/psql" -X -v ON_ERROR_STOP=1 -v esperado_base=postgres -v estado_esperado=remediado -h "$T" -p $PORT -U "$USR" -d postgres 2>&1)"; rc=$?
-chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'falta esperado_sysid' && echo ok)" "Q00 sin esperado_sysid: aborta (rc=$rc)"
+echo "# 1. Ejecución completa con un rol LOGIN de lectura (zz_ro), Q00–Q6"
+E="$(ev)"; ejecuta "$F0" "$E"
+chk "$([ $RC -eq 4 ] && has 'GUARDIA|OK' && has 'compuerta LOGIN+TEMP' && echo ok)" "sin huella de revisión: Q00–Q6 corren y la compuerta LOGIN+TEMP aborta (rc=$RC)"
+TOK="$(printf '%s' "$SAL" | grep -E '^[^|]*\|[0-9a-f]{64}\|[tf]$' | tail -1 | cut -d'|' -f2)"
+E="$(ev)"; ejecuta "$F0" "$E" --revision-login-temp "$TOK"
+chk "$([ $RC -eq 0 ] && has 'veredicto: sin motivos de abortar' && echo ok)" "con la huella de la lista revisada: Q6 exitoso con zz_ro (rc=$RC)"
+chk "$(has 'sin supabase_migrations.schema_migrations' && has 'ensure_rls' && has 'tablas_public_sin_rls' && echo ok)" "Q2, Q3, Q4 y Q5 se ejecutan con el rol de lectura"
+chk "$([ -f "$E/MANIFIESTO.sha256" ] && grep -q 'VINCULO=NO_VINCULADA_A_COMMIT' "$E/vinculo_git.txt" && [ "$(stat -c %a "$E")" = 700 ] && echo ok)" "la evidencia queda en directorio 700 con manifiesto y vínculo git declarado como NO vinculado (modo desarrollo)"
+( cd "$E" && sha256sum -c MANIFIESTO.sha256 >/dev/null 2>&1 ); chk "$([ $? -eq 0 ] && echo ok)" "el manifiesto de la evidencia verifica"
+adm -c "create schema supabase_migrations; create table supabase_migrations.schema_migrations (version text primary key, name text); insert into supabase_migrations.schema_migrations values ('20261110120000','o4');"
+E="$(ev)"; ejecuta "$F0" "$E" --revision-login-temp "$TOK"
+chk "$([ $RC -eq 0 ] && has 'DEPENDENCIA PENDIENTE' && ! has 20261110120000 && echo ok)" "Q4 con historial y rol sin privilegio: informa la dependencia pendiente, no lo lee y no amplía privilegios (rc=$RC)"
+adm -c "drop schema supabase_migrations cascade;"
 
-echo "# 2. Entorno libpq limpio (incluido PGHOSTADDR) y psql -X"
+echo "# 2. Ficha de identidad: los parámetros de ejecución no son su propia fuente de confianza"
+SAL="$("$EJ" --ficha "$F0" --ficha-sha256 "$(hsh "$F0")" --estado remediado --evidencia "$(ev)" --host /tmp/otro 2>&1)"; RC=$?; chk "$([ $RC -eq 2 ] && has 'argumento desconocido o no permitido' && echo ok)" "--host por línea de comandos: rechazado (rc=$RC)"
+for opt in --port --dbname --user --ref --sysid; do SAL="$("$EJ" --ficha "$F0" --ficha-sha256 "$(hsh "$F0")" --estado remediado --evidencia "$(ev)" $opt x 2>&1)"; RC=$?; chk "$([ $RC -eq 2 ] && echo ok)" "$opt por línea de comandos: rechazado (rc=$RC)"; done
+SAL="$("$EJ" --ficha "$F0" --ficha-sha256 "$(printf '0%.0s' $(seq 1 64))" --estado remediado --evidencia "$(ev)" 2>&1)"; RC=$?; chk "$([ $RC -eq 2 ] && has 'no coincide con la huella aprobada' && echo ok)" "ficha distinta de la aprobada (huella): rechazada (rc=$RC)"
+cp "$F0" "$T/mod.ficha"; H0="$(hsh "$F0")"; sed -i 's/^DBNAME=.*/DBNAME=otra/' "$T/mod.ficha"
+SAL="$("$EJ" --ficha "$T/mod.ficha" --ficha-sha256 "$H0" --estado remediado --evidencia "$(ev)" --sin-clave 2>&1)"; RC=$?; chk "$([ $RC -eq 2 ] && echo ok)" "ficha editada después de aprobada: rechazada (rc=$RC)"
+FX="$(mkficha sysmal SYSTEM_IDENTIFIER=1234567890123)"; ejecuta "$FX" "$(ev)"; chk "$([ $RC -eq 3 ] && has 'system_identifier distinto' && ! has 'GUARDIA|OK' && ! has 'rolname' && echo ok)" "sysid ajeno en la ficha: la guardia aborta antes de Q0–Q6 (rc=$RC)"
+FX="$(mkficha pto PORT=54997)"; ejecuta "$FX" "$(ev)"; chk "$([ $RC -ne 0 ] && echo ok)" "puerto distinto del servidor: no conecta (rc=$RC)"
+FX="$(mkficha usr DBUSER=postgres)"; ejecuta "$FX" "$(ev)"; chk "$([ $RC -eq 2 ] && has 'DBUSER no puede ser postgres' && echo ok)" "ficha con DBUSER=postgres: rechazada (rc=$RC)"
+FX="$(mkficha dup)"; echo 'DBNAME=postgres' >> "$FX"; ejecuta "$FX" "$(ev)"; chk "$([ $RC -eq 2 ] && has 'duplicada' && echo ok)" "clave duplicada en la ficha: rechazada (rc=$RC)"
+FX="$(mkficha ext)"; echo 'HOSTADDR=1.2.3.4' >> "$FX"; ejecuta "$FX" "$(ev)"; chk "$([ $RC -eq 2 ] && has 'clave desconocida' && echo ok)" "clave desconocida (HOSTADDR) en la ficha: rechazada (rc=$RC)"
+FX="$(mkficha falta)"; sed -i '/^DBUSER=/d' "$FX"; ejecuta "$FX" "$(ev)"; chk "$([ $RC -eq 2 ] && has 'falta DBUSER' && echo ok)" "ficha incompleta: rechazada (rc=$RC)"
+# Q00 por sí sola: base, current_user, session_user, puerto y rol prohibido
+q00() { { printf 'BEGIN READ ONLY;\n'; [ -n "$1" ] && printf 'SET ROLE %s;\n' "$1"; cat "$DIR/consultas_ro/Q00_guardia.sql"; printf 'ROLLBACK;\n'; } | env -i "$B/psql" -X -v ON_ERROR_STOP=1 -v "esperado_sysid=$SYSID" -v esperado_base="${BASE:-postgres}" -v esperado_usuario="${USU:-zz_ro}" -v esperado_puerto="${PTO:-$PORT}" -v estado_esperado=remediado -h "$T" -p $PORT -U "${CONN:-zz_ro}" -d postgres 2>&1; }
+out="$(BASE=otra q00 '')"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'base distinta' && echo ok)" "Q00: base distinta de la ficha aborta"
+out="$(USU=otro q00 '')"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'current_user distinto' && echo ok)" "Q00: current_user distinto de la ficha aborta"
+out="$(CONN=$ADM q00 'zz_ro')"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'session_user distinto' && echo ok)" "Q00: session_user distinto (SET ROLE) aborta aunque current_user coincida"
+out="$(PTO=1 q00 '')"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'puerto distinto' && echo ok)" "Q00: puerto distinto de la ficha aborta"
+out="$(USU=$ADM CONN=$ADM q00 '')"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'no puede ser postgres' && echo ok)" "Q00: un superusuario como usuario del inventario aborta"
+out="$({ printf 'select 1;\n'; cat "$DIR/consultas_ro/Q00_guardia.sql"; } | env -i "$B/psql" -X -v ON_ERROR_STOP=1 -v "esperado_sysid=$SYSID" -v esperado_base=postgres -v esperado_usuario=zz_ro -v esperado_puerto=$PORT -v estado_esperado=remediado -h "$T" -p $PORT -U zz_ro -d postgres 2>&1)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'no es de solo lectura' && echo ok)" "Q00 fuera de READ ONLY: aborta"
+for v in sysid base usuario puerto; do o="$({ printf 'BEGIN READ ONLY;\n'; cat "$DIR/consultas_ro/Q00_guardia.sql"; } | env -i "$B/psql" -X -v ON_ERROR_STOP=1 $( [ $v != sysid ] && echo "-v esperado_sysid=$SYSID") $( [ $v != base ] && echo "-v esperado_base=postgres") $( [ $v != usuario ] && echo "-v esperado_usuario=zz_ro") $( [ $v != puerto ] && echo "-v esperado_puerto=$PORT") -v estado_esperado=remediado -h "$T" -p $PORT -U zz_ro -d postgres 2>&1)"; chk "$(printf '%s' "$o" | grep -q "falta esperado_$v" && echo ok)" "Q00 sin esperado_$v: aborta"; done
+
+echo "# 3. Entorno libpq limpio (incluido PGHOSTADDR) y psql -X"
 printf '\\echo MARCA_PSQLRC_EJECUTADO\n' > "$T/psqlrc"
 CONTAM=(PGHOSTADDR=203.0.113.1 PGSERVICE=zz_inexistente PGOPTIONS="-c default_transaction_read_only=off" PGSSLMODE=require PGPASSFILE="$T/pgpass" PGPORT=1 PGHOST=/nonexistent PGUSER=nadie PGDATABASE=nada PSQLRC="$T/psqlrc")
-SAL="$(env "${CONTAM[@]}" "$EJ" "${base[@]}" --sysid "$SYSID" 2>&1)"; RC=$?
-chk "$([ $RC -eq 4 ] && has 'GUARDIA|OK' && has PGHOSTADDR && has PGSERVICE && has PSQLRC && ! has MARCA_PSQLRC_EJECUTADO && echo ok)" "variables PG*/PSQLRC contaminadas: se eliminan y no afectan la ejecución (rc=$RC)"
-out="$(env PGSERVICE=zz_inexistente "$B/psql" -X -h "$T" -p $PORT -U "$USR" -d postgres -Atc 'select 1' 2>&1)"; rc=$?
-chk "$([ $rc -ne 0 ] && echo ok)" "control: sin la limpieza, PGSERVICE contaminado rompe la conexión (rc=$rc)"
-out="$(env PSQLRC="$T/psqlrc" "$B/psql" -h "$T" -p $PORT -U "$USR" -d postgres -Atc 'select 1' 2>&1)"
-chk "$(printf '%s' "$out" | grep -q MARCA_PSQLRC_EJECUTADO && echo ok)" "control: psql sin -X ejecuta el archivo de arranque"
-run "${base[@]}" --sysid "$SYSID" --dry-run; chk "$([ $RC -eq 0 ] && has 'psql -X -v ON_ERROR_STOP=1' && echo ok)" "la línea de comando usa psql -X y ON_ERROR_STOP=1"
+SAL="$(env "${CONTAM[@]}" "$EJ" --ficha "$F0" --ficha-sha256 "$H0" --estado remediado --evidencia "$(ev)" --sin-clave --revision-login-temp "$TOK" 2>&1)"; RC=$?
+chk "$([ $RC -eq 0 ] && has PGHOSTADDR && has PGSERVICE && has PSQLRC && ! has MARCA_PSQLRC_EJECUTADO && echo ok)" "variables PG*/PSQLRC contaminadas: se eliminan y no afectan la ejecución (rc=$RC)"
+out="$(env PGSERVICE=zz_inexistente "$B/psql" -X -h "$T" -p $PORT -U zz_ro -d postgres -Atc 'select 1' 2>&1)"; rc=$?; chk "$([ $rc -ne 0 ] && echo ok)" "control: sin la limpieza, PGSERVICE contaminado rompe la conexión"
+out="$(env PSQLRC="$T/psqlrc" "$B/psql" -h "$T" -p $PORT -U zz_ro -d postgres -Atc 'select 1' 2>&1)"; chk "$(printf '%s' "$out" | grep -q MARCA_PSQLRC_EJECUTADO && echo ok)" "control: psql sin -X ejecuta el archivo de arranque"
+SAL="$("$EJ" --ficha "$F0" --ficha-sha256 "$H0" --estado remediado --sin-clave --dry-run 2>&1)"; RC=$?; chk "$([ $RC -eq 0 ] && has 'psql -X -v ON_ERROR_STOP=1' && echo ok)" "la línea de comando usa psql -X y ON_ERROR_STOP=1"
 
-echo "# 3. Validación de destino (aborta antes de conectar)"
+echo "# 4. Ficha remota: TLS verify-full, host exacto, CA por huella (dry-run, sin red)"
+printf 'CA-DE-PRUEBA\n' > "$T/ca.pem"; CAH="$(hsh "$T/ca.pem")"
+mkremota() { local f="$T/$1.ficha"; shift; printf 'FICHA_VERSION=1\nMODO=remoto\nHOST=db.%s.supabase.co\nPORT=5432\nPROJECT_REF=%s\nSYSTEM_IDENTIFIER=%s\nDBNAME=postgres\nDBUSER=inventario_ro\nCA_SHA256=%s\n' "$REF" "$REF" "$SYSID" "$CAH" > "$f"; for kv in "$@"; do sed -i "s|^${kv%%=*}=.*|$kv|" "$f"; done; echo "$f"; }
 mkdir "$T/falso"; printf '#!/bin/sh\ntouch "%s/psql_invocado"\n' "$T" > "$T/falso/psql"; chmod +x "$T/falso/psql"
-printf 'CA\n' > "$T/ca.pem"
-sal_y_psql() { SAL="$(PATH="$T/falso:$PATH" "$EJ" "$@" 2>&1)"; RC=$?; }
-sal_y_psql --host "db.${REF}.supabase.co" --port 5432 --dbname postgres --user postgres --ref "$REF" --sysid "$SYSID" --estado remediado --sslrootcert "$T/ca.pem" --dry-run
-chk "$([ $RC -eq 0 ] && has 'sslmode=verify-full' && ! has hostaddr && has 'sslrootcert=' && [ ! -e "$T/psql_invocado" ] && echo ok)" "remoto (dry-run): verify-full, sin hostaddr y sin invocar psql"
-run --host "db.otroproyecto0123456.supabase.co" --port 5432 --dbname postgres --user postgres --ref "$REF" --sysid "$SYSID" --estado remediado --sslrootcert "$T/ca.pem" --dry-run
-chk "$([ $RC -eq 2 ] && has 'db.<ref>.supabase.co' && echo ok)" "host de otro proyecto: rechazado (rc=$RC)"
-run --host "db.${REF}.supabase.co" --port 5432 --dbname postgres --user postgres --ref "$REF" --sysid "$SYSID" --estado remediado --dry-run
-chk "$([ $RC -eq 2 ] && has 'sslrootcert' && echo ok)" "remoto sin --sslrootcert: rechazado (rc=$RC)"
-run --host "db.${REF}.supabase.co,evil.example" --port 5432 --dbname postgres --user postgres --ref "$REF" --sysid "$SYSID" --estado remediado --sslrootcert "$T/ca.pem" --dry-run
-chk "$([ $RC -eq 2 ] && echo ok)" "multi-host (coma) en --host: rechazado (rc=$RC)"
-run --host "db.${REF}.supabase.co hostaddr=1.2.3.4" --port 5432 --dbname postgres --user postgres --ref "$REF" --sysid "$SYSID" --estado remediado --sslrootcert "$T/ca.pem" --dry-run
-chk "$([ $RC -eq 2 ] && echo ok)" "inyección de hostaddr en --host: rechazada (rc=$RC)"
-run --laboratorio --host "db.${REF}.supabase.co" --port 54998 --dbname postgres --user postgres --ref "$REF" --sysid "$SYSID" --estado remediado --dry-run
-chk "$([ $RC -eq 2 ] && has 'socket Unix' && echo ok)" "--laboratorio con host remoto: rechazado (rc=$RC)"
-run --sin-clave --host "db.${REF}.supabase.co" --port 5432 --dbname postgres --user postgres --ref "$REF" --sysid "$SYSID" --estado remediado --sslrootcert "$T/ca.pem" --dry-run
-chk "$([ $RC -eq 2 ] && has 'sólo se admite en laboratorio' && echo ok)" "--sin-clave en remoto: rechazado (rc=$RC)"
-run --laboratorio --sin-clave --host "$T" --port 5432 --dbname postgres --user "$USR" --ref "$REF" --sysid "$SYSID" --estado remediado --dry-run
-chk "$([ $RC -eq 2 ] && has 5432 && echo ok)" "laboratorio con puerto 5432: rechazado (rc=$RC)"
-run "${base[@]}" --sysid "$SYSID" --revision-login-temp "xyz"; chk "$([ $RC -eq 2 ] && has 'huella sha256' && echo ok)" "huella de revisión con formato inválido: rechazada (rc=$RC)"
+rem() { local f="$1"; shift; SAL="$(PATH="$T/falso:$PATH" "$EJ" --ficha "$f" --ficha-sha256 "$(hsh "$f")" --estado original --dry-run "$@" 2>&1)"; RC=$?; }
+FR="$(mkremota r1)"; rem "$FR" --ca "$T/ca.pem" --commit-esperado "$(printf 'a%.0s' $(seq 1 40))" --arbol-esperado "$(printf 'b%.0s' $(seq 1 40))"
+chk "$([ $RC -eq 0 ] && has 'sslmode=verify-full' && ! has hostaddr && has 'sslrootcert=' && has 'host=db.' && [ ! -e "$T/psql_invocado" ] && echo ok)" "remoto (dry-run): verify-full, sin hostaddr y sin invocar psql"
+GI=(--commit-esperado "$(printf 'a%.0s' $(seq 1 40))" --arbol-esperado "$(printf 'b%.0s' $(seq 1 40))")
+rem "$FR" "${GI[@]}"; chk "$([ $RC -eq 2 ] && has '--ca' && echo ok)" "remoto sin --ca: rechazado (rc=$RC)"
+printf 'OTRA-CA\n' > "$T/ca2.pem"; rem "$FR" --ca "$T/ca2.pem" "${GI[@]}"; chk "$([ $RC -eq 2 ] && has 'CA_SHA256' && echo ok)" "CA que no coincide con la huella de la ficha: rechazada (rc=$RC)"
+rem "$FR" --ca "$T/ca.pem"; chk "$([ $RC -eq 2 ] && has 'commit-esperado' && echo ok)" "remoto sin identidad git esperada: rechazado (rc=$RC)"
+FX="$(mkremota r2 HOST=db.otroproyecto0123456.supabase.co)"; rem "$FX" --ca "$T/ca.pem" "${GI[@]}"; chk "$([ $RC -eq 2 ] && has 'db.<PROJECT_REF>' && echo ok)" "host de otro proyecto: rechazado (rc=$RC)"
+FX="$(mkremota r3 PORT=6543)"; rem "$FX" --ca "$T/ca.pem" "${GI[@]}"; chk "$([ $RC -eq 2 ] && has 'PORT debe ser 5432' && echo ok)" "puerto distinto de 5432 en remoto: rechazado (rc=$RC)"
+FX="$(mkremota r4 DBUSER=supabase_admin)"; rem "$FX" --ca "$T/ca.pem" "${GI[@]}"; chk "$([ $RC -eq 2 ] && echo ok)" "remoto con usuario supabase_admin: rechazado (rc=$RC)"
+FX="$(mkremota r5 'HOST=db.abcdefghij0123456789.supabase.co,evil')"; rem "$FX" --ca "$T/ca.pem" "${GI[@]}"; chk "$([ $RC -eq 2 ] && echo ok)" "multi-host en la ficha: rechazado (rc=$RC)"
+SAL="$(PATH="$T/falso:$PATH" "$EJ" --ficha "$FR" --ficha-sha256 "$(hsh "$FR")" --estado original --sin-clave --dry-run --ca "$T/ca.pem" "${GI[@]}" 2>&1)"; RC=$?; chk "$([ $RC -eq 2 ] && has 'sólo se admite en laboratorio' && echo ok)" "--sin-clave en remoto: rechazado"
+
+echo "# 5. Directorio de evidencia: nuevo, seguro, fuera del repo, sin enlaces ni sobrescritura"
+E="$(ev)"; ejecuta "$F0" "$E" --revision-login-temp "$TOK"; h1="$(hsh "$E/inventario.txt")"
+ejecuta "$F0" "$E" --revision-login-temp "$TOK"; chk "$([ $RC -eq 2 ] && has 'NUEVO' && [ "$h1" = "$(hsh "$E/inventario.txt")" ] && echo ok)" "directorio ya existente: rechazado y sin sobrescribir (rc=$RC)"
+mkdir "$T/vacio"; ejecuta "$F0" "$T/vacio"; chk "$([ $RC -eq 2 ] && echo ok)" "directorio existente (aunque vacío): rechazado (rc=$RC)"
+ln -s "$T/ev" "$T/enlace"; ejecuta "$F0" "$T/enlace/nuevo"; chk "$([ $RC -eq 2 ] && has 'enlaces simbólicos' && echo ok)" "enlace simbólico en un componente de la ruta: rechazado (rc=$RC)"
+ln -s "$T/ev/inexistente_destino" "$T/ev/hoja"; ejecuta "$F0" "$T/ev/hoja"; chk "$([ $RC -eq 2 ] && echo ok)" "enlace simbólico como hoja: rechazado (rc=$RC)"
+ejecuta "$F0" "$REPO/zz_evidencia_prueba"; chk "$([ $RC -eq 2 ] && has 'fuera del repositorio' && [ ! -e "$REPO/zz_evidencia_prueba" ] && echo ok)" "evidencia dentro del repositorio: rechazada (rc=$RC)"
+ln -s "$REPO" "$T/aRepo"; ejecuta "$F0" "$T/aRepo/zz_evidencia_prueba"; chk "$([ $RC -eq 2 ] && [ ! -e "$REPO/zz_evidencia_prueba" ] && echo ok)" "enlace hacia el repositorio: rechazado y nada escrito en el repo (rc=$RC)"
+ejecuta "$F0" "$T/noexiste/nuevo"; chk "$([ $RC -eq 2 ] && has 'padre no existe' && echo ok)" "padre inexistente: rechazado (rc=$RC)"
+mkdir -m 777 "$T/abierto"; ejecuta "$F0" "$T/abierto/nuevo"; chk "$([ $RC -eq 2 ] && has 'escribible por cualquiera' && echo ok)" "padre escribible por cualquiera: rechazado (rc=$RC)"
+ejecuta "$F0" "relativa/ruta"; chk "$([ $RC -eq 2 ] && has 'absoluta' && echo ok)" "ruta relativa: rechazada (rc=$RC)"
+
+echo "# 6. Vínculo con git: identidad y código verificados ANTES de ejecutar (repositorio de prueba aparte)"
+G="$T/repo_prueba"; mkdir -p "$G/supabase/laboratorio" "$G/supabase/scripts" "$G/supabase/migrations"
+cp -r "$DIR" "$G/supabase/laboratorio/o4-pgtemp"; cp "$REPO/supabase/scripts/validar_topologia_propietario_rpc.sql" "$G/supabase/scripts/"; cp "$MIG" "$G/supabase/migrations/"
+( cd "$G" && git init -q && git -c user.email=t@t -c user.name=t add -A && git -c user.email=t@t -c user.name=t commit -q -m prueba ) >/dev/null 2>&1
+GC="$(git -C "$G" rev-parse HEAD)"; GT="$(git -C "$G" rev-parse 'HEAD^{tree}')"; EJG="$G/supabase/laboratorio/o4-pgtemp/ejecutar_inventario_ro.sh"
+ejg() { local e; e="$(ev)"; SAL="$("$EJG" --ficha "$F0" --ficha-sha256 "$H0" --estado remediado --evidencia "$e" --sin-clave --revision-login-temp "$TOK" "$@" 2>&1)"; RC=$?; EVG="$e"; }
+ejg --commit-esperado "$GC" --arbol-esperado "$GT"
+chk "$([ $RC -eq 0 ] && grep -q 'VINCULO=ESTRICTO' "$EVG/vinculo_git.txt" && grep -q "commit_actual=$GC" "$EVG/vinculo_git.txt" && echo ok)" "identidad esperada y código limpio: ejecuta y registra commit, árbol y hashes (rc=$RC)"
+ejg --commit-esperado "$(printf 'c%.0s' $(seq 1 40))" --arbol-esperado "$GT"; chk "$([ $RC -eq 5 ] && has 'distinto del commit esperado' && [ ! -e "$EVG/inventario.txt" ] && grep -q 'commit_actual' "$EVG/vinculo_git.txt" && echo ok)" "commit distinto del esperado: falla antes de conectar, pero deja registrado lo observado (rc=$RC)"
+ejg --commit-esperado "$GC" --arbol-esperado "$(printf 'd%.0s' $(seq 1 40))"; chk "$([ $RC -eq 5 ] && has 'árbol' && [ ! -e "$EVG/inventario.txt" ] && echo ok)" "árbol distinto del esperado: falla antes de conectar (rc=$RC)"
+echo '-- cambio' >> "$G/supabase/laboratorio/o4-pgtemp/consultas_ro/Q2_funcion.sql"
+ejg --commit-esperado "$GC" --arbol-esperado "$GT"; chk "$([ $RC -eq 5 ] && has 'sin commitear' && [ ! -e "$EVG/inventario.txt" ] && echo ok)" "consulta modificada sin commit: falla antes de conectar (rc=$RC)"
+git -C "$G" update-index --assume-unchanged supabase/laboratorio/o4-pgtemp/consultas_ro/Q2_funcion.sql
+ejg --commit-esperado "$GC" --arbol-esperado "$GT"; chk "$([ $RC -eq 5 ] && has 'difiere de su blob' && echo ok)" "cambio oculto con assume-unchanged: lo detecta la comparación con el blob (rc=$RC)"
+ejg; chk "$([ $RC -eq 0 ] && grep -q 'VINCULO=NO_VINCULADA_A_COMMIT' "$EVG/vinculo_git.txt" && grep -q 'estado_git_rutas_del_paquete=limpio\|MODIFICADO' "$EVG/vinculo_git.txt" && echo ok)" "sin identidad esperada: se ejecuta pero la evidencia queda declarada NO vinculada a commit"
+git -C "$G" update-index --no-assume-unchanged supabase/laboratorio/o4-pgtemp/consultas_ro/Q2_funcion.sql; git -C "$G" checkout -q -- supabase/laboratorio/o4-pgtemp/consultas_ro/Q2_funcion.sql
+echo 'x' > "$G/supabase/laboratorio/o4-pgtemp/extra.sh"
+ejg --commit-esperado "$GC" --arbol-esperado "$GT"; chk "$([ $RC -eq 5 ] && has 'sin commitear' && echo ok)" "archivo sin seguimiento en el paquete: falla antes de conectar (rc=$RC)"
+SAL="$("$EJG" --ficha "$F0" --ficha-sha256 "$H0" --estado remediado --evidencia "$(ev)" --sin-clave --commit-esperado "$GC" 2>&1)"; RC=$?; chk "$([ $RC -eq 2 ] && has 'van juntos' && echo ok)" "sólo el commit esperado, sin el árbol: rechazado (rc=$RC)"
 
 echo "--- casos: $TOTAL, fallas: $FALLAS"
 [ "$FALLAS" -eq 0 ]

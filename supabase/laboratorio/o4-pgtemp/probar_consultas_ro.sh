@@ -6,19 +6,20 @@
 # una huella del catálogo antes y después de cada consulta.
 # Uso: probar_consultas_ro.sh <dir_salida_vacío_o_inexistente_fuera_del_repo>
 set -uo pipefail
-[ "$#" -eq 1 ] || { echo "uso: $0 <dir_salida>" >&2; exit 2; }
+[ "$#" -eq 1 ] || { echo "uso: $0 <dir_salida_nuevo_absoluto_fuera_del_repo>" >&2; exit 2; }
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$DIR/../../.." && pwd)"
-# Canonicalización completa aunque el padre no exista (realpath -m); rechaza lo que caiga en el repo.
-OUT="$(realpath -m -- "$1")"; REPO_REAL="$(realpath -- "$REPO")"
-case "$OUT/" in "$REPO_REAL"/*) echo "abortado: la evidencia debe quedar fuera del repositorio" >&2; exit 2 ;; esac
+. "$DIR/vinculo_evidencia.sh"
+OUT="$1"
+# Evidencia: directorio NUEVO, 700, fuera del repo, sin enlaces ni sobrescritura; commit, árbol y hashes se
+# registran ANTES de ejecutar (modo estricto con GIT_COMMIT_ESPERADO y GIT_ARBOL_ESPERADO; si no, NO vinculada).
+dir_evidencia_seguro "$OUT" || exit 2
+vinculo_git "$OUT" || { echo "abortado: integridad del código no establecida; ver $OUT/vinculo_git.txt" >&2; exit 5; }
 unset PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER PGPASSWORD PGSERVICE PGSERVICEFILE DATABASE_URL SUPABASE_DB_URL || true
 . "$DIR/lab_comun.sh"
 Q="$DIR/consultas_ro"; PF="$REPO/supabase/scripts/validar_topologia_propietario_rpc.sql"
 MIG="$REPO/supabase/migrations/20261110120000_o4_pgtemp_remediacion.sql"; CUERPO="$DIR/cuerpo_original_325ae266.txt"
 [ "$(sha256sum "$CUERPO" | cut -d' ' -f1)" = "325ae266d9b166715ef5230ceaf7ff9d523e483cf5610dfb9779ab3f183f4af9" ] || { echo "abortado: cuerpo de referencia alterado" >&2; exit 2; }
-if [ -e "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then echo "abortado: $OUT no está vacío" >&2; exit 2; fi
-mkdir -p "$OUT"
 docker image inspect "$LAB_IMG" >/dev/null 2>&1 || { echo "abortado: imagen $LAB_IMG no presente (no se descarga)" >&2; exit 2; }
 export LAB_NONCE="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"; export LAB_CONTAINER="${LAB_PREFIJO}${LAB_NONCE:0:12}"
 CID=""; limpiar() { [ -n "$CID" ] && docker rm -f -v "$CID" > "$OUT/contenedor_eliminado.txt" 2>&1; }; trap limpiar EXIT
@@ -134,33 +135,87 @@ printf 'drop schema supabase_migrations cascade;\n' | lab_sql postgres -q >/dev/
 escenario "S3 remediada restaurada / esperado remediado" remediado NULL
 # --- Compuerta obligatoria LOGIN+TEMP (todos los roles, incluidos reservados y superusuarios) ---
 CERO="$(printf '0%.0s' $(seq 1 64))"
-ROSTER_SQL="from (select r.rolname, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolbypassrls,
-   (r.rolname = any (array(select trim(trailing '*' from btrim(y)) from unnest(string_to_array(coalesce(current_setting('supautils.reserved_roles', true), ''), ',')) y))) as reservado
-   from pg_roles r where r.rolcanlogin and has_database_privilege(r.oid, current_database(), 'TEMP')) x"
-digest_sql() { # digest_sql <filtro_sobre_x>  → huella de la lista filtrada
-  printf "select encode(sha256(convert_to(coalesce(string_agg(concat_ws('|', x.rolname, x.rolsuper, x.rolcreaterole, x.rolcreatedb, x.rolreplication, x.rolbypassrls, x.reservado), ';' order by x.rolname collate \"C\"), ''), 'UTF8')), 'hex') %s where %s;\n" "$ROSTER_SQL" "$1" | lab_sql postgres -qtA; }
 A1="$(q6raw remediado SIN)"
 chk "$(printf '%s' "${A1%%|*}" | grep -qF 'compuerta LOGIN+TEMP' && echo ok)" "G1 sin huella de revisión: la compuerta LOGIN+TEMP aborta"
 r="$(q6raw remediado AUTO)"; chk "$([ -z "${r%%|*}" ] && echo ok)" "G2 con la huella de la lista actual: pasa (simula la revisión humana)"
 r="$(q6raw remediado "$CERO")"; chk "$(printf '%s' "${r%%|*}" | grep -qF 'compuerta LOGIN+TEMP' && echo ok)" "G3 huella incorrecta: aborta"
-HSUB="$(digest_sql "not x.rolsuper and not x.reservado")"; r="$(q6raw remediado "$HSUB")"
-chk "$(printf '%s' "${r%%|*}" | grep -qF 'compuerta LOGIN+TEMP' && echo ok)" "G4 huella sin superusuarios ni reservados: aborta (ser rol de plataforma no exime)"
 LISTA="$(printf "select string_agg(rolname || ':' || rolsuper::text, ',' order by rolname collate \"C\") from pg_roles r where r.rolcanlogin and has_database_privilege(r.oid, current_database(), 'TEMP');\n" | lab_sql postgres -qtA)"
 chk "$(printf '%s' "$LISTA" | grep -q 'supabase_admin:true' && printf '%s' "$LISTA" | grep -q 'postgres:false' && echo ok)" "G5 la lista incluye superusuarios y roles de plataforma (supabase_admin, postgres): $(printf '%s' "$LISTA" | cut -c1-90)..."
-HQ1="$(printf 'BEGIN READ ONLY;\n'; cat "$Q/Q1_roles.sql"; printf 'ROLLBACK;\n')"; HQ1="$(printf '%s\n' "$HQ1" | lab_sql postgres -qtA -F '|' | grep -E '\|[0-9a-f]{64}$' | tail -1 | awk -F'|' '{print $NF}')"
+HQ1="$({ printf 'BEGIN READ ONLY;\n'; cat "$Q/Q1_roles.sql"; printf 'ROLLBACK;\n'; } | lab_sql postgres -qtA | grep -E '^[0-9a-f]{64}$' | tail -1)"
 chk "$([ -n "$HQ1" ] && [ "$HQ1" = "$(digest_actual remediado)" ] && echo ok)" "G6 la huella de Q1 coincide con la de Q6"
-OLD="$(digest_actual remediado)"
-printf 'create role zz_login login;\n' | lab_sql postgres -q >/dev/null 2>&1
-r="$(q6raw remediado "$OLD")"; chk "$(printf '%s' "${r%%|*}" | grep -qF 'compuerta LOGIN+TEMP' && echo ok)" "G7 un rol LOGIN nuevo invalida la revisión anterior"
-r="$(q6raw remediado AUTO)"; chk "$([ -z "${r%%|*}" ] && echo ok)" "G8 tras revisar la lista nueva, vuelve a pasar"
-printf 'drop role zz_login;\n' | lab_sql postgres -q >/dev/null 2>&1
-# Guardia Q00 dentro del laboratorio
+# Sensibilidad de la huella: cada dato revisado la modifica; es determinista y no depende de la zona horaria
+sens() { # sens <nombre> <sql_aplicar>
+  local antes despues; antes="$(digest_actual remediado)"
+  printf '%s\n' "$2" | lab_sql postgres -q >/dev/null 2>"$OUT/sens_$1.stderr" || { chk no "$1: no se pudo aplicar ($(head -c 120 "$OUT/sens_$1.stderr"))"; return; }
+  despues="$(digest_actual remediado)"; chk "$([ -n "$despues" ] && [ "$antes" != "$despues" ] && echo ok)" "H $1 cambia la huella"; }
+D0="$(digest_actual remediado)"
+printf 'create role zz_s login;\n' | lab_sql postgres -q >/dev/null 2>&1
+chk "$([ "$D0" != "$(digest_actual remediado)" ] && echo ok)" "H1 un rol LOGIN nuevo invalida la revisión anterior"
+sens connlimit "alter role zz_s connection limit 5;"
+sens validuntil "alter role zz_s valid until '2030-01-01 00:00:00+00';"
+sens rolconfig "alter role zz_s set statement_timeout = '5s';"
+sens membresia "grant anon to zz_s;"
+sens atributo "alter role zz_s createdb;"
+DT1="$(digest_actual remediado)"
+DT2="$({ printf 'BEGIN READ ONLY;\nset time zone %s;\n' "'Asia/Tokyo'"; cat "$Q/Q6_veredicto.sql"; printf 'ROLLBACK;\n'; } | lab_sql postgres -v ON_ERROR_STOP=1 -v estado_esperado=remediado -qtA -F '|' | grep -E '^[^|]*\|[0-9a-f]{64}\|[tf]$' | tail -1 | cut -d'|' -f2)"
+chk "$([ -n "$DT2" ] && [ "$DT1" = "$DT2" ] && echo ok)" "H la huella no depende de la zona horaria de la sesión (valid until presente)"
+printf 'drop role zz_s;\n' | lab_sql postgres -q >/dev/null 2>&1
+chk "$([ "$D0" = "$(digest_actual remediado)" ] && echo ok)" "H la huella es determinista: vuelve al valor original al deshacer los cambios"
+# Patrones de roles reservados: prefijo literal ("x*"), exacto, sin comodines de LIKE
+printf "create role zz_pref_a login; create role zz_exacto login; create role zzxaxb login; create role zz_a_b_c login;\n" | lab_sql postgres -q >/dev/null 2>&1
+PAT="zz_pref*, zz_exacto, zz_a_b*"
+rj() { { printf "BEGIN READ ONLY;\nselect set_config('supautils.reserved_roles', '%s', true);\n" "$PAT"; cat "$Q/Q1_roles.sql"; printf 'ROLLBACK;\n'; } | lab_sql supabase_admin -v ON_ERROR_STOP=1 -qtA 2>&1; }
+SAL="$(rj)"; RC=$?
+ALTERADO=0
+if ! { [ $RC -eq 0 ] && printf '%s' "$SAL" | grep -q '"patrones_reservados"'; }; then
+  # La variable es SIGHUP: se fija en la configuración del servidor DESCARTABLE del laboratorio y se restaura al terminar.
+  printf "alter system set supautils.reserved_roles = '%s'; select pg_reload_conf();\n" "$PAT" | lab_sql supabase_admin -q >/dev/null 2>"$OUT/alter_system.stderr" && ALTERADO=1 && sleep 2
+  SAL="$({ printf 'BEGIN READ ONLY;\n'; cat "$Q/Q1_roles.sql"; printf 'ROLLBACK;\n'; } | lab_sql supabase_admin -v ON_ERROR_STOP=1 -qtA 2>&1)"; RC=$?
+fi
+if [ $RC -eq 0 ] && printf '%s' "$SAL" | grep -q '"patrones_reservados"'; then
+  flag() { # flag <rol> <exacto|prefijo> → true/false, leyendo el JSON canónico impreso por Q1
+    printf '%s' "$SAL" | python3 -I -c 'import sys,json; t=sys.stdin.read(); o,_=json.JSONDecoder().raw_decode(t[t.index("{"):]); r=[x for x in o["roles"] if x["rol"]==sys.argv[1]]; print(str(r[0]["reservado_"+sys.argv[2]]).lower() if r else "ausente")' "$1" "$2"; }
+  chk "$([ "$(flag zz_pref_a prefijo)" = true ] && echo ok)" "R1 'zz_pref*' marca por prefijo a zz_pref_a"
+  chk "$([ "$(flag zz_exacto exacto)" = true ] && [ "$(flag zz_exacto prefijo)" = false ] && echo ok)" "R2 'zz_exacto' marca sólo por coincidencia exacta"
+  chk "$([ "$(flag zz_a_b_c prefijo)" = true ] && echo ok)" "R3 'zz_a_b*' marca a zz_a_b_c por prefijo literal"
+  chk "$([ "$(flag zzxaxb prefijo)" = false ] && [ "$(flag zzxaxb exacto)" = false ] && echo ok)" "R4 '_' no actúa como comodín: zzxaxb NO coincide con 'zz_a_b*'"
+  chk "$(printf '%s' "$SAL" | tr -d ' \n' | grep -q '"patrones_reservados":\["zz_a_b\*","zz_exacto","zz_pref\*"\]' && echo ok)" "R5 los patrones forman parte de la representación revisada, ordenados"
+else
+  echo "PENDIENTE  R1–R5 patrones reservados: no se pudo fijar supautils.reserved_roles en la sesión del laboratorio ($(printf '%s' "$SAL" | head -c 120)); no se simula el resultado"
+fi
+[ "$ALTERADO" -eq 1 ] && { printf "alter system reset supautils.reserved_roles; select pg_reload_conf();\n" | lab_sql supabase_admin -q >/dev/null 2>&1; sleep 1; }
+printf 'drop role zz_pref_a; drop role zz_exacto; drop role zzxaxb; drop role zz_a_b_c;\n' | lab_sql postgres -q >/dev/null 2>&1
+
+# Rol LOGIN de lectura real (zz_inventario_ro): ni postgres ni SET ROLE; Q00–Q6 completos, como el ejecutor
+printf 'create role zz_inventario_ro login;\n' | lab_sql postgres -q >/dev/null 2>"$OUT/rol_ro.stderr" || echo "aviso: no se pudo crear zz_inventario_ro"
 SID="$(printf 'select system_identifier::text from pg_control_system();\n' | lab_sql postgres -qtA)"
-g() { { printf 'BEGIN READ ONLY;\n'; cat "$Q/Q00_guardia.sql"; printf 'ROLLBACK;\n'; } | lab_sql postgres -v ON_ERROR_STOP=1 "$@" 2>&1; }
-out="$(g -v "esperado_sysid=$SID" -v esperado_base=postgres -v estado_esperado=remediado)"; rc=$?; chk "$([ $rc -eq 0 ] && printf '%s' "$out" | grep -q 'GUARDIA|OK' && echo ok)" "Q00 con identidad correcta: GUARDIA|OK"
-out="$(g -v "esperado_sysid=1234567890123" -v esperado_base=postgres -v estado_esperado=remediado)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'system_identifier distinto' && echo ok)" "Q00 con sysid ajeno: aborta (rc=$rc)"
-out="$(g -v "esperado_sysid=$SID" -v esperado_base=otra -v estado_esperado=remediado)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'base distinta' && echo ok)" "Q00 con base ajena: aborta (rc=$rc)"
-out="$(g -v "esperado_sysid=$SID" -v esperado_base=postgres -v estado_esperado=zzz)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'estado_esperado invalido' && echo ok)" "Q00 con estado inválido: aborta (rc=$rc)"
+inv() { # inv <estado> [huella] → sesión completa Q00..Q6 como zz_inventario_ro
+  local est="$1" tok="${2:-}"
+  { printf 'BEGIN READ ONLY;\n'; for f in Q00_guardia Q0_sesion Q1_roles Q2_funcion Q3_event_triggers Q4_version Q5_rls Q6_veredicto; do cat "$Q/$f.sql"; printf '\n'; done; printf 'ROLLBACK;\n'; } \
+   | lab_sql zz_inventario_ro -q -v "esperado_sysid=$SID" -v esperado_base=postgres -v esperado_usuario=zz_inventario_ro -v esperado_puerto=5432 -v "estado_esperado=$est" ${tok:+-v "revision_login_temp=$tok"} 2>&1; }
+SAL="$(inv remediado)"; RC=$?
+chk "$([ $RC -eq 0 ] && printf '%s' "$SAL" | grep -q 'GUARDIA|OK' && printf '%s' "$SAL" | grep -qF 'compuerta LOGIN+TEMP' && echo ok)" "L1 rol de lectura: Q00–Q6 completos corren y la compuerta aborta sin huella (rc=$RC)"
+TOKL="$(printf '%s' "$SAL" | grep -E '^[^|]*\|[0-9a-f]{64}\|[tf]$' | tail -1 | cut -d'|' -f2)"
+SAL="$(inv remediado "$TOKL")"; RC=$?; VERL="$(printf '%s' "$SAL" | grep -E '^[^|]*\|[0-9a-f]{64}\|[tf]$' | tail -1)"
+chk "$([ $RC -eq 0 ] && [ -n "$VERL" ] && [ -z "${VERL%%|*}" ] && [ "${VERL##*|}" = t ] && echo ok)" "L2 rol de lectura con la huella revisada: Q6 exitoso y sin escrituras (rc=$RC)"
+chk "$(printf '%s' "$SAL" | grep -q 'zz_inventario_ro' && echo ok)" "L3 el propio rol de lectura figura en la lista LOGIN+TEMP revisada"
+printf 'create schema supabase_migrations; create table supabase_migrations.schema_migrations (version text primary key, name text); insert into supabase_migrations.schema_migrations values (%s, %s);\n' "'20261110120000'" "'o4'" | lab_sql postgres -q >/dev/null 2>&1
+SAL="$(inv remediado "$TOKL")"; RC=$?
+chk "$([ $RC -eq 0 ] && printf '%s' "$SAL" | grep -q 'DEPENDENCIA PENDIENTE' && ! printf '%s' "$SAL" | grep -q '20261110120000' && echo ok)" "L4 Q4 con historial y rol sin privilegio: dependencia pendiente informada, historial no leído, sin ampliar privilegios (rc=$RC)"
+echo "PENDIENTE  L5 lectura del historial por el rol de staging: requiere USAGE/SELECT sobre supabase_migrations.schema_migrations; el privilegio NO está definido ni se otorgó (decisión humana)"
+printf 'drop schema supabase_migrations cascade;\n' | lab_sql postgres -q >/dev/null 2>&1
+# Guardia Q00 dentro del laboratorio (como zz_inventario_ro)
+g() { { printf 'BEGIN READ ONLY;\n'; cat "$Q/Q00_guardia.sql"; printf 'ROLLBACK;\n'; } | lab_sql zz_inventario_ro -v ON_ERROR_STOP=1 "$@" 2>&1; }
+GV=(-v "esperado_sysid=$SID" -v esperado_base=postgres -v esperado_usuario=zz_inventario_ro -v esperado_puerto=5432 -v estado_esperado=remediado)
+out="$(g "${GV[@]}")"; rc=$?; chk "$([ $rc -eq 0 ] && printf '%s' "$out" | grep -q 'GUARDIA|OK' && echo ok)" "Q00 con identidad correcta: GUARDIA|OK"
+out="$(g -v "esperado_sysid=1234567890123" "${GV[@]:2}")"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'system_identifier distinto' && echo ok)" "Q00 con sysid ajeno: aborta (rc=$rc)"
+out="$(g "${GV[@]}" -v esperado_base=otra)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'base distinta' && echo ok)" "Q00 con base ajena: aborta (rc=$rc)"
+out="$(g "${GV[@]}" -v esperado_usuario=otro)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'current_user distinto' && echo ok)" "Q00 con usuario ajeno: aborta (rc=$rc)"
+out="$(g "${GV[@]}" -v esperado_puerto=1)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'puerto distinto' && echo ok)" "Q00 con puerto ajeno: aborta (rc=$rc)"
+out="$(g "${GV[@]}" -v estado_esperado=zzz)"; rc=$?; chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'estado_esperado invalido' && echo ok)" "Q00 con estado inválido: aborta (rc=$rc)"
+out="$({ printf 'BEGIN READ ONLY;\n'; cat "$Q/Q00_guardia.sql"; printf 'ROLLBACK;\n'; } | lab_sql postgres -v ON_ERROR_STOP=1 -v "esperado_sysid=$SID" -v esperado_base=postgres -v esperado_usuario=postgres -v esperado_puerto=5432 -v estado_esperado=remediado 2>&1)"; rc=$?
+chk "$([ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'no puede ser postgres' && echo ok)" "Q00 no admite a postgres como sustituto del rol de lectura (rc=$rc)"
+printf 'drop role zz_inventario_ro;\n' | lab_sql postgres -q >/dev/null 2>&1
 # F7 (compensación): con ensure_rls remediado, una tabla nueva en public queda con RLS activa.
 printf 'create table public.zz_f7 (i int);\n' | lab_sql postgres -q >/dev/null 2>&1
 chk "$([ "$(printf "select relrowsecurity from pg_class where oid='public.zz_f7'::regclass;\n" | lab_sql postgres -qtA)" = "t" ] && echo ok)" "F7 (observación): CREATE TABLE en public deja RLS activa vía ensure_rls"
