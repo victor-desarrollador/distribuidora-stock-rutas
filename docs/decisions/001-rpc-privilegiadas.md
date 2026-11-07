@@ -1,6 +1,6 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 04/11/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 07/11/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
 **Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15; enmienda E-SL1 en 18.4.16, **aprobada para validación controlada el 04/11/2026**)
 
@@ -32,6 +32,7 @@
 | v1.5 + anexo §18.4 (cierre D-2) | Claude Code | Registra el cierre de D-2 (18.4.15): commit auditado `e826d308aab9a0b108ece17128c5c3448d7729ae`, PASS de Codex y de OpenCode, aceptación humana de esos informes como security review sólo para D-2, merge del PR #33 (`4654a95fb478c7b118dca4f67368ccd6a9b331b7`), CI en verde y el despliegue automático de Vercel a Production. Registra las aclaraciones C-1 y C-2 sobre el texto de 18.4.2.1 sin editarlo, y C-3 y C-4. No modifica 18.4.1 a 18.4.12, no cambia el estado de la ADR, no autoriza D-1, el arnés, las seis RPC ni producción. |
 | v1.5 + anexo §18.4 (E-SL1 propuesta) | Claude Code | Agrega 18.4.16: enmienda E-SL1 (paso 0 de rechazo de transacciones de sólo lectura en `abrir_jornada` y `reasignar_vendedor`, código `25006 jornada_metodo_no_permitido`), como **PROPUESTA TÉCNICA NO APROBADA**, con la dirección técnica humana del 03/11/2026 registrada sin aprobarla. No modifica 18.4.1 a 18.4.15 ni el estado de la ADR; no autoriza producción. |
 | v1.5 + anexo §18.4 (E-SL1 aprobada) | Claude Code | Registra la decisión humana del 04/11/2026: E-SL1 (18.4.16) queda **APROBADA PARA VALIDACIÓN CONTROLADA**, con el texto presentado y sin cambios, como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006 jornada_metodo_no_permitido`) y §16 T14. El punto 4 de la dirección técnica rige para `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida` en sus tareas autorizadas. No modifica 18.4.1 a 18.4.15, no cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. |
+| v1.5 + anexo §18.2.1 (O-4 RB + RA) | Claude Code | Registra la decisión humana del 07/11/2026 (14:13, America/Argentina/Tucuman) que aprueba, **para validación controlada y sólo como norma**, la alternativa A de la enmienda de O-4: contrato verificable RB + RA de `public.rls_auto_enable()` (§18.2.1). No cambia el estado de la ADR, no autoriza migraciones en staging ni en producción y no resuelve F7, F8, H-04 ni PB12C. |
 
 ---
 
@@ -521,6 +522,37 @@ Implementación y evidencia: `supabase/migrations/20261023140000_catalogo_produc
 - Causa de los lints 0028/0029: función `SECURITY DEFINER` en `public` (esquema expuesto, con USAGE para `anon` y `authenticated`) y EXECUTE explícito para esos roles.
 
 Implementación y evidencia local: `supabase/migrations/20261024232059_hardening_adr001_p11_o3_o4.sql`, `supabase/tests/hardening_adr001.test.sql`, `supabase/tests/grants_default_privileges.test.sql` y la entrada «Hardening transversal ADR-001: P11 global, O-3 y O-4» de `docs/progress-log.md`. La aplicación de la migración en staging y su validación posterior quedan pendientes de autorización humana.
+
+#### 18.2.1 Enmienda de O-4: contrato RB + RA de `public.rls_auto_enable()` (decisión humana del 07/11/2026, 14:13 America/Argentina/Tucuman)
+
+> **Alcance estricto.** Decisión humana del responsable del proyecto, **aprobada exclusivamente como norma y para preparar la validación controlada**. **No autoriza** ejecutar migraciones en staging ni en producción, **no cambia el estado de esta ADR** (APROBADA PARA VALIDACIÓN CONTROLADA), no autoriza cambios de SQL, RLS, RPC, tests o scripts adicionales y no resuelve P8–P10 ni P12–P17. Aprueba la **alternativa A** de la propuesta `PROPUESTA_ENMIENDA_ADR001_18_2.md` (SHA-256 `7844b4728ba41e6c0ab96dead4a2dc361d92976335c131b142dd1a61d2af8a28`, 06/11/2026; evidencia externa de T3-01, fuera de este repositorio). Reemplaza a la propuesta B.1.2b/B.1.2c, cuyo cuerpo `325ae266…` pasa a ser una definición prohibida.
+
+**Texto aprobado.** Se conservan `public.rls_auto_enable()` y el event trigger `ensure_rls` y se adopta el cuerpo remediado RB (SHA-256 `e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e`) con la configuración RA (`search_path=pg_catalog, pg_temp`), manteniendo los contratos de propietario, privilegios, OID y event trigger definidos en la propuesta. Se conserva el comportamiento funcional **observable** de `ensure_rls` (los tres DDL dejan la RLS activa); el cuerpo y `proconfig` de la función sí cambian respecto del observado en staging.
+
+**Contrato verificable (RB + RA).**
+
+- Función `public.rls_auto_enable()`, identificada por OID: `prokind = 'f'`, `SECURITY DEFINER`, owner `postgres`, retorno `event_trigger`, lenguaje `plpgsql`, `prosqlbody` y `probin` nulos.
+- `proconfig` exactamente `{"search_path=pg_catalog, pg_temp"}` (RA).
+- SHA-256 de `convert_to(prosrc, 'UTF8')` = `e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e` (RB): el cuerpo `325ae266…` con `cmd pg_catalog.record`, `tbl pg_catalog.name` y `FROM pg_catalog.pg_event_trigger_ddl_commands()`.
+- Sin `EXECUTE` para PUBLIC ni efectivo para `anon`, `authenticated` o `service_role` (§18.2 vigente); sin homónimos, sobrecargas ni triggers de tabla.
+- Event trigger `ensure_rls`: único y asociado sólo a la función, owner `postgres`, `ddl_command_end`, `evtenabled = 'O'` y `evttags` unidimensional con exactamente `CREATE TABLE`, `CREATE TABLE AS` y `SELECT INTO`, en cualquier orden y sin duplicados ni NULL.
+- Cuerpo `325ae266…` (`search_path=pg_catalog`): **definición prohibida**; vulnerable a la resolución de tipos en `pg_temp` (O4-PGTEMP). Está prohibido restaurarlo.
+
+**Límites.**
+
+- Se aprueba únicamente la norma. La migración `20261110120000_o4_pgtemp_remediacion.sql` queda como implementación local (forward-only, ADR-009) y **no está autorizada** en staging ni en producción.
+- No se modifica el comportamiento funcional de `ensure_rls`, no se eliminan objetos de plataforma y no se amplía el alcance de la migración O-4.
+- El hash identifica el cuerpo; **no certifica su seguridad**.
+- Si la plataforma recrea o modifica la función, el preflight falla cerrado; se requiere extracción read-only, comparación y una decisión humana nueva.
+- No se ha confirmado que la plataforma admita `CREATE OR REPLACE` sobre este objeto.
+- En local la función no existe: el preflight rechaza la ausencia de O-4 (`[O4_AUSENTE]`) salvo marcador explícito de laboratorio local (nunca `ESTADO_A`).
+
+**Pendientes (siguen abiertos; bloquean producción).**
+
+- **F7:** `EXCEPTION WHEN OTHERS THEN RAISE LOG` absorbe la falla al habilitar RLS: la tabla de `public` puede quedar sin RLS con el DDL exitoso. Compensación vigente: RLS explícita en las migraciones (P4) y preflight T3P-05.
+- **F8:** los DDL de roles reservados y superusuario no disparan `ensure_rls`; para `supabase_admin` es una inferencia no registrada.
+- **H-04** y **PB12C:** pendientes de resolución humana.
+- Decisión entre las alternativas B (fail-closed de F7) y C (retirar O-4 con RLS explícita) a partir de evidencia de la plataforma; inventario read-only de roles con LOGIN del entorno destino; revisión de seguridad; auditoría independiente del hash que corresponda; y autorización humana explícita de staging y de producción (cada una por separado).
 
 ### 18.3 Decisiones acotadas al dominio Stock (25/10/2026)
 

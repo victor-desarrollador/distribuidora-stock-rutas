@@ -1,4 +1,23 @@
 ---
+## 07/11/2026 — ADR-001 §18.2.1: aprobación normativa de la enmienda O-4 RB + RA (documental, sin commit; T3-01 NO cerrada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, HEAD `468b772bb4cd7be33674ab5346d9de7d95c266ac`. Cambio **exclusivamente documental**: sólo `docs/decisions/001-rpc-privilegiadas.md` y esta bitácora. No se modificó SQL, migraciones, RLS, RPC, tests ni scripts, y no se ejecutó Docker ni SQL.
+
+**Decisión humana (07/11/2026, 14:13, `America/Argentina/Tucuman`):** el responsable del proyecto confirmó y aprobó expresamente, con sus palabras, la alternativa A de la propuesta `PROPUESTA_ENMIENDA_ADR001_18_2.md` (SHA-256 `7844b4728ba41e6c0ab96dead4a2dc361d92976335c131b142dd1a61d2af8a28`): contrato RB (`e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e`) + RA (`search_path=pg_catalog, pg_temp`). La aprobación adopta el contrato **para validación controlada** y conserva el comportamiento funcional observable de `ensure_rls`.
+
+### Qué se hizo
+- **ADR-001 §18.2.1** (nueva): contrato verificable, límites y pendientes. Fila nueva en el historial de versiones y «Última revisión documental» → 07/11/2026. El estado de la ADR **no cambia** (APROBADA PARA VALIDACIÓN CONTROLADA).
+
+### Límites de la aprobación
+- Sólo norma: **no** autoriza migraciones en staging ni en producción, ni cambios adicionales de SQL, RLS, RPC, tests o scripts. No modifica el comportamiento funcional de `ensure_rls`, no elimina objetos de plataforma y no amplía el alcance de la migración O-4.
+
+### Pendientes (abiertos; bloquean producción)
+- **F7, F8, H-04 y PB12C.** Decisión B/C con evidencia de la plataforma, inventario de roles con LOGIN, **security review**, auditoría independiente del hash y autorización humana explícita de staging y de producción.
+- Los comentarios del repositorio que aún dicen «PROPUESTO, NO APROBADO» (preflight, migración y tests) **no se actualizaron** en esta tarea; su cambio exige un commit y una nueva auditoría.
+- Observaciones bajas de Codex sobre `468b772` (canonicalización de `OUT` en `probar_o4_docker.sh` y huella documental en `hashes_finales.txt`): sin tratar.
+- **T3-01 no está cerrada.** Commit, push, merge y deploy: no autorizados.
+
+---
 ## 07/11/2026 — T3-01/O-4: corrección local de M-01 y B-01 (opción M; commit local; T3-01 NO cerrada ni aprobada)
 
 **Rama:** `feat/t3-01-preflight-migraciones`, base `a1d29640a67d1846673f794bed2a754d98c229e5`. Superficie sensible (SECURITY DEFINER, event triggers, RLS, Supabase): **corresponde security review (pendiente)**. Decisión técnica tras el dictamen de Codex: marcador mediante tabla temporal de sesión (opción M).
