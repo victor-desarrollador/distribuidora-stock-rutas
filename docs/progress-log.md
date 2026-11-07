@@ -1,4 +1,23 @@
 ---
+## 07/11/2026 — B-02b.2 / S3-1: estado de cierre y bloqueos de continuidad (sólo lectura; sin commit)
+
+**Rama:** `feat/b-02b2-s3-registrar-carga`, sobre `c579f1e` (S3-0 aceptado técnicamente; ese commit no se modifica). Prioridad de Etapa 1: el dueño debe entender, en el detalle de `/jornadas`, en qué punto está la jornada y por qué no puede cerrarla ni abrir la siguiente.
+
+**Antes de implementar se verificó la duplicación:** el detalle ya muestra estado, fecha, camión e identificadores, y S3-0 lista las operaciones una por una. No mostraban el neto por producto en el camión, los pasos de cierre que faltan ni el bloqueo del camión. Se agregó sólo eso, sin repetir la insignia de estado y **sin lecturas nuevas**: todo se deriva de la jornada y del historial ya leído por S3-0. No se tocaron archivos de S3-0.
+
+**Qué se hizo.**
+- `pages/jornadas_continuidad.ts` (nuevo, puro): pasos del circuito según el estado real (carga, salida, ventas finalizadas, conteo formal, retorno y regularización, rendición y cierre). Los que el sistema todavía no registra se marcan «No disponible todavía», sin acciones. Toda jornada no cerrada bloquea al camión (ADR-007). La **carga neta registrada de esta jornada** (cargas − descargas, en BigInt) se rotula expresamente como lo registrado en el sistema para la jornada: **no es un conteo físico ni el saldo real del camión**; no se presentan diferencias, faltantes ni sobrantes. Un neto negativo falla cerrado.
+- `pages/JornadaContinuidadPanel.tsx` (nuevo): sección «Estado de cierre», presentacional, sin botones ni formularios, apta para Android.
+- `pages/Jornadas.tsx`: monta el panel (sólo gestión) antes del historial, con el mismo estado del historial.
+
+**Corrección de semántica (revisión previa al E2E):** el título «Mercadería registrada en el camión» podía leerse como saldo del camión. Pasa a «Carga neta registrada de esta jornada»; el `aria-label` a «Carga neta de la jornada»; los mensajes de vacío y error hablan de carga neta de la jornada; la aclaración dice que no es un conteo físico ni el saldo real del camión. Los identificadores internos pasan de `mercaderia*` a `cargaNeta*`.
+
+**Tests:** `jornadas_continuidad.test.ts` (17) y `JornadaContinuidadPanel.test.tsx` (5, con aserciones de la semántica nueva); E2E nuevo `tests/b02b2-jornadas-continuidad.spec.ts` (5 casos: abierta, cargada con carga neta exacta 5 un. y 1,000 kg, en reparto, Android 412×915 y vendedor sin panel; cero escrituras y cero RPC desde el panel), con guardas: sin Supabase, consultas, RPC, escrituras, almacenamiento del navegador, botones ni términos de faltante o diferencia. Mutantes (3, todos detectados, restaurados y verificados por sha256): neto negativo aceptado, camión nunca bloqueado, conteo marcado como hecho.
+
+**Verificación (`apps/web`):** `typecheck` rc 0; `lint` rc 0; Vitest **50 archivos / 1681 pruebas** PASS (antes 48 / 1659); `build` rc 0. Playwright, Docker y SQL **no** ejecutados.
+
+**Riesgos / pendiente:** (1) sin E2E (requiere autorización); (2) el neto coincide con el saldo del camión sólo mientras las únicas entradas y salidas del camión sean cargas y descargas de la jornada (hoy es así: no existen ventas ni retorno en SQL); cuando existan, este cálculo debe revisarse; (3) el bloqueo del camión es real y no se resuelve en la interfaz: faltan las RPC de cierre; (4) carga, descarga, intenciones y conteo previo siguen sin autorización.
+---
 ## 07/11/2026 — B-02b.2 / S3-0: historial de cargas y descargas de la jornada (sólo lectura; sin commit; E2E preparado, sin ejecutar)
 
 **Rama:** `feat/b-02b2-s3-registrar-carga`, desde `074a070` (S2), en la worktree nueva `../distribuidora-b02b2-s3` (ruta y rama verificadas libres antes de crearlas; `node_modules` copiado de S2 con lockfile idéntico, sin descargas). S1, S2, B-01 y T3-01 no se modificaron. S2 sigue con security review y auditoría final pendientes; si su hash cambia, S3 se rebasa.

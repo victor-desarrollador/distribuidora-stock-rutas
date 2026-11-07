@@ -8,6 +8,7 @@ import { useCorreccionJornada } from "../hooks/useCorreccionJornada";
 import { useHistorialJornada } from "../hooks/useHistorialJornada";
 import { useSalidaJornada } from "../hooks/useSalidaJornada";
 import { AvisoSalidaJornada } from "./AvisoSalidaJornada";
+import { JornadaContinuidadPanel } from "./JornadaContinuidadPanel";
 import { JornadaCorreccionPanel } from "./JornadaCorreccionPanel";
 import { JornadaHistorialPanel } from "./JornadaHistorialPanel";
 import { JornadaSalidaPanel } from "./JornadaSalidaPanel";
@@ -32,6 +33,9 @@ import { idCorto } from "./jornadas_presentacion";
 // B-02b.2 / S3-0: dueño y encargado ven, en el detalle, el historial de cargas
 // y descargas registradas (SÓLO LECTURA; hooks/useHistorialJornada.ts,
 // pages/jornadas_historial.ts). No participa del árbitro: no opera.
+// B-02b.2 / S3-1: estado de cierre y bloqueos de continuidad (SÓLO LECTURA,
+// pages/jornadas_continuidad.ts), derivado de la jornada y del mismo historial:
+// no hace lecturas propias.
 export default function Jornadas() {
   const jornadas = useJornadasLectura();
   // Un árbitro por montaje de la pantalla, compartido por ambas operaciones.
@@ -109,6 +113,11 @@ export default function Jornadas() {
                   onConfirmar={correccion.confirmar}
                   onReintentar={correccion.reintentar}
                   onVerificar={correccion.verificarEstado}
+                />
+                <JornadaContinuidadPanel
+                  jornada={jornada}
+                  historial={historial.estado}
+                  nombreCamion={nombreCamion(jornada.camionId)}
                 />
                 <JornadaHistorialPanel
                   jornada={jornada}
