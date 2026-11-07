@@ -22,14 +22,10 @@ dir_evidencia_seguro() {
   repo_real="$(realpath -- "$REPO")"
   case "$real_m/" in "$repo_real"/*) echo "abortado: la evidencia debe quedar fuera del repositorio" >&2; return 2 ;; esac
   [ -O "$padre" ] || { echo "abortado: el directorio padre no pertenece al usuario actual" >&2; return 2; }
-  local modo gid_p gid_u miembros
+  local modo
   modo="$(stat -c %a "$padre")"
-  [ $(( 8#$modo & 8#002 )) -eq 0 ] || { echo "abortado: el directorio padre es escribible por cualquiera" >&2; return 2; }
-  if [ $(( 8#$modo & 8#020 )) -ne 0 ]; then
-    gid_p="$(stat -c %g "$padre")"; gid_u="$(id -g)"
-    miembros="$(getent group "$gid_p" | cut -d: -f4)"
-    { [ "$gid_p" = "$gid_u" ] && [ -z "$miembros" ]; } || { echo "abortado: el directorio padre es escribible por un grupo compartido" >&2; return 2; }
-  fi
+  # Incondicional: el padre no puede ser escribible por el grupo ni por otros (nada de "grupo privado").
+  [ $(( 8#$modo & 8#022 )) -eq 0 ] || { echo "abortado: el directorio padre es escribible por el grupo u otros (modo $modo)" >&2; return 2; }
   ( umask 077; mkdir -m 700 -- "$ruta" ) || { echo "abortado: no se pudo crear el directorio de evidencia" >&2; return 2; }
   [ "$(realpath -- "$ruta")" = "$real_s" ] || { echo "abortado: la ruta cambió durante la creación" >&2; return 2; }
   return 0

@@ -110,7 +110,8 @@ ln -s "$T/ev/inexistente_destino" "$T/ev/hoja"; ejecuta "$F0" "$T/ev/hoja"; chk 
 ejecuta "$F0" "$REPO/zz_evidencia_prueba"; chk "$([ $RC -eq 2 ] && has 'fuera del repositorio' && [ ! -e "$REPO/zz_evidencia_prueba" ] && echo ok)" "evidencia dentro del repositorio: rechazada (rc=$RC)"
 ln -s "$REPO" "$T/aRepo"; ejecuta "$F0" "$T/aRepo/zz_evidencia_prueba"; chk "$([ $RC -eq 2 ] && [ ! -e "$REPO/zz_evidencia_prueba" ] && echo ok)" "enlace hacia el repositorio: rechazado y nada escrito en el repo (rc=$RC)"
 ejecuta "$F0" "$T/noexiste/nuevo"; chk "$([ $RC -eq 2 ] && has 'padre no existe' && echo ok)" "padre inexistente: rechazado (rc=$RC)"
-mkdir -m 777 "$T/abierto"; ejecuta "$F0" "$T/abierto/nuevo"; chk "$([ $RC -eq 2 ] && has 'escribible por cualquiera' && echo ok)" "padre escribible por cualquiera: rechazado (rc=$RC)"
+for m in 770 777 775 720 702; do mkdir "$T/p$m"; chmod $m "$T/p$m"; ejecuta "$F0" "$T/p$m/nuevo" --revision-login-temp "$TOK"; chk "$([ $RC -eq 2 ] && has 'escribible por el grupo u otros' && [ ! -e "$T/p$m/nuevo" ] && echo ok)" "padre con modo $m: rechazado incondicionalmente, sin crear nada (rc=$RC)"; done
+for m in 755 750 700; do mkdir "$T/q$m"; chmod $m "$T/q$m"; ejecuta "$F0" "$T/q$m/nuevo" --revision-login-temp "$TOK"; chk "$([ $RC -eq 0 ] && [ -d "$T/q$m/nuevo" ] && echo ok)" "padre con modo $m (sin escritura de grupo/otros): aceptado (rc=$RC)"; done
 ejecuta "$F0" "relativa/ruta"; chk "$([ $RC -eq 2 ] && has 'absoluta' && echo ok)" "ruta relativa: rechazada (rc=$RC)"
 
 echo "# 6. Vínculo con git: identidad y código verificados ANTES de ejecutar (repositorio de prueba aparte)"
@@ -132,6 +133,89 @@ git -C "$G" update-index --no-assume-unchanged supabase/laboratorio/o4-pgtemp/co
 echo 'x' > "$G/supabase/laboratorio/o4-pgtemp/extra.sh"
 ejg --commit-esperado "$GC" --arbol-esperado "$GT"; chk "$([ $RC -eq 5 ] && has 'sin commitear' && echo ok)" "archivo sin seguimiento en el paquete: falla antes de conectar (rc=$RC)"
 SAL="$("$EJG" --ficha "$F0" --ficha-sha256 "$H0" --estado remediado --evidencia "$(ev)" --sin-clave --commit-esperado "$GC" 2>&1)"; RC=$?; chk "$([ $RC -eq 2 ] && has 'van juntos' && echo ok)" "sólo el commit esperado, sin el árbol: rechazado (rc=$RC)"
+
+echo "# 7. Sin TOCTOU: ficha y CA se copian a un directorio privado y sólo la copia verificada se consume"
+FB="$T/fb"; REC="$T/rec"; mkdir "$FB" "$REC"
+cat > "$FB/psql" <<'EOS'
+#!/bin/bash
+# psql falso de laboratorio: sustituye los orígenes DESPUÉS de la validación y registra qué consumiría libpq.
+[ "${1:-}" = "--version" ] && { echo "psql (PostgreSQL) 17.0 falso-de-laboratorio"; exit 0; }
+printf '%s\n' "$@" > "$T_REC/psql_args"
+# Se sustituyen los orígenes ANTES de medir lo que libpq leería: modela el cambio entre la validación y la conexión.
+[ -n "${ORIG_FICHA:-}" ] && cp "$MAL_FICHA" "$ORIG_FICHA"
+[ -n "${ORIG_CA:-}" ] && cp "$MAL_CA" "$ORIG_CA"
+PRIVD="$(dirname "$PGPASSFILE")"; echo "$PRIVD" > "$T_REC/priv"; stat -c %a "$PRIVD" > "$T_REC/priv_modo"
+ca="$(printf '%s\n' "$@" | grep -o 'sslrootcert=[^ ]*' | head -1 | cut -d= -f2)"
+if [ -n "$ca" ]; then echo "$ca" > "$T_REC/ca_path"; /usr/bin/sha256sum "$ca" | cut -d' ' -f1 > "$T_REC/ca_hash"; stat -c %a "$ca" > "$T_REC/ca_modo"; fi
+cat > /dev/null
+echo "|$(printf 'a%.0s' $(seq 1 64))|t"
+EOS
+cat > "$FB/sha256sum" <<'EOS'
+#!/bin/bash
+# Si alguien hashea el ORIGEN (versión vulnerable), lo sustituye justo después de hashearlo.
+out="$(/usr/bin/sha256sum "$@")"; rc=$?
+for a in "$@"; do
+  if [ -n "${ORIG_FICHA:-}" ] && [ "$a" = "$ORIG_FICHA" ] && [ ! -e "$T_REC/sw_f" ]; then touch "$T_REC/sw_f"; cp "$MAL_FICHA" "$ORIG_FICHA"; fi
+  if [ -n "${ORIG_CA:-}" ] && [ "$a" = "$ORIG_CA" ] && [ ! -e "$T_REC/sw_c" ]; then touch "$T_REC/sw_c"; cp "$MAL_CA" "$ORIG_CA"; fi
+done
+printf '%s\n' "$out"; exit $rc
+EOS
+chmod +x "$FB/psql" "$FB/sha256sum"
+SYS_MAL=9999999999999
+ORIG_F="$T/orig.ficha"; MAL_F="$T/mal.ficha"; cp "$F0" "$ORIG_F"; HF="$(hsh "$ORIG_F")"; sed "s/^SYSTEM_IDENTIFIER=.*/SYSTEM_IDENTIFIER=$SYS_MAL/" "$F0" > "$MAL_F"
+tox() { # tox <args del ejecutor...>  (con PATH al psql/sha256sum falsos y registro en $REC)
+  rm -f "$REC"/*; SAL="$(T_REC="$REC" ORIG_FICHA="${OF:-}" MAL_FICHA="${MF:-}" ORIG_CA="${OC:-}" MAL_CA="${MC:-}" PATH="$FB:$PATH" "$EJX" "$@" 2>&1)"; RC=$?; }
+EJX="$EJ"
+# --- ficha (modo laboratorio) ---
+OF="$ORIG_F" MF="$MAL_F" OC="" MC=""; E="$(ev)"
+tox --ficha "$ORIG_F" --ficha-sha256 "$HF" --estado remediado --evidencia "$E" --sin-clave
+chk "$([ $RC -eq 0 ] && grep -q "esperado_sysid=$SYSID" "$REC/psql_args" && ! grep -q "$SYS_MAL" "$REC/psql_args" && echo ok)" "T1 ficha sustituida tras validar: psql recibe los valores de la ficha APROBADA (rc=$RC)"
+chk "$([ "$(hsh "$E/ficha.txt")" = "$HF" ] && [ "$(hsh "$ORIG_F")" != "$HF" ] && echo ok)" "T2 la evidencia guarda la ficha privada verificada y el origen sí fue sustituido"
+chk "$([ "$(cat "$REC/priv_modo")" = 700 ] && [ ! -d "$(cat "$REC/priv")" ] && [ -f "$E/ficha.txt" ] && [ -f "$E/MANIFIESTO.sha256" ] && echo ok)" "T3 el directorio temporal era 0700, se eliminó al terminar y la evidencia se conserva"
+# --- CA (modo remoto, repositorio de prueba con identidad git estricta) ---
+G2="$T/repo_prueba2"; mkdir -p "$G2/supabase/laboratorio" "$G2/supabase/scripts" "$G2/supabase/migrations"
+cp -r "$DIR" "$G2/supabase/laboratorio/o4-pgtemp"; cp "$REPO/supabase/scripts/validar_topologia_propietario_rpc.sql" "$G2/supabase/scripts/"; cp "$MIG" "$G2/supabase/migrations/"
+( cd "$G2" && git init -q && git -c user.email=t@t -c user.name=t add -A && git -c user.email=t@t -c user.name=t commit -q -m prueba ) >/dev/null 2>&1
+GC2="$(git -C "$G2" rev-parse HEAD)"; GT2="$(git -C "$G2" rev-parse 'HEAD^{tree}')"; EJX="$G2/supabase/laboratorio/o4-pgtemp/ejecutar_inventario_ro.sh"
+ORIG_C="$T/orig_ca.pem"; MAL_C="$T/mal_ca.pem"; cp "$T/ca.pem" "$ORIG_C"; printf 'CA-MALICIOSA\n' > "$MAL_C"
+FRR="$(mkremota rr)"; cp "$FRR" "$T/orig_rem.ficha"; HRR="$(hsh "$T/orig_rem.ficha")"; sed "s/^SYSTEM_IDENTIFIER=.*/SYSTEM_IDENTIFIER=$SYS_MAL/" "$FRR" > "$T/mal_rem.ficha"
+OF="$T/orig_rem.ficha" MF="$T/mal_rem.ficha" OC="$ORIG_C" MC="$MAL_C"; E="$(ev)"
+tox --ficha "$T/orig_rem.ficha" --ficha-sha256 "$HRR" --estado original --evidencia "$E" --ca "$ORIG_C" --commit-esperado "$GC2" --arbol-esperado "$GT2"
+chk "$([ $RC -eq 0 ] && echo ok)" "T4 ejecución remota simulada (psql falso) con identidad git estricta (rc=$RC)"
+CAP="$(cat "$REC/ca_path" 2>/dev/null)"
+chk "$([ -n "$CAP" ] && [ "$CAP" != "$ORIG_C" ] && [ "$(dirname "$CAP")" = "$(cat "$REC/priv")" ] && [ "$(cat "$REC/ca_modo")" = 400 ] && echo ok)" "T5 libpq recibe sslrootcert dentro del directorio privado (0400), no la ruta de origen"
+chk "$([ "$(cat "$REC/ca_hash")" = "$CAH" ] && [ "$(hsh "$ORIG_C")" != "$CAH" ] && echo ok)" "T6 al invocar psql la CA consumida tiene el SHA-256 aprobado aunque el origen ya fue sustituido"
+chk "$([ "$(hsh "$E/ca_verificada.pem")" = "$CAH" ] && [ "$(hsh "$E/ficha.txt")" = "$HRR" ] && grep -q "esperado_sysid=$SYSID" "$REC/psql_args" && ! grep -q "$SYS_MAL" "$REC/psql_args" && echo ok)" "T7 ficha y CA de la evidencia son los bytes aprobados; psql recibe el sysid aprobado"
+chk "$([ ! -d "$(cat "$REC/priv")" ] && [ -f "$E/ca_verificada.pem" ] && echo ok)" "T8 la limpieza elimina el temporal privado y conserva la evidencia"
+# --- sustitución antes de usar: bytes no aprobados se rechazan ---
+cp "$FRR" "$T/orig_rem.ficha"; cp "$MAL_C" "$ORIG_C"; E="$(ev)"; OF="" MF="" OC="" MC=""
+tox --ficha "$T/orig_rem.ficha" --ficha-sha256 "$HRR" --estado original --evidencia "$E" --ca "$ORIG_C" --commit-esperado "$GC2" --arbol-esperado "$GT2"
+chk "$([ $RC -eq 2 ] && has 'CA_SHA256' && [ ! -e "$REC/psql_args" ] && echo ok)" "T9 CA sustituida antes de usar: rechazada, psql no se invoca (rc=$RC)"
+cp "$T/ca.pem" "$ORIG_C"; cp "$MAL_F" "$ORIG_F"; E="$(ev)"
+tox --ficha "$ORIG_F" --ficha-sha256 "$HF" --estado remediado --evidencia "$E" --sin-clave
+chk "$([ $RC -eq 2 ] && has 'no coincide con la huella aprobada' && [ ! -e "$REC/psql_args" ] && echo ok)" "T10 ficha sustituida antes de usar: rechazada, psql no se invoca (rc=$RC)"
+cp "$F0" "$ORIG_F"
+# --- sustitución durante la copia: o bytes aprobados (inodo anterior) o rechazo; nunca bytes no aprobados ---
+mkdir "$T/fb2"; cat > "$T/fb2/cat" <<'EOS'
+#!/bin/bash
+# Primera invocación: sustituye el origen de la ficha ANTES de que cat lea (por truncado o por renombre).
+if [ ! -e "$T_REC/cat_hecho" ]; then touch "$T_REC/cat_hecho"
+  if [ "$CAT_MODO" = truncar ]; then cp "$MAL_FICHA" "$ORIG_FICHA"; else cp "$MAL_FICHA" "$ORIG_FICHA.tmp"; mv "$ORIG_FICHA.tmp" "$ORIG_FICHA"; fi
+fi
+exec /usr/bin/cat "$@"
+EOS
+chmod +x "$T/fb2/cat"; EJX="$EJ"
+for modo in truncar renombrar; do
+  cp "$F0" "$ORIG_F"; E="$(ev)"; rm -f "$REC"/*
+  SAL="$(T_REC="$REC" CAT_MODO=$modo ORIG_FICHA="$ORIG_F" MAL_FICHA="$MAL_F" PATH="$T/fb2:$FB:$PATH" "$EJ" --ficha "$ORIG_F" --ficha-sha256 "$HF" --estado remediado --evidencia "$E" --sin-clave 2>&1)"; RC=$?
+  if [ $modo = truncar ]; then chk "$([ $RC -eq 2 ] && has 'no coincide con la huella aprobada' && [ ! -e "$REC/psql_args" ] && echo ok)" "T11 sustitución por truncado durante la copia: bytes no aprobados rechazados (rc=$RC)"
+  else chk "$([ $RC -eq 0 ] && grep -q "esperado_sysid=$SYSID" "$REC/psql_args" && ! grep -q "$SYS_MAL" "$REC/psql_args" && [ "$(hsh "$E/ficha.txt")" = "$HF" ] && echo ok)" "T12 sustitución por renombre durante la copia: se consume el inodo aprobado (rc=$RC)"; fi
+done
+cp "$F0" "$ORIG_F"
+# --- estático: tras la copia, las rutas de origen no se vuelven a consultar ---
+LIN="$(grep -n '^unset FICHA CA' "$EJ" | cut -d: -f1)"
+chk "$([ -n "$LIN" ] && ! tail -n +$((LIN+1)) "$EJ" | grep -vE '^\s*#' | grep -qE '\$(\{)?(FICHA|CA)([^A-Za-z0-9_]|$)' && echo ok)" "T13 estático: ninguna referencia a las rutas de origen (FICHA/CA) después de 'unset FICHA CA'"
+chk "$(grep -q 'set -uo pipefail' "$EJ" && echo ok)" "T14 'set -u' activo: una referencia posterior a las rutas de origen abortaría"
 
 echo "--- casos: $TOTAL, fallas: $FALLAS"
 [ "$FALLAS" -eq 0 ]
