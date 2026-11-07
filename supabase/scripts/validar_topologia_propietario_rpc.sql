@@ -17,6 +17,13 @@
 --   4. T3P-08: service_role y la excepción P11-productos (conjunto exacto).
 --   5. T3P-06: manifiesto exacto de políticas RLS.
 -- Cada rechazo indica el invariante violado entre corchetes.
+-- Modo estricto (M-01): si faltan a la vez public.rls_auto_enable() y ensure_rls
+-- se rechaza con [O4_AUSENTE]. Sólo en laboratorio local se acepta, de forma
+-- explícita, creando en la MISMA sesión, antes de ejecutar este script:
+--   CREATE TEMP TABLE preflight_o4_ausente_laboratorio (modo text);
+--   INSERT INTO preflight_o4_ausente_laboratorio VALUES ('LABORATORIO_LOCAL_SIN_O4');
+-- (única columna «modo», exactamente una fila con ese valor). El resultado es
+-- [ESTADO_LOCAL_SIN_O4], nunca [ESTADO_A]. Con O-4 presente el marcador se rechaza.
 -- No modifica la base: sólo lee el catálogo. El único cambio de estado es un
 -- set_config(search_path, ..., is_local = true) dentro de la propia
 -- transacción, restaurado al terminar la sección 5.
@@ -75,6 +82,16 @@ DECLARE
   v_o4_triggers pg_catalog.text;     -- violaciones de los event triggers
   v_o4_n_ensure pg_catalog.int8;     -- ensure_rls asociados a la función (debe ser 1)
   v_o4_trg_tabla pg_catalog.bool;    -- algún trigger de tabla usa la función
+  -- M-01: modo estricto por defecto. O-4 ausente sólo se acepta con el
+  -- marcador explícito de laboratorio local (tabla temporal de sesión).
+  v_marc_nombre CONSTANT pg_catalog.text := 'preflight_o4_ausente_laboratorio';
+  v_marc_valor CONSTANT pg_catalog.text := 'LABORATORIO_LOCAL_SIN_O4';
+  v_marc_oid pg_catalog.oid;
+  v_marc_nsp pg_catalog.text;
+  v_marc_err pg_catalog.text;
+  v_marc_filas pg_catalog.int8;
+  v_marc_ok pg_catalog.int8;
+  v_modo_local pg_catalog.bool := false;  -- true sólo con marcador válido y O-4 ausente
 
   -- Bloque B (T3P-05..T3P-08)
   v_b record;                                   -- fila de manifiesto o de catálogo
@@ -1071,6 +1088,11 @@ BEGIN
   --     va por OID; evtfoid nunca se compara con un literal.
   v_oid_fn := pg_catalog.to_regprocedure('public.rls_auto_enable()');
   IF v_oid_fn IS NOT NULL THEN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_class m
+                WHERE m.relnamespace = pg_catalog.pg_my_temp_schema()
+                  AND m.relname = v_marc_nombre::pg_catalog.name) THEN
+      RAISE EXCEPTION 'validar_topologia: [O4_MARCADOR_INVALIDO] el marcador de laboratorio pg_temp.% existe pero O-4 está presente: el marcador sólo es válido con O-4 ausente.', v_marc_nombre;
+    END IF;
     SELECT NULLIF(pg_catalog.concat_ws('; ',
              CASE WHEN NOT p.prosecdef THEN 'no es SECURITY DEFINER' END,
              CASE WHEN p.prokind <> 'f' THEN 'prokind ' || p.prokind::pg_catalog.text END,
@@ -1154,6 +1176,53 @@ BEGIN
     v_sd_aprobadas := v_sd_aprobadas || v_oid_fn;
   ELSIF EXISTS (SELECT 1 FROM pg_catalog.pg_event_trigger t WHERE t.evtname = 'ensure_rls') THEN
     RAISE EXCEPTION 'validar_topologia: [O4_RLS_AUTO_ENABLE] existe el event trigger ensure_rls sin public.rls_auto_enable() (O-4: presentes o ausentes juntos).';
+  ELSE
+    -- M-01: faltan a la vez la función y ensure_rls. Modo estricto por
+    -- defecto: es un rechazo, salvo marcador explícito de laboratorio local.
+    -- Marcador: tabla TEMPORAL de la propia sesión pg_temp.<v_marc_nombre>,
+    -- relkind 'r', relpersistence 't', no partición, sin herencia, con una
+    -- única columna activa «modo» de tipo text y exactamente una fila cuyo
+    -- valor es v_marc_valor. Cualquier otra forma se rechaza. El catálogo se
+    -- consulta con pg_my_temp_schema() (nunca por search_path) y el operador
+    -- de comparación va calificado.
+    SELECT c.oid, n.nspname::pg_catalog.text
+      INTO v_marc_oid, v_marc_nsp
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relnamespace = pg_catalog.pg_my_temp_schema()
+       AND c.relname = v_marc_nombre::pg_catalog.name;
+    IF v_marc_oid IS NULL THEN
+      RAISE EXCEPTION 'validar_topologia: [O4_AUSENTE] public.rls_auto_enable() y ensure_rls están ausentes y no hay marcador de laboratorio local (tabla temporal pg_temp.%). Modo estricto: el entorno alojado debe conservar O-4 (ADR-001 §18.2).', v_marc_nombre;
+    END IF;
+    SELECT pg_catalog.concat_ws('; ',
+             CASE WHEN c.relkind <> 'r' THEN 'relkind ' || c.relkind::pg_catalog.text END,
+             CASE WHEN c.relpersistence <> 't' THEN 'no es temporal' END,
+             CASE WHEN c.relispartition OR c.relhassubclass
+                    OR EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhrelid = c.oid OR i.inhparent = c.oid)
+                  THEN 'partición o herencia' END,
+             CASE WHEN (SELECT pg_catalog.count(*) FROM pg_catalog.pg_attribute a
+                         WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped) <> 1
+                    OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a
+                                    WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                                      AND a.attname = 'modo'
+                                      AND a.atttypid = 'pg_catalog.text'::pg_catalog.regtype)
+                  THEN 'estructura distinta de (modo text)' END)
+      INTO v_marc_err
+      FROM pg_catalog.pg_class c
+     WHERE c.oid = v_marc_oid;
+    IF v_marc_err <> '' THEN
+      RAISE EXCEPTION 'validar_topologia: [O4_MARCADOR_INVALIDO] el marcador pg_temp.% no cumple la estructura: %.', v_marc_nombre, v_marc_err;
+    END IF;
+    EXECUTE pg_catalog.format(
+      'SELECT pg_catalog.count(*), pg_catalog.count(*) FILTER (WHERE modo OPERATOR(pg_catalog.=) %L) FROM %I.%I',
+      v_marc_valor, v_marc_nsp, v_marc_nombre)
+      INTO v_marc_filas, v_marc_ok;
+    IF v_marc_filas IS DISTINCT FROM 1 OR v_marc_ok IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'validar_topologia: [O4_MARCADOR_INVALIDO] el marcador pg_temp.% debe contener exactamente una fila con modo = % (filas: %, válidas: %).',
+        v_marc_nombre, v_marc_valor, v_marc_filas, v_marc_ok;
+    END IF;
+    v_modo_local := true;
+    RAISE WARNING 'validar_topologia: [O4_AUSENTE_LABORATORIO] O-4 ausente aceptado SOLO por el marcador explícito de laboratorio local. Este resultado nunca es ESTADO_A y no sirve para staging ni producción.';
   END IF;
 
   --     Rechazo exhaustivo: toda función SECURITY DEFINER (cualquier prokind)
@@ -1470,7 +1539,9 @@ BEGIN
   RAISE NOTICE 'service_role: denegado por defecto, excepción SELECT sobre public.productos (T3P-08, P11).';
   RAISE NOTICE 'Políticas RLS: manifiesto exacto de 33 políticas sobre 11 relaciones; políticas de otras relaciones no verificadas (T3P-06).';
   RAISE NOTICE '---';
-  IF v_pendientes = 0 THEN
+  IF v_modo_local THEN
+    RAISE WARNING '=== validar_topologia: [ESTADO_LOCAL_SIN_O4] invariantes restantes verificados con O-4 ausente por marcador de laboratorio local (% grupo(s) pendiente(s)). NO es ESTADO_A ni conformidad de topología. ===', v_pendientes;
+  ELSIF v_pendientes = 0 THEN
     RAISE NOTICE '=== validar_topologia: [ESTADO_A] invariantes exigidos por este preflight verificados; ninguna superficie pendiente detectada. Esto no equivale a una verificación completa de seguridad. ===';
   ELSE
     RAISE WARNING '=== validar_topologia: [ESTADO_B] invariantes exigidos por este preflight verificados, pero hay % grupo(s) de relaciones, owners o políticas sin contrato auditado (ver PENDIENTE_DECISION_*). Topología NO declarada conforme. ===', v_pendientes;

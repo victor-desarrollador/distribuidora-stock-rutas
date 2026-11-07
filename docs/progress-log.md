@@ -1,4 +1,31 @@
 ---
+## 07/11/2026 — T3-01/O-4: corrección local de M-01 y B-01 (opción M; commit local; T3-01 NO cerrada ni aprobada)
+
+**Rama:** `feat/t3-01-preflight-migraciones`, base `a1d29640a67d1846673f794bed2a754d98c229e5`. Superficie sensible (SECURITY DEFINER, event triggers, RLS, Supabase): **corresponde security review (pendiente)**. Decisión técnica tras el dictamen de Codex: marcador mediante tabla temporal de sesión (opción M).
+
+### Hallazgos corregidos localmente
+- **M-01** (`supabase/scripts/validar_topologia_propietario_rpc.sql`): con `public.rls_auto_enable()` y `ensure_rls` ausentes el preflight ya no llega a `ESTADO_A`. Modo estricto por defecto: `[O4_AUSENTE]`. Sólo se acepta con el marcador `pg_temp.preflight_o4_ausente_laboratorio` (tabla temporal, relkind `r`, sin partición ni herencia, única columna activa `modo text`, exactamente una fila `LABORATORIO_LOCAL_SIN_O4`); otra forma da `[O4_MARCADOR_INVALIDO]`. Se busca con `pg_my_temp_schema()` y el operador va calificado. Con marcador válido el cierre es `[ESTADO_LOCAL_SIN_O4]`, nunca `ESTADO_A`/`ESTADO_B`. Con O-4 presente el marcador se rechaza. Se conservan los demás controles.
+- **B-01** (`supabase/migrations/20261110120000_o4_pgtemp_remediacion.sql`): la guarda `current_user = postgres` es la primera sentencia, antes del advisory lock y del `return` por ausencia. El resto no cambió.
+
+### Arnés (`supabase/laboratorio/o4-pgtemp/`, solo laboratorio; no forma parte de `supabase test db`)
+`lab_comun.sh`, `probar_m01_b01.sh` (modo contenedor o socket Unix 700), `probar_o4_presente.sh`, `probar_o4_docker.sh`. Validan que el destino sea el contenedor descartable (sin red, puertos ni montajes, nonce, digest) y fallan cerrado.
+
+### Verificación (laboratorio Docker local descartable, sin staging ni producción)
+- **Imagen:** `public.ecr.aws/supabase/postgres@sha256:b15d862126dd2dac02da524696ccfde2dcce2ceaee0a58973b2727befe492706` (17.11.0.004).
+- **A:** 12/12 casos M-01/B-01. **B:** 19/19 con O-4 presente (remediada → `ESTADO_A`; original, hash desconocido, trigger ausente/duplicado/deshabilitado/REPLICA/ALWAYS/tags alteradas, ACL, owner, SECURITY INVOKER, proconfig y marcador junto con O-4 → rechazo). **C:** 9/9 casos nuevos de la migración y la batería existente `ejecutar.sh` (X01–X08 y RLS) con `fallas=0`.
+- **pgTAP (`supabase test db --local`, CLI 2.120.0, stack mínimo sólo con la base):** con O-4 remediada, **2163/2163, 0 SKIP**, `PASS`; sin O-4, **2147 PASS y 16 SKIP** (todos de O-4, no cuentan como aprobados), 33 archivos, `PASS`. El preflight da `ESTADO_A` con O-4 remediada (también en READ ONLY).
+- Defectos hallados durante la validación: sólo del arnés (ruta con espacios, centinela del cuerpo original, puerto interno del contenedor, fixtures B16/CM02); corregidos y repetidos hasta pasar por el motivo esperado.
+- **Evidencia:** `../evidencias-t3-01/m01-b01-docker/` (122 archivos; `MANIFIESTO.sha256` verificado 122/122; SHA-256 del manifiesto `808bd5e245db505c73a6907f7b8682070ef5535efd2c9c17ddcf2e480f2e1965`). Sanitizada: sin secretos.
+- **SHA-256 completos:** preflight `7b67a9d9b85a4d63b93e42cbe3660b3a8b645c2aacb73794b4776b1aa461d882`; migración `7068ddb38b037580413fba88b418ca89b92923c91710195081fcfabff7abef64`.
+
+### Pendiente / no autorizado
+- **H-04 pendiente.** **F7, F8 y las decisiones PB12C pendientes.** **Security review pendiente.** Auditoría independiente (Codex) del hash del commit.
+- La **enmienda de ADR-001 §18.2 sigue NO APROBADA** (el contrato RB + RA es una propuesta).
+- Las baterías B.1.2a/b/c no están en el repo y no se repitieron; el preflight no se probó contra el proyecto alojado.
+- El marcador es una opción de laboratorio, no un control de autorización: staging/producción deben correr el preflight sin marcador.
+- **Staging y producción no autorizados.** Push, PR, merge y deploy: no autorizados. **T3-01 no está cerrada.**
+
+---
 ## 06/11/2026 — T3-01 G-01: cierre de la aclaración textual (mensaje ESTADO_B; commit local; T3-01 Fase 1 NO aprobada)
 
 **Rama:** `feat/t3-01-preflight-migraciones`, base `9384b7d4211d3e50bfb59dc1e93ef33901c995a3`. Completa G-01.

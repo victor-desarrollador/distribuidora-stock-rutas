@@ -20,7 +20,8 @@
 --     verificación posterior (OID, hash, proconfig, ACL, contrato y trigger);
 --   * cualquier otro estado                             → ERROR, sin cambios.
 -- No toca tablas, grants, roles ni service_role. Exige current_user postgres
--- (owner de la función). Un único DO: atómico; todo error revierte.
+-- (owner de la función) como PRIMERA comprobación, antes del advisory lock y
+-- de cualquier retorno temprano (B-01). Un único DO: atómico; todo error revierte.
 do $mig$
 declare
   c_hash_original  constant pg_catalog.text := '325ae266d9b166715ef5230ceaf7ff9d523e483cf5610dfb9779ab3f183f4af9';
@@ -36,6 +37,12 @@ declare
   v_acl_post pg_catalog.aclitem[];
   v_err      pg_catalog.text;
 begin
+  -- B-01: guarda de identidad ANTES del advisory lock y de cualquier retorno
+  -- temprano (también en el caso «O-4 ausente»).
+  if current_user::pg_catalog.text <> 'postgres' then
+    raise exception 'o4_pgtemp: debe ejecutarse como postgres (owner de la función); current_user=%', current_user;
+  end if;
+
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('o4_pgtemp_remediacion'));
 
   v_oid := pg_catalog.to_regprocedure('public.rls_auto_enable()');
@@ -48,10 +55,6 @@ begin
     end if;
     raise notice 'o4_pgtemp: O-4 ausente (entorno local): sin cambios';
     return;
-  end if;
-
-  if current_user::pg_catalog.text <> 'postgres' then
-    raise exception 'o4_pgtemp: debe ejecutarse como postgres (owner de la función); current_user=%', current_user;
   end if;
 
   select pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc, 'UTF8')), 'hex'), p.proconfig, p.proacl
