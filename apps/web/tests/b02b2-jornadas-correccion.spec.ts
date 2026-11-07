@@ -253,10 +253,17 @@ test.describe("corregir jornada (backend real)", () => {
     const j = await sembrarJornada(request, api, "camion");
     const otro = await crearCamion(request, api, "destino");
     const enc = await entrarComo(browser, baseURL, CUENTAS.encargado);
-    const { fila, detalle } = await abrirDetalle(enc.page, j);
+    const { detalle } = await abrirDetalle(enc.page, j);
     await corregir(detalle, { camion: otro, motivo: "Camión en taller" });
     await expect(exitoCorreccion(enc.page)).toBeVisible();
-    await expect(fila).toContainText(otro.nombre);
+    // La fila de ESTA jornada es la seleccionada («Ver detalle» con aria-pressed):
+    // la selección se guarda por id y sobrevive a la relectura. No se filtra por el
+    // camión ni por la fecha, porque la corrección los modifica.
+    const filaSeleccionada = enc.page.locator("table tbody tr").filter({
+      has: enc.page.getByRole("button", { name: "Ver detalle", pressed: true }),
+    });
+    await expect(filaSeleccionada).toHaveCount(1);
+    await expect(filaSeleccionada).toContainText(otro.nombre);
     expect(await jornadaEnBase(request, api, j.id)).toMatchObject({ fecha: j.fecha, camion_id: otro.id });
     const historial = await correccionesDe(request, api, j.id);
     expect(historial.map((c) => [c.camion_anterior_id, c.camion_nuevo_id, c.actor_id])).toEqual([
