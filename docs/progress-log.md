@@ -1,4 +1,14 @@
 ---
+## 07/11/2026 — B-02b.1: M-01, negativo pgTAP «authenticated sin perfil» (escrito, NO ejecutado; sin commit)
+
+**Origen:** hallazgo M-01 de la auditoría de Codex sobre `94e44d9`: ninguna prueba demostraba que una cuenta `authenticated` sin perfil no lee `public.jornadas`.
+
+**Cambio (sólo test):** en `supabase/tests/jornadas_esquema.test.sql`, `plan(123)` pasa a `plan(124)`, se agrega la cuenta de prueba `aaaaaaaa-0000-4000-8000-000000000009` en `auth.users` **sin** fila en `perfiles` (su metadata dice «dueño de A», como fixture adversarial) y una única aserción `ok()`. Esa aserción exige cuatro condiciones: la precondición medida como owner (hay jornadas, la cuenta existe en Auth y no tiene perfil); `current_user = 'authenticated'`; `auth.uid()` igual a la cuenta; y `count(*) = 0` sobre `public.jornadas`. Reutiliza `pg_temp.como_usuario`. **Sin cambios en RLS, migraciones, grants, funciones ni esquemas.**
+
+**Estado de ejecución:** **NO ejecutado.** `supabase test db` requiere un stack local autorizado. Sólo hubo validación estática: el conteo de aserciones del archivo pasa de 123 a 124 y coincide con el plan, y `git diff --check` está limpio. No se afirma PASS.
+
+**Observaciones bajas atendidas:** el comentario de cabecera de `tests/b02b-jornadas-lectura.spec.ts` ya no dice «NO ejecutados»: registra la corrida 135/135 PASS sobre `a59de2e`. El README del paquete externo de evidencias ya no presenta loopback como aislamiento de red.
+---
 ## 07/11/2026 — B-02b.1: segunda corrida E2E sobre `a59de2e` (135/135 PASS; sólo documentación)
 
 **Laboratorio aislado:** `b02b1-e2e2-a59de2ee`, en una worktree descartable desde `a59de2eedafde9c9a91981d80a67bd6245bde96f`. Puertos: API 61521, PostgreSQL 61522 y Vite 61573. Sólo cambió la configuración de esa copia (`config.toml`, y `playwright.config.ts` con `env -u E2E_SUPABASE_SECRET_KEY` en el `webServer`). Las dependencias se copiaron de la worktree B-02b porque el lockfile es idéntico; no hubo descargas de dependencias, imágenes ni navegadores.

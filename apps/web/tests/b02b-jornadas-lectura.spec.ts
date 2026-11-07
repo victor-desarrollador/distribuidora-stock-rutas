@@ -1,8 +1,10 @@
 // B-02b.1 — E2E de la pantalla REAL de jornadas (/jornadas, sólo lectura).
 //
-// ESTADO: escritos y compilados, NO ejecutados. Requieren el stack Supabase
-// local con supabase/seed.sql (ver playwright.config.ts); su corrida necesita
-// autorización separada. Nada aquí toca staging ni producción.
+// ESTADO: ejecutados sobre a59de2e en un laboratorio Supabase local aislado
+// (07/11/2026): la suite Playwright completa dio 135/135 PASS, incluidos estos
+// casos. Requieren el stack local con supabase/seed.sql (ver
+// playwright.config.ts); cada corrida necesita autorización. Nada aquí toca
+// staging ni producción.
 //
 // Qué valida cada bloque (para no confundir mocks con RLS):
 //  - «roles y aislamiento» (BACKEND REAL): la base devuelve las filas; prueba la

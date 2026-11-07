@@ -15,7 +15,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(123);
+select plan(124);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como owner; se revierten al final)
@@ -31,7 +31,11 @@ insert into auth.users (id, aud, role, email, raw_user_meta_data) values
   ('aaaaaaaa-0000-4000-8000-000000000004', 'authenticated', 'authenticated', 'jor.a4@usuarios.distribuidora.invalid', '{}'),
   ('aaaaaaaa-0000-4000-8000-000000000005', 'authenticated', 'authenticated', 'jor.a5@usuarios.distribuidora.invalid', '{}'),
   ('bbbbbbbb-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'jor.b1@usuarios.distribuidora.invalid', '{}'),
-  ('bbbbbbbb-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'jor.b2@usuarios.distribuidora.invalid', '{}');
+  ('bbbbbbbb-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'jor.b2@usuarios.distribuidora.invalid', '{}'),
+  -- M-01: cuenta Auth válida SIN fila en perfiles; su metadata dice «dueño de A»
+  -- (adversarial: la autoridad es perfiles, nunca user_metadata).
+  ('aaaaaaaa-0000-4000-8000-000000000009', 'authenticated', 'authenticated', 'jor.sinperfil@usuarios.distribuidora.invalid',
+   '{"rol":"dueno","empresa_id":"aaaaaaaa-0000-4000-8000-000000000000"}');
 
 insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol, activo) values
   ('aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000000', 'jor.a1', 'A1 dueño', 'dueno', true),
@@ -921,6 +925,25 @@ select is(
   (select count(*)::int from public.reasignaciones_vendedor) + (select count(*)::int from public.correcciones_jornada),
   0,
   'authenticated: el dueño de B no ve los historiales de A');
+reset role;
+-- M-01: precondiciones medidas como owner (hay jornadas y la cuenta no tiene
+-- perfil); la lectura se hace como `authenticated` (NOBYPASSRLS), sin
+-- privilegios administrativos.
+do $$
+begin
+  perform set_config('m01.precondicion',
+    ((select count(*) from public.jornadas) > 0
+     and exists (select 1 from auth.users where id = 'aaaaaaaa-0000-4000-8000-000000000009')
+     and not exists (select 1 from public.perfiles where usuario_id = 'aaaaaaaa-0000-4000-8000-000000000009'))::text,
+    true);
+end $$;
+select pg_temp.como_usuario('aaaaaaaa-0000-4000-8000-000000000009');
+select ok(
+  current_setting('m01.precondicion')::boolean
+  and current_user = 'authenticated'
+  and auth.uid() = 'aaaaaaaa-0000-4000-8000-000000000009'::uuid
+  and (select count(*) from public.jornadas) = 0,
+  'authenticated sin perfil (metadata de dueño de A) no ve jornadas, aunque existan');
 reset role;
 
 -- DML directo de authenticated, anon y service_role
