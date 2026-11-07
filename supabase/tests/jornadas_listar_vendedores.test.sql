@@ -16,7 +16,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(65);
+select plan(70);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -419,6 +419,57 @@ set local role propietario_rpc;
 select is((select count(*)::int from privado.perfiles_empresa_gestion), 0,
   'V3: con el claim de un vendedor la vista no da ninguna fila (la política exige dueño o encargado activo)');
 reset role;
+
+-- ===========================================================================
+-- DP — defensa en profundidad (H-01): la función no depende sólo de la RLS del lector
+-- ===========================================================================
+-- Se simula un drift peligroso de la política del lector (USING true: la vista pasaría
+-- a devolver perfiles de TODAS las empresas). La función compara además el empresa_id
+-- con el del llamador, así que no debe filtrar nada de otra empresa. Se restaura la
+-- política justo después (y la transacción se revierte al final).
+alter policy perfiles_select_empresa_lector on public.perfiles using (true);
+
+select set_config('request.jwt.claims',
+  '{"sub":"a3a3a3a3-0000-4000-8000-000000000001","role":"authenticated"}', true);
+set local role propietario_rpc;
+select is(
+  (select count(*)::int from privado.perfiles_empresa_gestion
+    where empresa_id = 'b3b3b3b3-0000-4000-8000-000000000000'),
+  2,
+  'DP1 (control): con la política alterada la vista SÍ devuelve los perfiles de B al dueño de A (el drift es real)');
+reset role;
+
+set local role authenticated;
+select results_eq(
+  $$select usuario_id from public.listar_vendedores_jornada()$$,
+  $$values ('a3a3a3a3-0000-4000-8000-000000000003'::uuid), ('a3a3a3a3-0000-4000-8000-000000000007'),
+           ('a3a3a3a3-0000-4000-8000-000000000001'), ('a3a3a3a3-0000-4000-8000-000000000002')$$,
+  'DP2: con la política alterada la función sigue devolviendo sólo los 4 perfiles activos de A (ninguno de B)');
+reset role;
+
+select set_config('request.jwt.claims',
+  '{"sub":"b3b3b3b3-0000-4000-8000-000000000001","role":"authenticated"}', true);
+set local role authenticated;
+select results_eq(
+  $$select usuario_id from public.listar_vendedores_jornada()$$,
+  $$values ('b3b3b3b3-0000-4000-8000-000000000001'::uuid), ('b3b3b3b3-0000-4000-8000-000000000002')$$,
+  'DP3: con la política alterada el dueño de B recibe sólo los 2 perfiles de B (ninguno de A)');
+reset role;
+
+select set_config('request.jwt.claims',
+  '{"sub":"a3a3a3a3-0000-4000-8000-000000000003","role":"authenticated"}', true);
+set local role authenticated;
+select throws_ok('select * from public.listar_vendedores_jornada()', 'PT403', 'jornada_no_autorizado',
+  'DP4: con la política alterada el vendedor sigue recibiendo PT403 (no se filtra nada)');
+reset role;
+
+alter policy perfiles_select_empresa_lector on public.perfiles
+  using (empresa_id = (select privado.empresa_gestion_actual()));
+select ok(
+  (select qual ~ 'empresa_gestion_actual' and qual ~ 'empresa_id' and qual !~ '^true$'
+     from pg_policies where schemaname = 'public' and tablename = 'perfiles'
+      and policyname = 'perfiles_select_empresa_lector'),
+  'DP5: la política del lector quedó restaurada (filtra empresa_id con empresa_gestion_actual)');
 
 -- ===========================================================================
 -- AT — atomicidad de la ventana de privilegios transitorios (fallo inyectado)
