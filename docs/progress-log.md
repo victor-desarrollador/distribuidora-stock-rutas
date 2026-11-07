@@ -1,4 +1,49 @@
 ---
+## 07/11/2026 — B-02b.2 / S1: confirmar salida real desde /jornadas (sólo frontend y tests; commit local autorizado; E2E pendiente)
+
+**Rama:** `feat/b-02b2-s1-confirmar-salida`, desde `a85e49c` (B-02b.1), en la worktree `../distribuidora-b02b2-s1`. B-01 no se modificó. La rama B-02b.1 (`a85e49c`) tampoco cambió. Dentro de esta rama no se modificaron el contrato de B-02a (`lib/jornadas.ts`) ni las guardas de lectura de B-02b.1 (`jornadas_lectura.test.ts`), pero **sí** la pantalla de B-02b.1 (`Jornadas.tsx`, `JornadasVista.tsx`, `jornadas_presentacion.ts`) y su test de presentación (`JornadasVista.test.tsx`), para integrar S1. Plan: `../evidencias-entrega-b/b02b2-preflight/PREFLIGHT_B02B2.md`, slice S1.
+
+**Qué se hizo.** Dueño y encargado pueden confirmar la salida de una jornada `cargada` desde su detalle, con la RPC existente `confirmar_salida` a través de `ejecutar` de B-02a (comando `salir`). **Sin cambios** en migraciones, `supabase/tests`, RLS, RPC, grants, `lib/jornadas.ts`, `lib/stock.ts` ni en los demás botones: «Nueva jornada» sigue deshabilitado; carga, descarga, apertura y reasignación no se habilitan.
+- `pages/jornadas_salida.ts` (nuevo, controlador sin React):
+  - pide una confirmación explícita y, al confirmar, crea **una clave de idempotencia por intención**, sólo en memoria;
+  - mantiene un **envío único**: el doble clic y las acciones durante el envío o la verificación se ignoran;
+  - después del éxito relee la lista desde Supabase;
+  - un rechazo definitivo termina la intención (la clave no se consumió) y, si es `jornada_estado_invalido`, relee;
+  - **sin respuesta** o con `40001`/`40P01` agotados, **no reenvía nada por su cuenta**: lee el estado real de la jornada. Si ya salió, la informa como registrada; si sigue `cargada`, ofrece «Reintentar confirmación» con la **misma clave**; si la lectura falla, sólo ofrece «Verificar estado»;
+  - las respuestas tardías que llegan después del desmontaje se descartan.
+- `hooks/useSalidaJornada.ts` (nuevo): conecta el controlador con React y verifica el estado con `leerTodasLasJornadas({ fecha })` de B-02a.
+- `pages/JornadaSalidaPanel.tsx` (nuevo, presentacional): botón, pregunta de confirmación con el camión, estados `status`/`alert`, botones táctiles `min-h-12` y razón del deshabilitado con `aria-describedby`.
+- `pages/JornadasVista.tsx`: la prop opcional `accionesDetalle` se muestra sólo si `puedeAdministrar`; se quitó el botón fijo «Confirmar salida (no disponible todavía)». `pages/Jornadas.tsx` la pasa sólo para `ROLES_GESTION`. `jornadas_presentacion.ts`: el aviso de «no disponible» ya no incluye la salida.
+- Guardas de B-02b.1 sobre el fuente (`jornadas_lectura.test.ts`): **no se modificaron** y siguen pasando. La mutación vive en módulos separados, cubiertos por guardas nuevas: sin almacenamiento del navegador, sin `.rpc(`/`.from(`/escrituras directas, y `salir` como único comando.
+- Tras una recarga la clave se pierde (no se persiste). La pantalla muestra el estado real leído de la base: si la salida se registró, la jornada aparece «En reparto» y ya no se ofrece confirmar; si no, una nueva confirmación es segura porque el servidor sólo admite la salida en `cargada`.
+
+**Tests:** nuevos `pages/jornadas_salida.test.ts` y `pages/JornadaSalidaPanel.test.tsx`. En `JornadasVista.test.tsx` se actualizó el caso de botones mutadores (ahora sólo «Nueva jornada» queda pendiente) y se agregaron los casos de `accionesDetalle` y del vendedor. E2E nuevo `tests/b02b2-jornadas-salida.spec.ts` (10 casos): dueño (con actor), encargado (con actor), doble clic con respuesta lenta, pérdida **sin** efecto en la base con reintento visible y la misma clave, carga neta cero rechazada sin efectos, vista móvil 393×851, pérdida con efecto ya confirmado, vendedor sin acción y con `PT403` en la base, otra empresa sin visibilidad y con `PT404` en la base, y jornada abierta sin acción.
+
+**Revisión de estabilidad del hook:** no se encontró un defecto.
+- `releer` se toma una vez y es `useJornadasLectura().recargar`, que delega en un controlador de lectura creado con `useState`, estable durante toda la vida del componente y que relee con el filtro vigente.
+- Un cambio de usuario publica `cargando` en el controlador de sesión, con lo que `RutasPrivadas` desmonta la pantalla; un perfil inactivo la bloquea; un cambio de rol del mismo usuario oculta el panel y el servidor vuelve a autorizar.
+- Se agregaron tests de regresión: relectura con la fecha vigente, `detener`/`iniciar`, evidencia estructural. Un mutante que quita la relectura es detectado por 4 tests.
+- El E2E se reforzó con el `actor_id` de la operación (dueño y encargado) y con la comprobación de que todos los envíos ante una respuesta perdida son `confirmar_salida`.
+
+**Revisión 1 de Codex** (estática, de solo lectura, previa al commit, sobre la huella del árbol `c133aa9e…701a`; evidencia en `../evidencias-entrega-b/b02b2-s1-revisiones/revision-1/`): **DESFAVORABLE**, con 3 hallazgos medios y 1 bajo. Los cuatro se confirmaron y se corrigieron:
+- **S1-C1:** tras un éxito, el panel no ofrece ninguna acción aunque la jornada local todavía figure `cargada`.
+- **S1-C2:** una intención con resultado desconocido ya no se descarta por navegar a otra jornada; mientras no se resuelva, no se puede iniciar otra confirmación y su clave se conserva.
+- **S1-C3:** se agregaron los E2E de pérdida sin efecto con reintento visible, carga neta cero, otra empresa y vista móvil.
+- **S1-C4:** esta bitácora precisa qué partes de B-02b.1 se modificaron.
+Los tests de regresión de C1 y C2 detectan sus mutantes.
+
+**Revisión 2 de Codex** (huella `0ed57de4…307c`; `revision-2/`): **DESFAVORABLE**. C1 a C4 quedaron resueltos (C3 sólo de forma estática) y apareció un hallazgo nuevo, **S1-C5 (media)**: la relectura posterior al éxito pone la lista en «cargando», desmonta el detalle y oculta el anuncio de éxito. Se confirmó y se corrigió:
+- el resultado lo anuncia el componente nuevo `pages/AvisoSalidaJornada.tsx`, fuera del listado y del detalle, por la prop `avisos` de `JornadasVista`;
+- la región `role="status"` está siempre montada; el rechazo definitivo se inserta como `role="alert"` sólo cuando existe, sin dejar un `alert` vacío que rompa los E2E de B-02b.1;
+- el panel ya no anuncia el resultado.
+Prueba de integración nueva: controlador de salida y controlador de lectura real, con la transición `listo → cargando → listo` y una relectura fallida; un mutante que muestra los avisos sólo en `listo` es detectado. Se ajustaron dos tests del panel y el E2E de carga neta cero por el traslado del anuncio.
+
+**Revisión 3 de Codex** (huella `da97aa08…97d6`; `revision-3/`): **FAVORABLE**, sin hallazgos nuevos; S1-C1 a S1-C5 resueltos (C3 sólo de forma estática). Codex no ejecutó comandos y aclaró que es una revisión estática previa al commit, no la auditoría final de un hash. Después del dictamen no se modificaron código ni tests: el único cambio posterior es esta entrada de la bitácora (título y este párrafo), y la huella de los archivos de código y tests se comprobó idéntica antes del commit. Se usaron 2 de los 2 ciclos de corrección permitidos.
+
+**Verificación (`apps/web`):** `typecheck` rc 0; `lint` rc 0; Vitest **43 archivos / 1487 pruebas** PASS (antes 40 / 1428); `build` rc 0; tipos estrictos de los specs rc 0; `playwright test --list` **145 casos en 22 archivos**; `git diff --check` limpio. **Playwright funcional NO ejecutado:** requiere un laboratorio local con red ligada a loopback y autorización específica.
+
+**Riesgos / pendiente:** (1) E2E real sin correr; (2) security review (RPC, jornadas, idempotencia) y auditoría final independiente sobre el hash de este commit; (3) si se pierde la respuesta y se recarga antes de verificar, la clave se pierde; el riesgo es bajo porque una salida ya registrada se rechaza por estado y no se duplica.
+---
 ## 07/11/2026 — B-02b.1: M-01, negativo pgTAP «authenticated sin perfil» (commit `23b50ef`; pgTAP PASS)
 
 **Origen:** hallazgo M-01 de la auditoría de Codex sobre `94e44d9`: ninguna prueba demostraba que una cuenta `authenticated` sin perfil no lee `public.jornadas`.

@@ -135,15 +135,38 @@ describe("JornadasVista", () => {
     expect(html).not.toContain("Detalle de la jornada");
   });
 
-  it("los botones mutadores están deshabilitados y explican por qué", () => {
+  // B-02b.2 / S1: «Confirmar salida» ya no es un botón deshabilitado de esta
+  // vista; lo aporta `accionesDetalle` (JornadaSalidaPanel). Las demás
+  // operaciones siguen deshabilitadas y explican por qué.
+  it("los botones mutadores que siguen pendientes están deshabilitados y explican por qué", () => {
     const j = jornada(1);
     const html = vista(listo([j]), { seleccionadaId: j.id });
     const mutadores = botones(html).filter((b) => /Nueva jornada|Confirmar salida|Cargar mercader|Descargar|Abrir jornada/i.test(b.texto));
-    expect(mutadores.map((b) => b.texto.replace(/\s*\(.*$/, ""))).toEqual(["Nueva jornada", "Confirmar salida"]);
+    expect(mutadores.map((b) => b.texto.replace(/\s*\(.*$/, ""))).toEqual(["Nueva jornada"]);
     expect(mutadores.every((b) => b.deshabilitado && b.atributos.includes("title="))).toBe(true);
     expect(mutadores.every((b) => /no disponible todavía/.test(b.texto))).toBe(true);
-    expect(html).toContain("sólo lectura");
     expect(html).toContain(MENSAJE_NO_DISPONIBLE.slice(0, 30));
+    expect(MENSAJE_NO_DISPONIBLE).not.toMatch(/confirmar la salida de jornadas se habilitarán/);
+  });
+
+  it("sin `accionesDetalle` el detalle no ofrece ninguna acción mutadora", () => {
+    const j = jornada(1, "cargada");
+    const html = vista(listo([j]), { seleccionadaId: j.id });
+    expect(html).not.toContain("Confirmar salida");
+  });
+
+  it("dueño/encargado: las acciones del detalle se muestran dentro del detalle de la jornada seleccionada", () => {
+    const j = jornada(1, "cargada");
+    const vistas: string[] = [];
+    const html = vista(listo([j, jornada(2)]), { seleccionadaId: j.id }, {
+      accionesDetalle: (x) => {
+        vistas.push(x.id);
+        return <button type="button">acción de {x.id}</button>;
+      },
+    });
+    expect(vistas).toEqual([j.id]);
+    const detalle = html.slice(html.indexOf('aria-label="Detalle de la jornada"'));
+    expect(detalle).toContain(`acción de ${j.id}`);
   });
 
   it("no hay formularios ni botones de envío", () => {
@@ -196,6 +219,19 @@ describe("JornadasVista para el vendedor/piloto (puedeAdministrar = false)", () 
     expect(html).not.toContain('role="note"');
     // El único botón deshabilitado posible es el filtro «Ver todas las fechas».
     expect(botones(html).filter((b) => b.deshabilitado).map((b) => b.texto)).toEqual(["Ver todas las fechas"]);
+  });
+
+  it("aunque se pasen `accionesDetalle`, el vendedor no recibe ninguna acción de gestión", () => {
+    let llamadas = 0;
+    const html = vista(listo([j]), { seleccionadaId: j.id }, {
+      puedeAdministrar: false,
+      accionesDetalle: () => {
+        llamadas += 1;
+        return <button type="button">Confirmar salida</button>;
+      },
+    });
+    expect(llamadas).toBe(0);
+    expect(html).not.toContain("Confirmar salida");
   });
 
   it("el detalle oculta quién abrió, la operación de apertura y el vendedor asignado", () => {

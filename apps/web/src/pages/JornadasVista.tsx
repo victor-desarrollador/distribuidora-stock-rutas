@@ -7,6 +7,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { EstadoJornada, Jornada } from "../lib/jornadas";
 import {
@@ -18,10 +19,11 @@ import {
 } from "./jornadas_presentacion";
 import type { EstadoPantallaJornadas } from "./jornadas_lectura";
 
-// Vista presentacional de la pantalla de jornadas reales (B-02b.1): SÓLO
-// LECTURA. Sin estado ni efectos: todo llega por props, así se prueba con
-// renderToStaticMarkup. Las operaciones (abrir, cargar, descargar, salir)
-// todavía no existen en esta pantalla: sus botones están deshabilitados.
+// Vista presentacional de la pantalla de jornadas reales (B-02b.1). Sin estado
+// ni efectos: todo llega por props, así se prueba con renderToStaticMarkup.
+// Esta vista no muta nada. Las acciones del detalle (en B-02b.2 / S1, sólo la
+// confirmación de salida) llegan ya armadas por `accionesDetalle` y viven en
+// sus propios módulos; abrir, cargar y descargar siguen sin existir.
 
 const CLASE_ESTADO: Record<EstadoJornada, string> = {
   abierta: "bg-amber-100 text-amber-800",
@@ -44,6 +46,13 @@ export interface JornadasVistaProps {
   onCargarMas: () => void;
   onCargarTodas: () => void;
   onSeleccionar: (id: string | null) => void;
+  // Acciones de gestión del detalle (sólo dueño y encargado; la pantalla
+  // decide si las pasa). Sin ellas, el detalle no ofrece ninguna acción.
+  accionesDetalle?: (jornada: Jornada) => ReactNode;
+  // Anuncios del resultado de una operación (p. ej. la salida confirmada).
+  // Se muestran fuera del listado y del detalle, así sobreviven a la
+  // relectura que pone la lista en «cargando» (corrección S1-C5).
+  avisos?: ReactNode;
 }
 
 function InsigniaEstado({ estado }: { estado: EstadoJornada }) {
@@ -61,11 +70,13 @@ function Detalle({
   nombreCamion,
   puedeAdministrar,
   onCerrar,
+  acciones,
 }: {
   jornada: Jornada;
   nombreCamion: (id: string) => string;
   puedeAdministrar: boolean;
   onCerrar: () => void;
+  acciones?: (jornada: Jornada) => ReactNode;
 }) {
   const campos: Array<[string, string]> = [
     ["Fecha operativa", formatearFechaOperativa(jornada.fecha)],
@@ -115,18 +126,7 @@ function Detalle({
         La carga, las ventas y los retornos de la jornada todavía no se
         muestran en esta pantalla.
       </p>
-      {puedeAdministrar && (
-        <div className="mt-4">
-          <button
-            type="button"
-            disabled
-            title={MENSAJE_NO_DISPONIBLE}
-            className="min-h-12 cursor-not-allowed rounded-lg bg-slate-200 px-5 font-semibold text-slate-500"
-          >
-            Confirmar salida (no disponible todavía)
-          </button>
-        </div>
-      )}
+      {puedeAdministrar && acciones?.(jornada)}
     </section>
   );
 }
@@ -151,6 +151,8 @@ export function JornadasVista({
   onCargarMas,
   onCargarTodas,
   onSeleccionar,
+  accionesDetalle,
+  avisos,
 }: JornadasVistaProps) {
   const { lectura, fecha, seleccionadaId } = estado;
   const seleccionada =
@@ -229,6 +231,8 @@ export function JornadasVista({
           Sólo ves las jornadas que tu usuario puede consultar.
         </p>
       </div>
+
+      {avisos}
 
       {lectura.estado === "cargando" && (
         <p role="status" className="rounded-xl bg-white p-10 text-center text-slate-500">
@@ -388,6 +392,7 @@ export function JornadasVista({
               nombreCamion={nombreCamion}
               puedeAdministrar={puedeAdministrar}
               onCerrar={() => onSeleccionar(null)}
+              acciones={accionesDetalle}
             />
           )}
         </>

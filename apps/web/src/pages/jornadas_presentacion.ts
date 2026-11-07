@@ -12,7 +12,7 @@ export const ETIQUETA_ESTADO_JORNADA: Record<EstadoJornada, string> = {
 };
 
 export const MENSAJE_NO_DISPONIBLE =
-  "Todavía no disponible: abrir, cargar, descargar y confirmar la salida de jornadas se habilitarán en una próxima etapa. Esta pantalla es de sólo lectura.";
+  "Todavía no disponible: abrir, cargar y descargar jornadas se habilitarán en una próxima etapa. Ya se puede confirmar la salida de una jornada cargada desde su detalle.";
 
 /** 'AAAA-MM-DD' → 'DD/MM/AAAA' sin pasar por Date (sin corrimientos de zona). */
 export function formatearFechaOperativa(fecha: string): string {

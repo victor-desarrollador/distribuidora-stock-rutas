@@ -2,19 +2,25 @@ import { useAuth } from "../auth/useAuth";
 import { ROLES_GESTION } from "../auth/roles";
 import { useCatalogoCamiones } from "../hooks/useCatalogoCamiones";
 import { useJornadasLectura } from "../hooks/useJornadasLectura";
+import { useSalidaJornada } from "../hooks/useSalidaJornada";
+import { AvisoSalidaJornada } from "./AvisoSalidaJornada";
+import { JornadaSalidaPanel } from "./JornadaSalidaPanel";
 import { JornadasVista } from "./JornadasVista";
 import { idCorto } from "./jornadas_presentacion";
 
-// Pantalla de jornadas reales (B-02b.1): sólo lectura sobre la capa B-02a.
-// Dueño y encargado leen las jornadas de su empresa; el vendedor/piloto lee
-// sólo la suya (Blueprint §9, ADR-007 §2.8; la RLS decide las filas). Las operaciones mutadoras
-// (abrir, cargar, descargar, confirmar salida) llegan en B-02b.2: hasta
-// entonces sus botones están deshabilitados y no se llama a ninguna RPC.
+// Pantalla de jornadas reales. Lectura (B-02b.1) sobre la capa B-02a: dueño y
+// encargado leen las jornadas de su empresa; el vendedor/piloto lee sólo la
+// suya (Blueprint §9, ADR-007 §2.8; la RLS decide las filas).
+// B-02b.2 / S1: dueño y encargado pueden confirmar la salida de una jornada
+// cargada; la operación vive en hooks/useSalidaJornada.ts y
+// pages/jornadas_salida.ts. Abrir, cargar y descargar siguen sin habilitarse.
 export default function Jornadas() {
   const jornadas = useJornadasLectura();
+  const salida = useSalidaJornada(jornadas.recargar);
   const { catalogo } = useCatalogoCamiones();
   const { usuario } = useAuth();
-  // Sólo presentación: el acceso lo decide ProtectedRoute y las filas, RLS.
+  // Sólo presentación: el acceso lo decide ProtectedRoute; las filas, RLS; y
+  // quién puede confirmar la salida, el servidor.
   const puedeAdministrar =
     usuario !== null && ROLES_GESTION.includes(usuario.rol);
 
@@ -38,6 +44,23 @@ export default function Jornadas() {
       onCargarMas={jornadas.cargarMas}
       onCargarTodas={jornadas.cargarTodas}
       onSeleccionar={jornadas.seleccionar}
+      accionesDetalle={
+        puedeAdministrar
+          ? (jornada) => (
+              <JornadaSalidaPanel
+                jornada={jornada}
+                fase={salida.fase}
+                nombreCamion={nombreCamion(jornada.camionId)}
+                onSolicitar={salida.solicitar}
+                onCancelar={salida.cancelar}
+                onConfirmar={salida.confirmar}
+                onReintentar={salida.reintentar}
+                onVerificar={salida.verificarEstado}
+              />
+            )
+          : undefined
+      }
+      avisos={puedeAdministrar ? <AvisoSalidaJornada fase={salida.fase} /> : undefined}
     />
   );
 }
