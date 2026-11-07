@@ -19,11 +19,12 @@ function jornada(n: number, estado: EstadoJornada = "cargada"): Jornada {
 }
 
 const noop = () => undefined;
-const panel = (j: Jornada, fase: FaseSalida = { fase: "inactiva" }) =>
+const panel = (j: Jornada, fase: FaseSalida = { fase: "inactiva" }, bloqueadaPorOtra?: boolean) =>
   renderToStaticMarkup(
     <JornadaSalidaPanel
       jornada={j}
       fase={fase}
+      bloqueadaPorOtra={bloqueadaPorOtra}
       nombreCamion="Camión Norte · AB123CD"
       onSolicitar={noop}
       onCancelar={noop}
@@ -138,5 +139,18 @@ describe("JornadaSalidaPanel", () => {
     const html = panel(j, { fase: "confirmando", jornadaId: j.id });
     expect(html).not.toContain("<form");
     expect(html).not.toContain('type="submit"');
+  });
+
+  it("S2 M-02: con la jornada retenida por una corrección, «Confirmar salida» deshabilitado con la razón", () => {
+    const html = panel(jornada(1, "cargada"), { fase: "inactiva" }, true);
+    expect(botones(html)).toEqual([{ texto: "Confirmar salida", deshabilitado: true }]);
+    expect(html).toMatch(/aria-describedby="salida-ayuda-[^"]+"/);
+    expect(html).toContain("Hay una corrección de esta jornada en curso o sin resolver");
+  });
+
+  it("S2 M-02: la fase propia (resultado desconocido) se muestra aunque la otra operación figure retenida", () => {
+    const j = jornada(1, "cargada");
+    const html = panel(j, { fase: "desconocido", jornadaId: j.id, mensaje: "x", reintentable: true }, true);
+    expect(botones(html).map((b) => b.texto)).toEqual(["Reintentar confirmación", "Verificar estado"]);
   });
 });

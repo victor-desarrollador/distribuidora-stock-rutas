@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { obtenerPuertoJornadas, type PuertoJornadas } from "../lib/jornadas";
+import type { ArbitroJornadas } from "../pages/jornadas_operacion";
 import {
   SALIDA_INACTIVA,
   crearControladorSalida,
@@ -31,13 +32,21 @@ export function verificarConLectura(
  *
  * `releer` se toma UNA vez, al crear el controlador: debe delegar en algo
  * estable durante la vida del componente. `useJornadasLectura().recargar`
- * cumple: llama siempre al mismo controlador de lectura.
+ * cumple: llama siempre al mismo controlador de lectura. `arbitro` (también
+ * tomado una vez) es el árbitro compartido de la pantalla (S2 M-02).
  */
-export function useSalidaJornada(releer: () => void) {
+export function useSalidaJornada(releer: () => void, arbitro?: ArbitroJornadas) {
   const [fase, setFase] = useState<FaseSalida>(SALIDA_INACTIVA);
   const [controlador] = useState(() => {
     const puerto = obtenerPuertoJornadas();
-    return crearControladorSalida(puerto, verificarConLectura(puerto), releer, setFase);
+    return crearControladorSalida(
+      puerto,
+      verificarConLectura(puerto),
+      releer,
+      setFase,
+      undefined,
+      arbitro
+    );
   });
 
   useEffect(() => {

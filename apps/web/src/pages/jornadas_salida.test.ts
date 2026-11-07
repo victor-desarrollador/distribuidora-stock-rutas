@@ -404,7 +404,8 @@ describe("estabilidad de `releer` (capturado una sola vez por el hook)", () => {
     const hookLectura = sin(fuenteHookLectura);
     expect(hookLectura).toMatch(/const \[controlador\] = useState\(\(\) =>\s*crearControladorJornadas\(/);
     expect(hookLectura).toMatch(/recargar: \(\) => void controlador\.recargar\(\)/);
-    expect(sin(fuentePantalla)).toMatch(/useSalidaJornada\(jornadas\.recargar\)/);
+    // Desde S2 (M-02) también recibe el árbitro compartido de la pantalla.
+    expect(sin(fuentePantalla)).toMatch(/useSalidaJornada\(jornadas\.recargar, arbitro\)/);
     // El hook de salida no guarda claves ni estado fuera del controlador.
     expect(sin(fuenteHook)).toMatch(/const \[controlador\] = useState\(\(\) =>/);
   });

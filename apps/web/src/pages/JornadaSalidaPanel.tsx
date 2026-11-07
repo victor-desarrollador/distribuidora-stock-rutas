@@ -11,6 +11,9 @@ import { ETIQUETA_ESTADO_JORNADA } from "./jornadas_presentacion";
 export interface JornadaSalidaPanelProps {
   jornada: Jornada;
   fase: FaseSalida;
+  // Otra operación (la corrección) retiene esta jornada (S2 M-02). Sólo
+  // presentación: la exclusión efectiva la aplica el motor.
+  bloqueadaPorOtra?: boolean;
   nombreCamion: string;
   onSolicitar: (jornada: Jornada) => void;
   onCancelar: () => void;
@@ -25,6 +28,7 @@ const BOTON =
 export function JornadaSalidaPanel({
   jornada,
   fase,
+  bloqueadaPorOtra = false,
   nombreCamion,
   onSolicitar,
   onCancelar,
@@ -106,6 +110,25 @@ export function JornadaSalidaPanel({
   // Tras un éxito no se ofrece ninguna acción, aunque la jornada local todavía
   // figure `cargada` mientras llega la relectura (evita una segunda intención).
   if (propia?.fase === "exito") return null;
+
+  if (bloqueadaPorOtra) {
+    return (
+      <div className="mt-4 space-y-1">
+        <button
+          type="button"
+          disabled
+          aria-describedby={idAyuda}
+          className={`${BOTON} bg-slate-200 text-slate-500`}
+        >
+          Confirmar salida
+        </button>
+        <p id={idAyuda} className="text-xs text-slate-500">
+          Hay una corrección de esta jornada en curso o sin resolver. Terminala o
+          verificá su estado antes de confirmar la salida.
+        </p>
+      </div>
+    );
+  }
 
   // Otra jornada tiene una confirmación con resultado desconocido: hasta
   // resolverla no se inicia otra (conserva la clave de esa intención).
