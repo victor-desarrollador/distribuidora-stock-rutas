@@ -1,5 +1,5 @@
 ---
-## 07/11/2026 — B-02b.2 / S1: confirmar salida real desde /jornadas (sólo frontend y tests; commit local autorizado; E2E pendiente)
+## 07/11/2026 — B-02b.2 / S1: confirmar salida real desde /jornadas (sólo frontend y tests; commit `0e45c65`; E2E 145/145 PASS)
 
 **Rama:** `feat/b-02b2-s1-confirmar-salida`, desde `a85e49c` (B-02b.1), en la worktree `../distribuidora-b02b2-s1`. B-01 no se modificó. La rama B-02b.1 (`a85e49c`) tampoco cambió. Dentro de esta rama no se modificaron el contrato de B-02a (`lib/jornadas.ts`) ni las guardas de lectura de B-02b.1 (`jornadas_lectura.test.ts`), pero **sí** la pantalla de B-02b.1 (`Jornadas.tsx`, `JornadasVista.tsx`, `jornadas_presentacion.ts`) y su test de presentación (`JornadasVista.test.tsx`), para integrar S1. Plan: `../evidencias-entrega-b/b02b2-preflight/PREFLIGHT_B02B2.md`, slice S1.
 
@@ -42,7 +42,14 @@ Prueba de integración nueva: controlador de salida y controlador de lectura rea
 
 **Verificación (`apps/web`):** `typecheck` rc 0; `lint` rc 0; Vitest **43 archivos / 1487 pruebas** PASS (antes 40 / 1428); `build` rc 0; tipos estrictos de los specs rc 0; `playwright test --list` **145 casos en 22 archivos**; `git diff --check` limpio. **Playwright funcional NO ejecutado:** requiere un laboratorio local con red ligada a loopback y autorización específica.
 
-**Riesgos / pendiente:** (1) E2E real sin correr; (2) security review (RPC, jornadas, idempotencia) y auditoría final independiente sobre el hash de este commit; (3) si se pierde la respuesta y se recarga antes de verificar, la clave se pierde; el riesgo es bajo porque una salida ya registrada se rechaza por estado y no se duplica.
+**E2E funcional (corrida única autorizada, 07/11/2026) sobre `0e45c6514e32ceab05852f9ae0370a8d730a91e7`:** **145/145 PASS**, 0 FAIL, 0 SKIP, 0 flaky (Chromium, 1 worker, 0 retries; exit 0). Los **10 E2E de S1** (`b02b2-jornadas-salida.spec.ts`) pasaron en el primer intento.
+- Laboratorio `b02b2-s1-e2e`: copia descartable del commit exacto; sólo se ajustaron en ella `supabase/config.toml` y `apps/web/playwright.config.ts`. Servicios db, auth, kong y postgrest, en la red `b02b2-s1-e2e-net` (bridge con `host_binding_ipv4=127.0.0.1`, sin IPv6) pasada con `--network-id`. Se aplicaron las 25 migraciones y el seed, sin descargas ni vínculo remoto.
+- Publicación exclusiva en 127.0.0.1: API `61721`, PostgreSQL `61722`, Vite `61773`, verificado tras el start (`ss` y `docker port`) y durante toda la corrida (95 muestras, ninguna fuera de loopback). Vite se lanzó sin la clave E2E, que sólo tuvo el proceso del runner.
+- PostgreSQL (consultas en transacción `READ ONLY` sobre la base del laboratorio, antes de la limpieza): 8 operaciones `salida_jornada`; ninguna jornada con salida duplicada; ninguna clave de idempotencia repetida; ninguna jornada en reparto sin su salida; ninguna salida registrada por un vendedor (actores: 6 dueño, 2 encargado) ni por un actor de otra empresa.
+- Resultados sanitizados con el sanitizador post-L-01 (sin residuos; escaneo por patrón: 0 secretos). Limpieza selectiva completa: stack, red, copia y crudos eliminados; inventarios Docker y puertos idénticos antes y después; los proyectos existentes y el volumen huérfano `supabase_db_b02b1-e2e-0208a359` no se tocaron.
+- Evidencias: `../evidencias-entrega-b/b02b2-s1-e2e/`, `MANIFIESTO.sha256` (30 archivos) `c287e6153d53f696b444d0a92155843b5cd2bc82070ab0c7dd6884e1d23a4ff8`; reporte de Playwright `reportes/corrida-01-playwright/SHA256SUMS` `d95322d83b5777a7e743f878ff7a8382e9720a7002055e2d49f72702780c048a`.
+
+**Riesgos / pendiente:** (1) E2E ejecutado sobre `0e45c65` (este registro documental no cambia código ni tests); (2) security review (RPC, jornadas, idempotencia) y auditoría final independiente sobre un hash concreto: **ambas siguen pendientes**; (3) si se pierde la respuesta y se recarga antes de verificar, la clave se pierde; el riesgo es bajo porque una salida ya registrada se rechaza por estado y no se duplica.
 ---
 ## 07/11/2026 — B-02b.1: M-01, negativo pgTAP «authenticated sin perfil» (commit `23b50ef`; pgTAP PASS)
 
