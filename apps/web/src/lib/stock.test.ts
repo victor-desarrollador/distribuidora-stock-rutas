@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   MENSAJE_ERROR_GENERICO,
+  MAX_INTENTOS,
+  MENSAJE_CONCURRENCIA_AGOTADA,
   MENSAJE_ERROR_LECTURA,
   MENSAJE_RESULTADO_DESCONOCIDO,
   MENSAJE_SIN_UBICACIONES,
   armarDatosStock,
+  clasificarErrorStock,
   crearPuertoStock,
   mensajeErrorStock,
 } from "./stock";
@@ -28,7 +31,6 @@ const productos = [
   { id: P1, codigo: null, nombre: "Yogur", forma_venta: "unidad", stock_minimo: 10, activo: true },
   { id: P2, codigo: "F-1", nombre: "Jamón", forma_venta: "peso", stock_minimo: 2500, activo: true },
 ];
-const camiones = [{ id: CAMION, patente: "AB123CD", nombre: "Camión 1" }];
 const saldos = [
   { ubicacion_id: DEP, producto_id: P1, cantidad: 40 },
   { ubicacion_id: DEP, producto_id: P2, cantidad: 12500 },
@@ -39,6 +41,8 @@ type Respuesta = { data: unknown; error: unknown };
 function clienteFalso(opciones: {
   tablas?: Record<string, Respuesta>;
   rpc?: Respuesta | (() => never);
+  // Respuestas sucesivas de la RPC (la última se repite). "lanzar" simula una excepción de red.
+  secuencia?: (Respuesta | "lanzar")[];
 }) {
   const consultas: { tabla: string; columnas: string }[] = [];
   const rpcs: { nombre: string; argumentos: Record<string, unknown> }[] = [];
@@ -54,6 +58,11 @@ function clienteFalso(opciones: {
     },
     rpc(nombre: string, argumentos: Record<string, unknown>) {
       rpcs.push({ nombre, argumentos });
+      if (opciones.secuencia) {
+        const x = opciones.secuencia[Math.min(rpcs.length - 1, opciones.secuencia.length - 1)];
+        if (x === "lanzar") throw new Error("fallo de red");
+        return Promise.resolve(x);
+      }
       const r = opciones.rpc;
       return typeof r === "function" ? r() : Promise.resolve(r ?? { data: OP, error: null });
     },
@@ -64,7 +73,6 @@ function clienteFalso(opciones: {
 const tablasOk = {
   ubicaciones: { data: ubicaciones, error: null },
   productos: { data: productos, error: null },
-  camiones: { data: camiones, error: null },
   stock_actual: { data: saldos, error: null },
 };
 
@@ -80,7 +88,7 @@ describe("consulta de stock", () => {
     expect(r.datos.saldos).toHaveLength(2);
     expect(r.datos.productos[1].formaVenta).toBe("peso");
     expect(consultas.map((c) => c.tabla).sort()).toEqual(
-      ["camiones", "productos", "stock_actual", "ubicaciones"]
+      ["productos", "stock_actual", "ubicaciones"]
     );
   });
 
@@ -104,7 +112,7 @@ describe("consulta de stock", () => {
 });
 
 describe("armarDatosStock", () => {
-  const base = { ubicaciones, productos, camiones, saldos };
+  const base = { ubicaciones, productos, saldos };
 
   it("rechaza una fila inválida (cantidad fraccionaria, forma de venta desconocida)", () => {
     expect(armarDatosStock({ ...base, saldos: [{ ubicacion_id: DEP, producto_id: P1, cantidad: 1.5 }] }).ok).toBe(false);
@@ -207,7 +215,7 @@ describe("operaciones por RPC", () => {
     expect(mensajeErrorStock(red)).toBe(MENSAJE_RESULTADO_DESCONOCIDO);
     const { puerto } = clienteFalso({ rpc: { data: null, error: red } });
     const r = await puerto.ejecutar({ tipo: "ingreso", productoId: P1, cantidad: 1, motivo: null }, "k");
-    expect(r).toEqual({ ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO });
+    expect(r).toEqual({ ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO, incierto: true });
     // Con código de PostgREST (error del servidor) sigue siendo genérico.
     expect(mensajeErrorStock({ message: "boom", code: "PT500" })).toBe(MENSAJE_ERROR_GENERICO);
   });
@@ -218,7 +226,149 @@ describe("operaciones por RPC", () => {
     };
     const a = await clienteFalso({ rpc: lanzar }).puerto.ejecutar({ tipo: "ingreso", productoId: P1, cantidad: 1, motivo: null }, "k");
     const b = await clienteFalso({ rpc: { data: null, error: null } }).puerto.ejecutar({ tipo: "ingreso", productoId: P1, cantidad: 1, motivo: null }, "k");
-    expect(a).toEqual({ ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO });
-    expect(b).toEqual({ ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO });
+    expect(a).toEqual({ ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO, incierto: true });
+    expect(b).toEqual({ ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO, incierto: true });
+  });
+});
+
+
+const INGRESO = { tipo: "ingreso", productoId: P1, cantidad: 4, motivo: null } as const;
+const deadlock = { message: "deadlock detected", code: "40P01", details: "", hint: "" };
+const serializacion = { message: "could not serialize access", code: "40001", details: "", hint: "" };
+const OK: Respuesta = { data: OP, error: null };
+const falla = (error: unknown): Respuesta => ({ data: null, error });
+
+describe("clasificación de errores (P13-stock)", () => {
+  it.each([
+    [{ code: "40001", message: "x" }, "concurrencia"],
+    [{ code: "40P01", message: "x" }, "concurrencia"],
+    [{ code: "", message: "TypeError: Failed to fetch" }, "desconocido"],
+    [{ message: "sin código" }, "desconocido"],
+    [null, "otro"],
+    [{ code: "PT409", message: "stock_insuficiente" }, "negocio"],
+    [{ code: "PT400", message: "otro_texto" }, "negocio"],
+    [{ code: "PT500", message: "stock_error_interno" }, "negocio"],
+    [{ code: "PT403", message: "stock_no_autorizado" }, "sin_permiso"],
+    [{ code: "42501", message: "permission denied" }, "sin_permiso"],
+    // 55P03 y 57014 NO se reintentan solos: la ADR los admite sólo bajo condiciones que no se cumplen.
+    [{ code: "55P03", message: "lock not available" }, "otro"],
+    [{ code: "57014", message: "canceling statement" }, "otro"],
+    [{ code: "23505", message: "duplicate key" }, "otro"],
+    [{ code: "PGRST301", message: "JWT expired" }, "otro"],
+  ])("%j → %s", (error, clase) => {
+    expect(clasificarErrorStock(error)).toBe(clase);
+  });
+
+  it("un código stock_* gana sobre un código reintentable aparente", () => {
+    expect(clasificarErrorStock({ code: "40001", message: "stock_insuficiente" })).toBe("negocio");
+  });
+});
+
+describe("reintentos (P13-stock: máximo 3, misma clave y mismo payload)", () => {
+  it("el máximo es 3 intentos", () => {
+    expect(MAX_INTENTOS).toBe(3);
+  });
+
+  it.each([
+    ["40001", serializacion],
+    ["40P01", deadlock],
+  ])("%s: reintenta y tiene éxito en el 2.º intento con la misma clave y payload", async (_c, error) => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: [falla(error), OK] });
+    const r = await puerto.ejecutar(INGRESO, "clave-fija");
+    expect(r).toEqual({ ok: true, datos: OP });
+    expect(rpcs).toHaveLength(2);
+    expect(rpcs[1]).toEqual(rpcs[0]);
+    expect(rpcs[0].argumentos.p_idempotency_key).toBe("clave-fija");
+  });
+
+  it("éxito en el 3.er intento (límite)", async () => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: [falla(deadlock), falla(serializacion), OK] });
+    expect(await puerto.ejecutar(INGRESO, "k")).toEqual({ ok: true, datos: OP });
+    expect(rpcs).toHaveLength(3);
+    expect(new Set(rpcs.map((x) => JSON.stringify(x))).size).toBe(1);
+  });
+
+  it("agotados los 3 intentos ante 40P01: se detiene, mensaje claro y sin incierto", async () => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: [falla(deadlock)] });
+    const r = await puerto.ejecutar(INGRESO, "k");
+    expect(rpcs).toHaveLength(3);
+    expect(r).toEqual({ ok: false, error: MENSAJE_CONCURRENCIA_AGOTADA });
+  });
+
+  it("agotados los 3 intentos por fallo de red: resultado incierto", async () => {
+    const red = { message: "TypeError: Failed to fetch", code: "" };
+    const { puerto, rpcs } = clienteFalso({ secuencia: [falla(red)] });
+    const r = await puerto.ejecutar(INGRESO, "k");
+    expect(rpcs).toHaveLength(3);
+    expect(r).toEqual({ ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO, incierto: true });
+  });
+
+  it("una excepción lanzada también se reintenta y agota en 3", async () => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: ["lanzar"] });
+    const r = await puerto.ejecutar(INGRESO, "k");
+    expect(rpcs).toHaveLength(3);
+    expect(r).toMatchObject({ ok: false, incierto: true });
+  });
+
+  it("red y luego éxito: un solo efecto lógico (misma clave en ambos intentos)", async () => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: ["lanzar", OK] });
+    expect(await puerto.ejecutar(INGRESO, "k9")).toEqual({ ok: true, datos: OP });
+    expect(rpcs.map((x) => x.argumentos.p_idempotency_key)).toEqual(["k9", "k9"]);
+  });
+
+  it.each([
+    ["stock_insuficiente", "PT409"],
+    ["stock_conflicto_idempotencia", "PT409"],
+    ["stock_no_autorizado", "PT403"],
+    ["stock_error_interno", "PT500"],
+    ["stock_cantidad_invalida", "PT400"],
+  ])("%s (%s) nunca se reintenta", async (message, code) => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: [falla({ message, code })] });
+    const r = await puerto.ejecutar(INGRESO, "k");
+    expect(rpcs).toHaveLength(1);
+    expect(r.ok).toBe(false);
+    expect(r).not.toHaveProperty("incierto");
+  });
+
+  it.each(["55P03", "57014", "23505", "PGRST301", "42501"])("%s no se reintenta automáticamente", async (code) => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: [falla({ message: "x", code })] });
+    await puerto.ejecutar(INGRESO, "k");
+    expect(rpcs).toHaveLength(1);
+  });
+
+  it("un error de negocio después de un reintento corta el bucle", async () => {
+    const { puerto, rpcs } = clienteFalso({
+      secuencia: [falla(deadlock), falla({ message: "stock_insuficiente", code: "PT409" })],
+    });
+    const r = await puerto.ejecutar(
+      { tipo: "cuarentena", productoId: P1, origenId: DEP, cantidad: 9, motivo: "m" },
+      "k"
+    );
+    expect(rpcs).toHaveLength(2);
+    expect(r).toEqual({ ok: false, error: "No hay stock suficiente en el depósito." });
+  });
+
+  it("aplica a las tres RPC", async () => {
+    for (const intento of [
+      INGRESO,
+      { tipo: "cuarentena", productoId: P1, origenId: DEP, cantidad: 1, motivo: "m" },
+      { tipo: "merma", productoId: P1, origenId: DEP, cantidad: 1, motivoCodigo: "vencido", motivo: null },
+    ] as const) {
+      const { puerto, rpcs } = clienteFalso({ secuencia: [falla(serializacion), OK] });
+      expect((await puerto.ejecutar(intento, "k")).ok).toBe(true);
+      expect(rpcs).toHaveLength(2);
+    }
+  });
+
+  it("éxito sin id devuelto: incierto, sin bucle", async () => {
+    const { puerto, rpcs } = clienteFalso({ secuencia: [{ data: null, error: null }] });
+    const r = await puerto.ejecutar(INGRESO, "k");
+    expect(rpcs).toHaveLength(1);
+    expect(r).toMatchObject({ ok: false, incierto: true });
+  });
+
+  it("el mensaje de resultado desconocido no promete idempotencia después de recargar", () => {
+    expect(MENSAJE_RESULTADO_DESCONOCIDO).toContain("sin recargar");
+    expect(MENSAJE_RESULTADO_DESCONOCIDO).toContain("revisá el stock");
   });
 });

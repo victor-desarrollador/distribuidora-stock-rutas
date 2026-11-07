@@ -1,7 +1,7 @@
 // Stock real en Supabase (B-01): consulta del saldo y operaciones de stock de
 // la Etapa 2 (Blueprint §7.2, §7.4, §7.7; ADR-001 §18.3).
 //
-// Lectura: SELECT con RLS sobre `ubicaciones`, `productos`, `camiones` y la
+// Lectura: SELECT con RLS sobre `ubicaciones`, `productos` y la
 // vista `stock_actual` (security_invoker: sólo dueño y encargado de la empresa
 // obtienen filas). El saldo es la suma de `movimientos_stock`; nunca se edita.
 //
@@ -43,12 +43,6 @@ export interface ProductoStock {
   activo: boolean;
 }
 
-export interface CamionStock {
-  id: string;
-  patente: string;
-  nombre: string;
-}
-
 export interface SaldoStock {
   ubicacionId: string;
   productoId: string;
@@ -61,7 +55,6 @@ export interface DatosStock {
   cuarentenaId: string;
   ubicaciones: UbicacionStock[];
   productos: ProductoStock[];
-  camiones: CamionStock[];
   saldos: SaldoStock[];
 }
 
@@ -100,9 +93,11 @@ export type IntentoStock =
       motivo: string | null;
     };
 
+// `incierto`: el servidor pudo haber registrado la operación aunque no se
+// recibió la respuesta (red, timeout). Se reintenta con la misma clave.
 export type ResultadoStock<T> =
   | { ok: true; datos: T }
-  | { ok: false; error: string };
+  | { ok: false; error: string; incierto?: true };
 
 export interface PuertoStock {
   leer(): Promise<ResultadoStock<DatosStock>>;
@@ -120,11 +115,18 @@ export const MENSAJE_ERROR_LECTURA =
 export const MENSAJE_ERROR_GENERICO =
   "No se pudo registrar la operación. Intentá de nuevo.";
 // Fallo de red o respuesta inesperada: el resultado es desconocido. Reintentar
-// con los mismos datos reutiliza la misma clave y no duplica (P12).
+// con los mismos datos reutiliza la misma clave y no duplica (P12) SÓLO mientras
+// no se recargue ni se cierre la página: la clave vive en memoria. Después de
+// recargar hay que revisar el stock antes de volver a cargar la operación.
 export const MENSAJE_RESULTADO_DESCONOCIDO =
-  "No se pudo confirmar la operación. Revisá el stock o reintentá con los mismos datos: no se registra dos veces.";
+  "No se pudo confirmar la operación: puede haberse registrado. Reintentá con los mismos datos sin recargar la página (no se registra dos veces). Si ya recargaste, revisá el stock antes de volver a cargarla.";
 export const MENSAJE_SIN_UBICACIONES =
   "La empresa no tiene configurados el depósito y la cuarentena.";
+
+// P13-stock: agotados los intentos ante 40001/40P01. PostgreSQL revierte toda
+// la transacción en esos casos: no quedó ningún efecto.
+export const MENSAJE_CONCURRENCIA_AGOTADA =
+  "El sistema estaba ocupado y la operación no se registró después de varios intentos. Esperá un momento y reintentá.";
 
 const MENSAJE_SIN_PERMISO =
   "No tenés permiso para registrar movimientos de stock.";
@@ -149,6 +151,56 @@ const MENSAJES_ERROR: Record<string, string> = {
   stock_error_interno: MENSAJE_ERROR_GENERICO,
 };
 
+// Máximo de intentos de una operación (ADR-001 §18.3, P13-stock: «máximo 3»).
+// Se toma como 3 intentos en total (1 inicial + 2 reintentos): cumple la regla
+// con cualquiera de sus dos lecturas. La ADR no define espera entre intentos y
+// no se agrega una.
+export const MAX_INTENTOS = 3;
+
+export type ClaseErrorStock =
+  // 40001 / 40P01: PostgreSQL revirtió la transacción; sin efectos. Reintentable.
+  | "concurrencia"
+  // Sin respuesta del servidor (red, timeout, respuesta que no es de PostgREST):
+  // resultado desconocido. Reintentable con la misma clave y el mismo payload.
+  | "desconocido"
+  // PTxyz / códigos `stock_*`: error de negocio. Nunca se reintenta.
+  | "negocio"
+  | "sin_permiso"
+  // Todo lo demás, incluidos 55P03 y 57014: la ADR sólo los admite bajo
+  // condiciones que este contrato no cumple (ver abajo). No se reintentan solos.
+  | "otro";
+
+/**
+ * Clasifica un error de supabase-js según P13-stock.
+ *  - `40001`, `40P01`: reintentables.
+ *  - sin `code` (supabase-js devuelve `code` vacío ante un fallo de red): conexión
+ *    perdida o timeout con resultado desconocido, reintentable.
+ *  - `55P03`: sólo «si proviene de la política explícita de locks». Las RPC de
+ *    stock usan `pg_advisory_xact_lock` sin `lock_timeout`/`NOWAIT`: no hay tal
+ *    política, así que no se reintenta.
+ *  - `57014`: sólo «si es un timeout o cancelación recuperable». El cliente no
+ *    puede distinguirlo con el contrato vigente: no se reintenta.
+ *  - `PTxyz` y los códigos `stock_*`: nunca.
+ */
+export function clasificarErrorStock(error: unknown): ClaseErrorStock {
+  if (error === null || typeof error !== "object") return "otro";
+  const { code, message } = error as { code?: unknown; message?: unknown };
+
+  if (typeof message === "string" && Object.hasOwn(MENSAJES_ERROR, message)) {
+    return message === "stock_no_autorizado" || message === "stock_no_autenticado"
+      ? "sin_permiso"
+      : "negocio";
+  }
+  if (typeof code === "string" && /^PT\d{3}$/.test(code)) return "negocio";
+  if (code === "42501") return "sin_permiso";
+  if (code === "40001" || code === "40P01") return "concurrencia";
+  if (code === "" || code === undefined || code === null) return "desconocido";
+  return "otro";
+}
+
+export const esReintentable = (clase: ClaseErrorStock): boolean =>
+  clase === "concurrencia" || clase === "desconocido";
+
 /**
  * Traduce un error de Supabase a un mensaje seguro. Sólo se usa el `message`
  * cuando es un código conocido; cualquier otra cosa se reemplaza por un
@@ -156,22 +208,22 @@ const MENSAJES_ERROR: Record<string, string> = {
  */
 export function mensajeErrorStock(error: unknown): string {
   if (error !== null && typeof error === "object") {
-    const { code, message } = error as { code?: unknown; message?: unknown };
-
+    const { message } = error as { message?: unknown };
     if (typeof message === "string" && Object.hasOwn(MENSAJES_ERROR, message)) {
       return MENSAJES_ERROR[message];
     }
-
-    // Sin permiso de ejecución (p. ej. sin sesión: rol anon).
-    if (code === "42501") return MENSAJE_SIN_PERMISO;
-
-    // Sin código: el servidor no llegó a responder (supabase-js devuelve un
-    // error con `code` vacío ante un fallo de red) o respondió algo que no es
-    // de PostgREST. La operación pudo haberse registrado: resultado desconocido.
-    if (code === "" || code === undefined) return MENSAJE_RESULTADO_DESCONOCIDO;
   }
 
-  return MENSAJE_ERROR_GENERICO;
+  switch (clasificarErrorStock(error)) {
+    case "sin_permiso":
+      return MENSAJE_SIN_PERMISO;
+    case "concurrencia":
+      return MENSAJE_CONCURRENCIA_AGOTADA;
+    case "desconocido":
+      return MENSAJE_RESULTADO_DESCONOCIDO;
+    default:
+      return MENSAJE_ERROR_GENERICO;
+  }
 }
 
 function textoNoVacio(valor: unknown): valor is string {
@@ -225,21 +277,6 @@ export function filaAProductoStock(fila: unknown): ProductoStock | null {
   };
 }
 
-export function filaACamion(fila: unknown): CamionStock | null {
-  if (fila === null || typeof fila !== "object") return null;
-  const f = fila as Record<string, unknown>;
-
-  if (
-    !textoNoVacio(f.id) ||
-    !textoNoVacio(f.patente) ||
-    !textoNoVacio(f.nombre)
-  ) {
-    return null;
-  }
-
-  return { id: f.id, patente: f.patente, nombre: f.nombre };
-}
-
 export function filaASaldo(fila: unknown): SaldoStock | null {
   if (fila === null || typeof fila !== "object") return null;
   const f = fila as Record<string, unknown>;
@@ -281,15 +318,13 @@ function convertirTodas<T>(
 export function armarDatosStock(entrada: {
   ubicaciones: unknown;
   productos: unknown;
-  camiones: unknown;
   saldos: unknown;
 }): ResultadoStock<DatosStock> {
   const ubicaciones = convertirTodas(entrada.ubicaciones, filaAUbicacion);
   const productos = convertirTodas(entrada.productos, filaAProductoStock);
-  const camiones = convertirTodas(entrada.camiones, filaACamion);
   const saldos = convertirTodas(entrada.saldos, filaASaldo);
 
-  if (!ubicaciones || !productos || !camiones || !saldos) {
+  if (!ubicaciones || !productos || !saldos) {
     return { ok: false, error: MENSAJE_ERROR_LECTURA };
   }
 
@@ -316,7 +351,6 @@ export function armarDatosStock(entrada: {
       cuarentenaId: cuarentenas[0].id,
       ubicaciones,
       productos,
-      camiones,
       saldos,
     },
   };
@@ -326,25 +360,23 @@ export function crearPuertoStock(cliente: SupabaseClient): PuertoStock {
   return {
     async leer() {
       try {
-        const [u, p, c, s] = await Promise.all([
+        const [u, p, s] = await Promise.all([
           cliente.from("ubicaciones").select("id, tipo, camion_id"),
           cliente
             .from("productos")
             .select("id, codigo, nombre, forma_venta, stock_minimo, activo"),
-          cliente.from("camiones").select("id, patente, nombre"),
           cliente
             .from("stock_actual")
             .select("ubicacion_id, producto_id, cantidad"),
         ]);
 
-        if (u.error || p.error || c.error || s.error) {
+        if (u.error || p.error || s.error) {
           return { ok: false, error: MENSAJE_ERROR_LECTURA };
         }
 
         return armarDatosStock({
           ubicaciones: u.data,
           productos: p.data,
-          camiones: c.data,
           saldos: s.data,
         });
       } catch {
@@ -353,40 +385,60 @@ export function crearPuertoStock(cliente: SupabaseClient): PuertoStock {
     },
 
     async ejecutar(intento, claveIdempotencia) {
-      try {
-        const { data, error } =
-          intento.tipo === "ingreso"
-            ? await cliente.rpc("registrar_ingreso", {
+      // Una sola clave y un solo payload para todos los intentos (P12/P13).
+      const llamar = () =>
+        intento.tipo === "ingreso"
+          ? cliente.rpc("registrar_ingreso", {
+              p_idempotency_key: claveIdempotencia,
+              p_producto_id: intento.productoId,
+              p_cantidad: intento.cantidad,
+              p_motivo: intento.motivo,
+            })
+          : intento.tipo === "cuarentena"
+            ? cliente.rpc("mover_a_cuarentena", {
                 p_idempotency_key: claveIdempotencia,
                 p_producto_id: intento.productoId,
+                p_ubicacion_origen_id: intento.origenId,
                 p_cantidad: intento.cantidad,
                 p_motivo: intento.motivo,
               })
-            : intento.tipo === "cuarentena"
-              ? await cliente.rpc("mover_a_cuarentena", {
-                  p_idempotency_key: claveIdempotencia,
-                  p_producto_id: intento.productoId,
-                  p_ubicacion_origen_id: intento.origenId,
-                  p_cantidad: intento.cantidad,
-                  p_motivo: intento.motivo,
-                })
-              : await cliente.rpc("registrar_merma", {
-                  p_idempotency_key: claveIdempotencia,
-                  p_producto_id: intento.productoId,
-                  p_ubicacion_origen_id: intento.origenId,
-                  p_cantidad: intento.cantidad,
-                  p_motivo_codigo: intento.motivoCodigo,
-                  p_motivo: intento.motivo,
-                });
+            : cliente.rpc("registrar_merma", {
+                p_idempotency_key: claveIdempotencia,
+                p_producto_id: intento.productoId,
+                p_ubicacion_origen_id: intento.origenId,
+                p_cantidad: intento.cantidad,
+                p_motivo_codigo: intento.motivoCodigo,
+                p_motivo: intento.motivo,
+              });
 
-        if (error) return { ok: false, error: mensajeErrorStock(error) };
-        if (!textoNoVacio(data)) {
-          return { ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO };
+      let ultimoError: unknown = null;
+
+      for (let n = 1; n <= MAX_INTENTOS; n++) {
+        let respuesta: { data: unknown; error: unknown };
+        try {
+          respuesta = await llamar();
+        } catch (e) {
+          // Excepción de red: se trata como error sin código.
+          respuesta = { data: null, error: { message: String(e), code: "" } };
         }
-        return { ok: true, datos: data };
-      } catch {
-        return { ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO };
+
+        if (!respuesta.error) {
+          if (!textoNoVacio(respuesta.data)) {
+            return { ok: false, error: MENSAJE_RESULTADO_DESCONOCIDO, incierto: true };
+          }
+          return { ok: true, datos: respuesta.data };
+        }
+
+        ultimoError = respuesta.error;
+        if (!esReintentable(clasificarErrorStock(ultimoError))) break;
       }
+
+      const clase = clasificarErrorStock(ultimoError);
+      return {
+        ok: false,
+        error: mensajeErrorStock(ultimoError),
+        ...(clase === "desconocido" ? { incierto: true as const } : {}),
+      };
     },
   };
 }

@@ -16,7 +16,6 @@ const datos: DatosStock = {
     { id: "pu", codigo: null, nombre: "Yogur", formaVenta: "unidad", stockMinimo: 10, activo: true },
     { id: "pp", codigo: null, nombre: "Jamón", formaVenta: "peso", stockMinimo: 2500, activo: true },
   ],
-  camiones: [],
   saldos: [
     { ubicacionId: "dep", productoId: "pu", cantidad: 40 },
     { ubicacionId: "dep", productoId: "pp", cantidad: 12500 },

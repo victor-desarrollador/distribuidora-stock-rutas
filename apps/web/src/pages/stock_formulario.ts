@@ -10,7 +10,7 @@
 //     de la lista de §7.7 y texto obligatorio sólo con «otro»;
 //   - cuarentena y merma sólo desde el depósito (D3/D4): el origen no se elige.
 
-import { gramos_a_kg, kg_a_gramos } from "../domain/peso";
+import { kg_a_gramos } from "../domain/peso";
 import {
   CANTIDAD_MAXIMA,
   MOTIVOS_MERMA,
@@ -227,26 +227,34 @@ export function generarClaveNavegador(): string | null {
 
 /**
  * Presenta una cantidad en unidad mínima: unidades («12 un.») o kg con 3
- * decimales fijos («1,250 kg»). Un negativo (no debería existir) se muestra
- * con signo, sin corregirlo.
+ * decimales fijos («1,250 kg»). Trabaja sobre el entero exacto (BigInt): nunca
+ * pasa por `Number`, así un total mayor que Number.MAX_SAFE_INTEGER no pierde
+ * precisión. Una cantidad no entera lanza (falla cerrado). Un negativo (no
+ * debería existir) se muestra con signo, sin corregirlo.
  */
 export function formatearCantidad(
-  cantidad: number,
+  cantidad: number | bigint,
   formaVenta: FormaVentaStock
 ): string {
-  const signo = cantidad < 0 ? "-" : "";
-  const absoluto = Math.abs(cantidad);
-  return formaVenta === "peso"
-    ? `${signo}${gramos_a_kg(absoluto)} kg`
-    : `${signo}${absoluto} un.`;
+  const valor = BigInt(cantidad);
+  const signo = valor < 0n ? "-" : "";
+  const absoluto = valor < 0n ? -valor : valor;
+
+  if (formaVenta === "peso") {
+    const digitos = absoluto.toString().padStart(4, "0");
+    return `${signo}${digitos.slice(0, -3)},${digitos.slice(-3)} kg`;
+  }
+  return `${signo}${absoluto} un.`;
 }
 
+// Los saldos individuales son enteros seguros (filaASaldo); sus sumas se hacen
+// en BigInt porque pueden superar Number.MAX_SAFE_INTEGER.
 export interface FilaStock {
   producto: ProductoStock;
-  deposito: number;
-  cuarentena: number;
-  camiones: number;
-  total: number;
+  deposito: bigint;
+  cuarentena: bigint;
+  camiones: bigint;
+  total: bigint;
 }
 
 /**
@@ -258,7 +266,7 @@ export function armarFilasStock(datos: DatosStock): FilaStock[] {
   const filas = new Map<string, FilaStock>(
     datos.productos.map((p) => [
       p.id,
-      { producto: p, deposito: 0, cuarentena: 0, camiones: 0, total: 0 },
+      { producto: p, deposito: 0n, cuarentena: 0n, camiones: 0n, total: 0n },
     ])
   );
 
@@ -266,10 +274,11 @@ export function armarFilasStock(datos: DatosStock): FilaStock[] {
     const fila = filas.get(saldo.productoId);
     const tipo = tipoPorUbicacion.get(saldo.ubicacionId);
     if (!fila || !tipo) continue;
-    if (tipo === "deposito") fila.deposito += saldo.cantidad;
-    else if (tipo === "cuarentena") fila.cuarentena += saldo.cantidad;
-    else fila.camiones += saldo.cantidad;
-    fila.total += saldo.cantidad;
+    const cantidad = BigInt(saldo.cantidad);
+    if (tipo === "deposito") fila.deposito += cantidad;
+    else if (tipo === "cuarentena") fila.cuarentena += cantidad;
+    else fila.camiones += cantidad;
+    fila.total += cantidad;
   }
 
   return [...filas.values()]
@@ -277,18 +286,18 @@ export function armarFilasStock(datos: DatosStock): FilaStock[] {
     .filter(
       (f) =>
         f.producto.activo ||
-        f.deposito !== 0 ||
-        f.cuarentena !== 0 ||
-        f.camiones !== 0
+        f.deposito !== 0n ||
+        f.cuarentena !== 0n ||
+        f.camiones !== 0n
     )
     .sort((a, b) => a.producto.nombre.localeCompare(b.producto.nombre, "es-AR"));
 }
 
-/** Saldo en depósito de un producto (para mostrar lo disponible). */
-export function saldoDeposito(datos: DatosStock, productoId: string): number {
+/** Saldo en depósito de un producto (exacto, en BigInt). */
+export function saldoDeposito(datos: DatosStock, productoId: string): bigint {
   return datos.saldos
     .filter((s) => s.productoId === productoId && s.ubicacionId === datos.depositoId)
-    .reduce((suma, s) => suma + s.cantidad, 0);
+    .reduce((suma, s) => suma + BigInt(s.cantidad), 0n);
 }
 
 export function textoUnidadEntrada(formaVenta: FormaVentaStock): string {

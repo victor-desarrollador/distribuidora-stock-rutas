@@ -30,7 +30,6 @@ const datos: DatosStock = {
     { id: "pi", codigo: null, nombre: "Antiguo", formaVenta: "unidad", stockMinimo: 0, activo: false },
     { id: "pj", codigo: null, nombre: "Baja con stock", formaVenta: "unidad", stockMinimo: 0, activo: false },
   ],
-  camiones: [{ id: "c1", patente: "AB123CD", nombre: "C1" }],
   saldos: [
     { ubicacionId: "dep", productoId: "pu", cantidad: 40 },
     { ubicacionId: "cua", productoId: "pu", cantidad: 2 },
@@ -118,6 +117,61 @@ describe("validarFormularioStock", () => {
       ok: true,
       intento: { tipo: "merma", productoId: "pp", origenId: "dep", cantidad: 500, motivoCodigo: "vencido", motivo: null },
     });
+  });
+});
+
+describe("sumas exactas (bigint) y presentación sin pérdida de precisión", () => {
+  const SEGURO = Number.MAX_SAFE_INTEGER; // 9007199254740991
+  const datosGrandes: DatosStock = {
+    ...datos,
+    ubicaciones: [
+      ...datos.ubicaciones,
+      { id: "cam2", tipo: "camion", camionId: "c2" },
+    ],
+    saldos: [
+      { ubicacionId: "dep", productoId: "pp", cantidad: SEGURO },
+      { ubicacionId: "cua", productoId: "pp", cantidad: SEGURO },
+      { ubicacionId: "cam", productoId: "pp", cantidad: SEGURO },
+      { ubicacionId: "cam2", productoId: "pp", cantidad: 1 },
+    ],
+  };
+
+  it("la suma de saldos individualmente seguros que supera MAX_SAFE_INTEGER es exacta", () => {
+    const fila = armarFilasStock(datosGrandes).find((f) => f.producto.id === "pp")!;
+    expect(fila.deposito).toBe(9007199254740991n);
+    expect(fila.camiones).toBe(9007199254740992n); // en Number sería inexacto (o igual a la siguiente)
+    expect(fila.total).toBe(3n * 9007199254740991n + 1n);
+    expect(typeof fila.total).toBe("bigint");
+  });
+
+  it("el total se presenta exacto, sin pasar por Number", () => {
+    const fila = armarFilasStock(datosGrandes).find((f) => f.producto.id === "pp")!;
+    // 27021597764222974 g = 27021597764222,974 kg
+    expect(formatearCantidad(fila.total, "peso")).toBe("27021597764222,974 kg");
+    expect(formatearCantidad(fila.total, "unidad")).toBe("27021597764222974 un.");
+    // Number lo habría redondeado: 27021597764222974 no es representable.
+    expect(String(Number(fila.total))).not.toBe("27021597764222974");
+  });
+
+  it("saldoDeposito suma en BigInt", () => {
+    const d: DatosStock = {
+      ...datos,
+      saldos: [
+        { ubicacionId: "dep", productoId: "pu", cantidad: SEGURO },
+        { ubicacionId: "dep", productoId: "pu", cantidad: SEGURO },
+      ],
+    };
+    expect(saldoDeposito(d, "pu")).toBe(2n * 9007199254740991n);
+  });
+
+  it("falla cerrado ante una cantidad no entera (no redondea)", () => {
+    expect(() => formatearCantidad(1.5, "unidad")).toThrow();
+    expect(() => formatearCantidad(Number.NaN, "peso")).toThrow();
+  });
+
+  it("acepta bigint y number con el mismo resultado en el rango seguro", () => {
+    expect(formatearCantidad(1250n, "peso")).toBe(formatearCantidad(1250, "peso"));
+    expect(formatearCantidad(-1250n, "peso")).toBe("-1,250 kg");
   });
 });
 
@@ -220,8 +274,8 @@ describe("presentación", () => {
     const filas = armarFilasStock(datos);
     expect(filas.map((f) => f.producto.id)).toEqual(["pj", "pp", "pu"]);
     const yogur = filas.find((f) => f.producto.id === "pu")!;
-    expect(yogur).toMatchObject({ deposito: 40, cuarentena: 2, camiones: 8, total: 50 });
-    expect(saldoDeposito(datos, "pp")).toBe(12500);
-    expect(saldoDeposito(datos, "pi")).toBe(0);
+    expect(yogur).toMatchObject({ deposito: 40n, cuarentena: 2n, camiones: 8n, total: 50n });
+    expect(saldoDeposito(datos, "pp")).toBe(12500n);
+    expect(saldoDeposito(datos, "pi")).toBe(0n);
   });
 });

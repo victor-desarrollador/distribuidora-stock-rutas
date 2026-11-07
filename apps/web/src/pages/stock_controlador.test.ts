@@ -15,7 +15,6 @@ const datos = (cantidad: number): DatosStock => ({
     { id: "cua", tipo: "cuarentena", camionId: null },
   ],
   productos: [{ id: "p", codigo: null, nombre: "Yogur", formaVenta: "unidad", stockMinimo: 0, activo: true }],
-  camiones: [],
   saldos: [{ ubicacionId: "dep", productoId: "p", cantidad }],
 });
 
