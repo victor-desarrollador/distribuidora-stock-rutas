@@ -329,7 +329,7 @@ test.describe("sin llamadas mutadoras desde /jornadas (backend real)", () => {
     await filtrarPorFecha(page, fecha);
     await expect(filaDe(page, c)).toHaveCount(1);
     await filaDe(page, c).getByRole("button", { name: "Ver detalle" }).click();
-    await page.getByRole("button", { name: "Actualizar" }).click();
+    await page.getByRole("button", { name: "Actualizar", exact: true }).click();
     await expect(filaDe(page, c)).toHaveCount(1);
 
     expect(solicitudes.length).toBeGreaterThan(0);
