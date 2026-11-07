@@ -262,9 +262,13 @@ test.describe("roles y aislamiento (backend real, RLS real)", () => {
     await expect(detalle).not.toContainText(/Abierta por|Operación de apertura|Vendedor asignado/);
     await expect(v.page.getByText(/Nueva jornada|Confirmar salida/)).toHaveCount(0);
 
-    // Sin jornada asignada en la fecha siguiente.
+    // Sin jornada asignada en la fecha siguiente. El resumen accesible
+    // (aria-live) es único en la pantalla y se verifica con su texto exacto.
     await filtrarPorFecha(v.page, otraFecha);
-    await expect(v.page.getByText("No tenés una jornada asignada el")).toBeVisible();
+    const [anio, mes, dia] = otraFecha.split("-");
+    const resumen = v.page.locator('p[aria-live="polite"]');
+    await expect(resumen).toHaveCount(1);
+    await expect(resumen).toHaveText(`No tenés una jornada asignada el ${dia}/${mes}/${anio}.`);
     await expect(filas(v.page)).toHaveCount(0);
     await expect(v.page.getByText(propia.nombre)).toHaveCount(0);
 
@@ -420,7 +424,12 @@ test.describe("UI con PostgREST simulado (page.route): NO valida RLS ni la base"
   test("si el servidor devuelve menos filas que las pedidas (tope de filas) la pantalla falla cerrado", async ({ page }) => {
     await simular(page, { maxRows: 100 });
     await page.goto("/jornadas");
-    await expect(page.getByRole("alert")).toHaveText("No se pudieron leer las jornadas. Intentá de nuevo.");
+    // El alerta de error de lectura contiene el mensaje seguro y, aparte, el
+    // botón «Reintentar»: se verifican por separado.
+    const alerta = page.getByRole("alert");
+    await expect(alerta).toContainText("No se pudieron leer las jornadas. Intentá de nuevo.");
+    await expect(alerta.getByRole("button", { name: "Reintentar" })).toBeVisible();
+    // Falla cerrada: ninguna fila parcial a la vista.
     await expect(filas(page)).toHaveCount(0);
   });
 });

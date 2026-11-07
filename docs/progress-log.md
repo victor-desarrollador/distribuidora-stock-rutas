@@ -1,4 +1,24 @@
 ---
+## 07/11/2026 — B-02b.1: primera corrida E2E y corrección de aserciones (sólo tests)
+
+**Rama:** `feat/b-02b-jornadas-lectura`, desde `0208a35`, en la worktree `distribuidora-b02a-jornadas-datos`. B-01 (worktree principal) no se tocó.
+
+**Primera corrida (06/11, laboratorio local `b02b1-e2e-0208a359`, commit `0208a35`):** 25/25 migraciones y el seed aplicados; Playwright **117 PASS, 4 FAIL, 14 omitidos**. Las evidencias (`corrida.log`, `resultados.json`, `start.sanitizado.log`) estaban en `/tmp` (tmpfs) y **se perdieron con el reinicio del 07/11**. Sólo se conservan sus SHA-256 y la primera línea de cada error, registradas en la sesión anterior. Las evidencias futuras van a `../evidencias-entrega-b/b02b1-e2e/`, fuera del repo.
+
+**Diagnósticos (probables, NO confirmados; se confirman con una nueva corrida):**
+- `b01-stock.spec.ts:172` (más 14 omitidos del mismo archivo): arnés. El proceso Node de Playwright no tenía `VITE_SUPABASE_URL` ni `VITE_SUPABASE_PUBLISHABLE_KEY`.
+- `example.spec.ts:3`: arnés. La URL `127.0.0.1:4173` estaba fija y el laboratorio usaba otro puerto.
+- `b02b-jornadas-lectura.spec.ts:230`: aserción E2E. Probable violación de modo estricto: el texto vacío del vendedor aparece en el resumen `aria-live` y también en el bloque vacío.
+- `b02b-jornadas-lectura.spec.ts:420`: aserción E2E. El alerta incluye el botón «Reintentar» y `toHaveText` exige el texto completo.
+
+**Correcciones (sólo tests):** el caso del vendedor verifica el único `p[aria-live="polite"]` con `toHaveCount(1)` y el texto exacto con la fecha, sin `.first()`, y conserva las comprobaciones de 0 filas. El caso del tope de filas usa `toContainText` para el mensaje seguro, exige por separado el botón «Reintentar» y conserva la comprobación de 0 filas (falla cerrada). `example.spec.ts` usa `page.goto('/')` con `baseURL`. **Sin cambios en la aplicación, migraciones, RPC ni RLS.**
+
+**Verificación (`apps/web`):** `typecheck` rc 0; `lint` rc 0; Vitest 40 archivos / **1428** PASS; `build` rc 0; tipos estrictos de los 2 specs rc 0; `playwright test --list` 135 casos en 21 archivos; `git diff --check` limpio. **Playwright funcional pendiente** de una segunda corrida autorizada.
+
+**Volumen huérfano:** `supabase_db_b02b1-e2e-0208a359` existe; sus etiquetas compose y supabase son `b02b1-e2e-0208a359` y ningún contenedor lo usa. Se **conserva** sin montar, reutilizar ni borrar. No quedan contenedores ni redes de ese laboratorio.
+
+**Pendiente:** segunda corrida en un laboratorio nuevo; matriz RLS de `jornadas` y `camiones` (inactivo, sin perfil, `anon`, `service_role` y escrituras directas); decisión sobre el volumen huérfano; security review antes de integrar.
+---
 ## 06/11/2026 — B-02b.1: pantalla de jornadas con lectura real (sólo lectura; sin commit)
 
 **Rama:** `feat/b-02b-jornadas-lectura`, desde `e67fb6b` (B-02a), en la worktree `distribuidora-b02a-jornadas-datos`. La worktree principal y los cambios de B-01 no se tocaron.
