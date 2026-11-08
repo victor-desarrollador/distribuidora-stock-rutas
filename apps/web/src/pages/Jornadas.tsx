@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import { ROLES_GESTION } from "../auth/roles";
 import { useAperturaJornada } from "../hooks/useAperturaJornada";
+import { useAvisoSalidaPagina } from "../hooks/useAvisoSalidaPagina";
 import { useCatalogoCamiones } from "../hooks/useCatalogoCamiones";
 import { useJornadasLectura } from "../hooks/useJornadasLectura";
 import { useCorreccionJornada } from "../hooks/useCorreccionJornada";
@@ -16,6 +17,7 @@ import { JornadaCorreccionPanel } from "./JornadaCorreccionPanel";
 import { JornadaHistorialPanel } from "./JornadaHistorialPanel";
 import { JornadaSalidaPanel } from "./JornadaSalidaPanel";
 import { JornadasVista } from "./JornadasVista";
+import { faseConRiesgoApertura } from "./jornadas_apertura";
 import { fechaOperativaHoy } from "./jornadas_correccion";
 import { crearArbitroJornadas, jornadaRetenida } from "./jornadas_operacion";
 import { idCorto } from "./jornadas_presentacion";
@@ -43,6 +45,10 @@ import { idCorto } from "./jornadas_presentacion";
 // operativa y vendedor de la lista real de `listar_vendedores_jornada`) con el
 // controlador independiente pages/jornadas_apertura.ts. No participa del
 // árbitro: la apertura no retiene ninguna jornada existente.
+// T-1: mientras la apertura envía, consulta o tiene resultado desconocido, se
+// pide al navegador confirmar la salida (puede no mostrarlo). T-2: ante
+// `jornada_duplicada` o `jornada_vendedor_ocupado`, el panel orienta a revisar
+// las jornadas de la fecha; esa lectura nunca confirma la apertura.
 export default function Jornadas() {
   const jornadas = useJornadasLectura();
   // Un árbitro por montaje de la pantalla, compartido por ambas operaciones.
@@ -53,6 +59,7 @@ export default function Jornadas() {
   const apertura = useAperturaJornada(jornadas.recargar, vendedores.recargar);
   const { trasRelectura } = correccion;
   const { trasRelectura: trasRelecturaApertura } = apertura;
+  useAvisoSalidaPagina(faseConRiesgoApertura(apertura.fase));
   const lectura = jornadas.estado.lectura;
   // Cada lectura completa (`listo`) llega en un objeto nuevo y la generación de
   // la lectura descarta respuestas viejas: tras un éxito, el primer `listo` es

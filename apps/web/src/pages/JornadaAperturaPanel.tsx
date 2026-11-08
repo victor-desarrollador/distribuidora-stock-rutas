@@ -3,11 +3,14 @@ import { AlertTriangle, CalendarPlus, CheckCircle2, Loader2, RefreshCw } from "l
 
 import { nombreRol } from "../auth/roles";
 import type { CamionCatalogo } from "../lib/camiones";
-import type {
-  EntradaApertura,
-  EstadoVendedores,
-  FaseApertura,
-  OpcionesPermitidas,
+import {
+  MENSAJE_RECUPERACION_NO_CONFIRMA,
+  MENSAJE_RIESGO_RECARGA,
+  type EntradaApertura,
+  type EstadoVendedores,
+  type FaseApertura,
+  type OpcionesPermitidas,
+  type RecuperacionApertura,
 } from "./jornadas_apertura";
 import { formatearFechaOperativa, idCorto } from "./jornadas_presentacion";
 
@@ -98,6 +101,7 @@ export function JornadaAperturaPanel(props: JornadaAperturaPanelProps) {
       <Formulario
         {...props}
         error={fase.fase === "editando" ? fase.error : fase.mensaje}
+        recuperacion={fase.fase === "error" ? fase.recuperacion : undefined}
         camionId={camionId}
         fecha={fecha}
         vendedorId={vendedorId}
@@ -135,6 +139,8 @@ export function JornadaAperturaPanel(props: JornadaAperturaPanelProps) {
             {fase.informacion}
           </p>
         )}
+        {/* T-1: sin prometer que el navegador muestre su aviso. */}
+        <p className="text-sm">{MENSAJE_RIESGO_RECARGA}</p>
         <button type="button" onClick={onReintentar} className={`${BOTON} bg-amber-600 text-white`}>
           <RefreshCw size={18} />
           Reintentar apertura
@@ -195,7 +201,9 @@ function Formulario({
   onCancelar,
   onConfirmar,
   onRecargarVendedores,
+  onVerFecha,
   error,
+  recuperacion,
   camionId,
   fecha,
   vendedorId,
@@ -204,6 +212,7 @@ function Formulario({
   setVendedorId,
 }: JornadaAperturaPanelProps & {
   error?: string;
+  recuperacion?: RecuperacionApertura;
   camionId: string;
   fecha: string;
   vendedorId: string;
@@ -338,6 +347,22 @@ function Formulario({
           <AlertTriangle size={18} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </p>
+      )}
+
+      {/* T-2: orientación ante una posible apertura anterior. Ver la lista sólo
+          informa: la fase sigue en error y nada se da por registrado. */}
+      {recuperacion && (
+        <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p>{recuperacion.mensaje}</p>
+          <p className="font-medium">{MENSAJE_RECUPERACION_NO_CONFIRMA}</p>
+          <button
+            type="button"
+            onClick={() => onVerFecha(recuperacion.fecha)}
+            className={`${BOTON} border border-amber-500 text-amber-900`}
+          >
+            Ver jornadas del {formatearFechaOperativa(recuperacion.fecha)}
+          </button>
+        </div>
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row">

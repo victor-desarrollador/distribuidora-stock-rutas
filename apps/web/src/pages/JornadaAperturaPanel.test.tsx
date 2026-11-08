@@ -6,6 +6,10 @@ import { JornadaAperturaPanel } from "./JornadaAperturaPanel";
 import {
   MENSAJE_APERTURA_DESCONOCIDA,
   MENSAJE_APERTURA_OK,
+  MENSAJE_RECUPERACION_DUPLICADA,
+  MENSAJE_RECUPERACION_NO_CONFIRMA,
+  MENSAJE_RECUPERACION_VENDEDOR_OCUPADO,
+  MENSAJE_RIESGO_RECARGA,
   type EntradaApertura,
   type EstadoVendedores,
   type FaseApertura,
@@ -199,5 +203,46 @@ describe("JornadaAperturaPanel: envío y respuesta", () => {
   it("si el vendedor ya no figura en la lista, el resumen usa un id corto (nunca un nombre inventado)", () => {
     const html = panel({ fase: "enviando", datos: DATOS }, { estado: "listo", vendedores: [] });
     expect(html).toContain("Vendedor 33333333");
+  });
+});
+
+describe("JornadaAperturaPanel: T-1 advertencia de recarga", () => {
+  it("en `desconocido` advierte que recargar pierde el reintento seguro, sin prometer el aviso del navegador", () => {
+    const html = panel({ fase: "desconocido", datos: DATOS, mensaje: MENSAJE_APERTURA_DESCONOCIDA, informacion: null });
+    expect(html).toContain(MENSAJE_RIESGO_RECARGA);
+  });
+
+  it("en reposo, formulario, envío y éxito no muestra esa advertencia", () => {
+    for (const f of [
+      { fase: "inactiva" },
+      { fase: "editando" },
+      { fase: "enviando", datos: DATOS },
+      { fase: "exito", jornadaId: JORNADA, datos: DATOS, mensaje: MENSAJE_APERTURA_OK },
+    ] as FaseApertura[]) {
+      expect(panel(f)).not.toContain(MENSAJE_RIESGO_RECARGA);
+    }
+  });
+});
+
+describe("JornadaAperturaPanel: T-2 orientación ante una posible apertura anterior", () => {
+  it.each([
+    ["jornada_duplicada", "Ese camión ya tiene una jornada en esa fecha.", MENSAJE_RECUPERACION_DUPLICADA],
+    ["jornada_vendedor_ocupado", "El vendedor ya tiene una jornada en esa fecha.", MENSAJE_RECUPERACION_VENDEDOR_OCUPADO],
+  ])("%s: mensaje del servidor, orientación, aclaración y acción para ver la fecha", (_c, mensaje, orientacion) => {
+    const html = panel({ fase: "error", mensaje, recuperacion: { fecha: "2026-11-12", mensaje: orientacion } });
+    expect(html).toContain("<form");
+    expect(html).toContain(mensaje);
+    expect(html).toContain(orientacion);
+    expect(html).toContain(MENSAJE_RECUPERACION_NO_CONFIRMA);
+    expect(boton(html, "Ver jornadas del 12/11/2026")?.deshabilitado).toBe(false);
+    // Sigue siendo un error: no hay anuncio de éxito ni se ofrece «Nueva jornada».
+    expect(html).not.toContain(MENSAJE_APERTURA_OK);
+    expect(boton(html, "Abrir jornada")?.deshabilitado).toBe(false);
+  });
+
+  it("sin orientación (otros rechazos) no ofrece la acción ni la aclaración", () => {
+    const html = panel({ fase: "error", mensaje: "El camión tiene otra jornada sin cerrar." });
+    expect(html).not.toContain(MENSAJE_RECUPERACION_NO_CONFIRMA);
+    expect(botones(html).some((b) => b.texto.startsWith("Ver jornadas del"))).toBe(false);
   });
 });

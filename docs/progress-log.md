@@ -1,4 +1,31 @@
 ---
+## 07/11/2026 — D-B2-1 / T-1 + T-2: aviso al recargar y orientación de recuperación en la apertura (sólo frontend; sin commit)
+
+**Rama:** `feat/d-b2-1-t1-t2-recuperacion-apertura`, en la worktree nueva `../distribuidora-d-b2-1-t1t2`, desde la base congelada `8220daecc534025482a4a81b9db8cc8f42a2cedd` (`integracion/d-b2-1-apertura`, que no se modifica). Autorización del responsable: implementar exclusivamente T-1 y T-2. No se tocaron SQL, RLS, RPC, migraciones ni permisos; tampoco la clave de idempotencia ni el contrato de las RPC.
+
+**Qué se hizo.**
+- **T-1:**
+  - `pages/jornadas_apertura.ts`: `faseConRiesgoApertura` (verdadera en `enviando`, `verificando` y `desconocido`).
+  - `hooks/useAvisoSalidaPagina.ts` (nuevo): `instalarAvisoSalida`, que registra `beforeunload` con `preventDefault` y `returnValue`, y el hook que lo activa sólo mientras la condición sea verdadera.
+  - `pages/Jornadas.tsx`: `useAvisoSalidaPagina(faseConRiesgoApertura(apertura.fase))`.
+  - El panel, en `desconocido`, advierte que recargar pierde el reintento seguro y que el navegador «puede pedirte confirmación, pero no siempre lo hace».
+  - Sin almacenamiento del navegador.
+- **T-2:**
+  - Ante `jornada_duplicada` o `jornada_vendedor_ocupado`, la fase `error` agrega `recuperacion` (la fecha de la intención rechazada y un mensaje que plantea la posibilidad de una apertura anterior o de otra persona).
+  - El formulario muestra la orientación, la aclaración «Ver la lista no confirma que tu apertura se haya registrado» y «Ver jornadas del DD/MM/AAAA», que sólo cambia el filtro de la lista.
+  - La fase sigue en `error`, no se lee nada automáticamente y un nuevo envío es otra intención con otra clave. Los demás rechazos no cambian.
+
+**Tests:**
+- `jornadas_apertura.test.ts`: tabla de fases con y sin aviso; recorrido de fases del controlador; `instalarAvisoSalida` sobre un `EventTarget`; sólo escucha `beforeunload`; texto sin promesas; guardas estructurales; `recuperacionPara` sólo para los dos códigos (incluidos `__proto__` y `toString`); fecha de la intención; ni lectura ni éxito; idempotencia sin cambios. Se ajustaron 2 tests previos (el `it.each` de rechazos y el replay rechazado) para incluir `recuperacion`.
+- `JornadaAperturaPanel.test.tsx`: advertencia sólo en `desconocido`; orientación y acción para los dos códigos; ausencia en los demás.
+- E2E nuevo `tests/b02b2-jornadas-apertura-recuperacion.spec.ts` (5 casos). El spec de D-B2-1 no se modificó.
+
+**Verificación (`apps/web`):** `typecheck` rc 0; `lint` rc 0; Vitest **53 archivos / 1794 pruebas** PASS (antes 53 / 1770); `build` rc 0. Tipos estrictos y ESLint del spec nuevo rc 0.
+
+**E2E en laboratorio descartable** (project_id `d-b2-1-t1t2-e2e`, puertos 628xx en loopback, 26/26 migraciones, backend real): corrida 01 **55 passed** (recuperación 5 + apertura 12 + lectura 8 + `auth` + `jornadas-rpc-http`), sin fallos, omitidos ni flaky. Dos mutantes, sólo en el lab, detectados (sin aviso: 2 fallos; sin orientación: 2 fallos). PostgreSQL `READ ONLY` con invariantes en 0. Vigía: 0 muestras fuera de loopback. Limpieza con inventarios idénticos. Evidencia: `../evidencias-entrega-b/d-b2-1-t1t2-e2e/`.
+
+**Riesgos / pendiente:** (1) el aviso depende del navegador: puede no mostrarse (sin interacción previa, en móviles o por cierre del sistema), y no protege ante un corte de energía ni ante otro dispositivo; (2) T-2 orienta pero no recupera: tras recargar, la intención original se pierde (la recuperación durable para jornadas no existe; ADR-010 cubre sólo stock); (3) el aviso no se extendió a la salida (S1) ni a la corrección (S2): sería T-3, sin autorizar; (4) review y auditoría independiente del hash una vez commiteado; sin commit, push ni merge.
+---
 ## 07/11/2026 — D-B2-1: E2E integrado local del frontend de apertura con el backend E-PL1 auditado (sin commit)
 
 **Autorización:** el responsable autorizó exclusivamente pruebas de integración LOCALES, tras el dictamen FAVORABLE de Codex sobre el backend D-B2-1 / E-PL1: commit `cd654d9b80120dc437c3328ced73edff3ce71107`, árbol `f2015a2c42257360a3cb6c5fb34280f909f398db`, rama `feat/d-b2-1-e-pl1-listar-vendedores` (verificados antes de empezar; worktree del backend limpia). El backend está directamente sobre `5c87935`, la misma base del frontend: el único archivo en común es este `progress-log.md`, que no entra en la prueba.

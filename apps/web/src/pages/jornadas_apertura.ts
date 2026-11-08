@@ -83,7 +83,10 @@ export type FaseApertura =
       releida?: true;
     }
   // Rechazo definitivo del servidor: la transacción se revirtió.
-  | { fase: "error"; mensaje: string }
+  // `recuperacion` (T-2): sólo ante `jornada_duplicada` o
+  // `jornada_vendedor_ocupado`, la fecha cuyas jornadas conviene revisar porque
+  // pudo existir una apertura anterior. Es sólo orientación: no cambia la fase.
+  | { fase: "error"; mensaje: string; recuperacion?: RecuperacionApertura }
   // Siempre reintentable: reenviar la MISMA clave y el MISMO payload devuelve
   // la jornada original o se evalúa desde cero; nunca crea una segunda.
   | {
@@ -94,7 +97,51 @@ export type FaseApertura =
       informacion: string | null;
     };
 
+export interface RecuperacionApertura {
+  // Fecha operativa 'AAAA-MM-DD' de la apertura rechazada.
+  fecha: string;
+  mensaje: string;
+}
+
 export const APERTURA_INACTIVA: FaseApertura = { fase: "inactiva" };
+
+/**
+ * T-1: fases en las que recargar o cerrar la pantalla pierde la intención en
+ * memoria (clave y datos) y con ella el reintento seguro. La pantalla pide al
+ * navegador que confirme la salida sólo en estas fases; el navegador puede no
+ * mostrar el aviso. No se guarda nada en el navegador.
+ */
+export function faseConRiesgoApertura(fase: FaseApertura): boolean {
+  return fase.fase === "enviando" || fase.fase === "verificando" || fase.fase === "desconocido";
+}
+
+/** T-1: advertencia visible en `desconocido`; no promete el aviso del navegador. */
+export const MENSAJE_RIESGO_RECARGA =
+  "Si recargás o cerrás esta pantalla, se pierde el reintento seguro de esta apertura. El navegador puede pedirte confirmación antes de salir, pero no siempre lo hace.";
+
+// T-2: orientación ante rechazos que pueden deberse a una apertura anterior
+// (por ejemplo, una respuesta perdida seguida de una recarga, que cambia la
+// clave) o a otra persona. Nunca afirman que esta apertura se registró.
+export const MENSAJE_RECUPERACION_DUPLICADA =
+  "Puede que esa jornada ya se haya abierto en un intento anterior (por ejemplo, si se perdió la conexión o recargaste la pantalla) o que la haya abierto otra persona. Revisá las jornadas de esa fecha antes de volver a intentar.";
+export const MENSAJE_RECUPERACION_VENDEDOR_OCUPADO =
+  "Puede que ese vendedor ya tenga asignada la jornada en un intento anterior (por ejemplo, si se perdió la conexión o recargaste la pantalla) o que se la haya asignado otra persona. Revisá las jornadas de esa fecha antes de volver a intentar.";
+export const MENSAJE_RECUPERACION_NO_CONFIRMA =
+  "Ver la lista no confirma que tu apertura se haya registrado.";
+
+const MENSAJES_RECUPERACION: Readonly<Record<string, string>> = {
+  jornada_duplicada: MENSAJE_RECUPERACION_DUPLICADA,
+  jornada_vendedor_ocupado: MENSAJE_RECUPERACION_VENDEDOR_OCUPADO,
+};
+
+/** Orientación de recuperación para un rechazo; `undefined` si no corresponde. */
+export function recuperacionPara(
+  codigo: string | null,
+  fecha: string
+): RecuperacionApertura | undefined {
+  if (codigo === null || !Object.hasOwn(MENSAJES_RECUPERACION, codigo)) return undefined;
+  return { fecha, mensaje: MENSAJES_RECUPERACION[codigo] };
+}
 
 export const MENSAJE_APERTURA_OK = "Jornada abierta.";
 export const MENSAJE_VENDEDOR_INVALIDO = "Elegí un vendedor de la lista.";
@@ -251,7 +298,12 @@ export function crearControladorApertura(
     }
     // Rechazo definitivo: la transacción se revirtió y la clave no se consumió.
     intencion = null;
-    emitir({ fase: "error", mensaje: r.error.mensaje });
+    const recuperacion = recuperacionPara(r.error.codigo, i.datos.fecha);
+    emitir(
+      recuperacion
+        ? { fase: "error", mensaje: r.error.mensaje, recuperacion }
+        : { fase: "error", mensaje: r.error.mensaje }
+    );
     if (r.error.codigo !== null && CODIGOS_RELEER_JORNADAS.has(r.error.codigo)) {
       alCambiarJornadas();
     }
