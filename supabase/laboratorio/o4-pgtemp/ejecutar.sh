@@ -112,7 +112,9 @@ for g in G1_nonce_erroneo G2_sin_nonce G3_sysid_erroneo; do
 done
 echo "GUARDIA_AUTOPRUEBA|OK|G1 G2 G3 abortaron" | tee "$OUT/guardia/resumen.txt"
 
-rls() { ps postgres -qtA -c "select c.oid::regclass || '|' || c.relrowsecurity || '|' || c.relforcerowsecurity || '|' || (select count(*) from pg_policy p where p.polrelid = c.oid) from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p') order by 1" > "$1"; }
+# H-04: instantánea CANÓNICA de RLS (tablas y, por política: nombre, comando, permisividad, roles ordenados, USING y WITH CHECK con
+# la diferencia entre NULL y expresión presente), en lugar del conteo de políticas. Ver rls_instantanea.sql y probar_rls_instantanea.sh.
+rls() { ps postgres -qtA < "$DIR/rls_instantanea.sql" > "$1"; }
 
 # --- Estado ORIGINAL (vulnerable): sólo dentro del laboratorio verificado ---
 mkdir -p "$OUT/original" "$OUT/remediado"

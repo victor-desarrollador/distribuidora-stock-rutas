@@ -1,4 +1,17 @@
 ---
+## 08/11/2026 — T3-01-L / H-04: instantánea canónica de RLS en el arnés de explotación (rama `fix/t3-01-l-h04` desde `141ac27`; commit local; H-04 NO resuelto hasta auditoría independiente; T3-01-L NO cerrado)
+
+**Hallazgo H-04 (Codex, 06/11/2026).** El arnés `ejecutar.sh` comprobaba «sin cambios en RLS» comparando, por tabla, `relrowsecurity`, `relforcerowsecurity` y la **cantidad** de políticas. Una política alterada o sustituida que conservara el conteo pasaba inadvertida (falso negativo).
+
+**Corrección (sólo laboratorio; sin migraciones, RPC, tablas, privilegios ni RLS productivo; ADR-010 sin cambios).**
+- `rls_instantanea.sql` (nuevo): instantánea canónica de sólo lectura, una línea por tabla (`rls`, `force`) y por política (nombre, comando, permisividad, roles ordenados, `USING` y `WITH CHECK` como `ABSENT` o `EXPR:` + SHA-256 de `pg_get_expr`), con orden determinista (collation C).
+- `ejecutar.sh`: `rls()` usa esa instantánea en lugar del conteo.
+- `probar_rls_instantanea.sh` (nuevo): contenedor descartable (sin red, puertos ni montajes). Casos I01–I04 (debe quedar igual), N01–N13 (debe diferir con el conteo igual), C01–C05 (cobertura y determinismo sobre las políticas reales), E01–E03 (extremo a extremo con `cmp` sobre políticas reales), **D01–D04 (control permanente del detector degradado: la consulta antigua por conteo informa igualdad, la instantánea nueva informa diferencia, dentro de BEGIN/SAVEPOINT/ROLLBACK, sin residuos)** y R01 (sin residuos).
+
+**Verificación (local, laboratorio descartable).** `ejecutar.sh`: X01–X08 y X_RLS 10/10 (exit 0). `probar_rls_instantanea.sh`: 30 casos, 0 fallas (exit 0). Las 25 migraciones idénticas a `141ac27`. `git diff --check` limpio. Evidencia vinculada al commit: ver el informe de la tarea. Un primer intento del control D03 falló por un defecto del propio control (la primera mutación seguía aplicada en la misma transacción); se corrigió con `SAVEPOINT`/`ROLLBACK TO`.
+
+**Pendiente.** Security review (toca RLS/grants como superficie de verificación), auditoría independiente (Codex y OpenCode) del hash, F7, F8, B/C y todo acceso remoto. No se tocó `apps/web/` (lint/typecheck/test/build no aplican).
+
 ## 07/11/2026 — T3-01-L / E-O4-ACL: corrección de M-01 (BA16 con `proacl IS NULL` real) y de la trazabilidad de la evidencia (rama `fix/t3-01-l-acl-ba16` desde `abfa1b7`; sin commit; T3-01-L NO cerrado)
 
 **Rama:** `fix/t3-01-l-acl-ba16`, desde `abfa1b79a045e0b7f7e071504457dafbccbe7815` (worktree `distribuidora-t3-01-l-acl-fix`). `abfa1b7` y `feat/t3-01-l-acl-exacta` no se tocaron. Sin commit, push, merge ni deploy; sin staging ni producción; sin `db push` ni `migration up`; sin roles reales. Superficie sensible: RPC/funciones SQL, `SECURITY DEFINER`, grants. Corresponde security review; no está hecha.
