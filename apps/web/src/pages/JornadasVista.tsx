@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   ClipboardList,
   Info,
-  Plus,
   RefreshCw,
   Truck,
   X,
@@ -23,7 +22,8 @@ import type { EstadoPantallaJornadas } from "./jornadas_lectura";
 // ni efectos: todo llega por props, así se prueba con renderToStaticMarkup.
 // Esta vista no muta nada. Las acciones del detalle (en B-02b.2 / S1, sólo la
 // confirmación de salida) llegan ya armadas por `accionesDetalle` y viven en
-// sus propios módulos; abrir, cargar y descargar siguen sin existir.
+// sus propios módulos. La apertura (D-B2-1) llega armada por `apertura`;
+// cargar y descargar siguen sin existir.
 
 const CLASE_ESTADO: Record<EstadoJornada, string> = {
   abierta: "bg-amber-100 text-amber-800",
@@ -53,6 +53,9 @@ export interface JornadasVistaProps {
   // Se muestran fuera del listado y del detalle, así sobreviven a la
   // relectura que pone la lista en «cargando» (corrección S1-C5).
   avisos?: ReactNode;
+  // Panel «Nueva jornada» (D-B2-1), armado por la pantalla. Sólo se muestra a
+  // dueño y encargado; vive fuera del listado (sobrevive a la relectura).
+  apertura?: ReactNode;
 }
 
 function InsigniaEstado({ estado }: { estado: EstadoJornada }) {
@@ -156,6 +159,7 @@ export function JornadasVista({
   onSeleccionar,
   accionesDetalle,
   avisos,
+  apertura,
 }: JornadasVistaProps) {
   const { lectura, fecha, seleccionadaId } = estado;
   const seleccionada =
@@ -186,19 +190,10 @@ export function JornadasVista({
             <RefreshCw size={18} />
             Actualizar
           </button>
-          {puedeAdministrar && (
-            <button
-              type="button"
-              disabled
-              title={MENSAJE_NO_DISPONIBLE}
-              className="flex min-h-12 cursor-not-allowed items-center gap-2 rounded-lg bg-slate-200 px-5 font-medium text-slate-500"
-            >
-              <Plus size={20} />
-              Nueva jornada (no disponible todavía)
-            </button>
-          )}
         </div>
       </div>
+
+      {puedeAdministrar && apertura}
 
       {puedeAdministrar && (
         <div
