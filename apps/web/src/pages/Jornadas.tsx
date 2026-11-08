@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "../auth/useAuth";
 import { ROLES_GESTION } from "../auth/roles";
+import { useAperturaJornada } from "../hooks/useAperturaJornada";
 import { useCatalogoCamiones } from "../hooks/useCatalogoCamiones";
 import { useJornadasLectura } from "../hooks/useJornadasLectura";
 import { useCorreccionJornada } from "../hooks/useCorreccionJornada";
 import { useHistorialJornada } from "../hooks/useHistorialJornada";
 import { useSalidaJornada } from "../hooks/useSalidaJornada";
+import { useVendedoresJornada } from "../hooks/useVendedoresJornada";
 import { AvisoSalidaJornada } from "./AvisoSalidaJornada";
+import { JornadaAperturaPanel } from "./JornadaAperturaPanel";
 import { JornadaContinuidadPanel } from "./JornadaContinuidadPanel";
 import { JornadaCorreccionPanel } from "./JornadaCorreccionPanel";
 import { JornadaHistorialPanel } from "./JornadaHistorialPanel";
@@ -28,28 +31,38 @@ import { idCorto } from "./jornadas_presentacion";
 // Ambas operaciones usan el motor común pages/jornadas_operacion.ts, cada una
 // con su propio controlador e intención, y un árbitro compartido: mientras una
 // confirma, envía, verifica o tiene resultado desconocido sobre una jornada, la
-// otra no puede iniciarse sobre esa jornada (S2 M-02). Abrir, reasignar, cargar
-// y descargar siguen sin habilitarse.
+// otra no puede iniciarse sobre esa jornada (S2 M-02). Reasignar, cargar y
+// descargar siguen sin habilitarse.
 // B-02b.2 / S3-0: dueño y encargado ven, en el detalle, el historial de cargas
 // y descargas registradas (SÓLO LECTURA; hooks/useHistorialJornada.ts,
 // pages/jornadas_historial.ts). No participa del árbitro: no opera.
 // B-02b.2 / S3-1: estado de cierre y bloqueos de continuidad (SÓLO LECTURA,
 // pages/jornadas_continuidad.ts), derivado de la jornada y del mismo historial:
 // no hace lecturas propias.
+// D-B2-1: dueño y encargado abren una jornada real (camión activo, fecha
+// operativa y vendedor de la lista real de `listar_vendedores_jornada`) con el
+// controlador independiente pages/jornadas_apertura.ts. No participa del
+// árbitro: la apertura no retiene ninguna jornada existente.
 export default function Jornadas() {
   const jornadas = useJornadasLectura();
   // Un árbitro por montaje de la pantalla, compartido por ambas operaciones.
   const [arbitro] = useState(crearArbitroJornadas);
   const salida = useSalidaJornada(jornadas.recargar, arbitro);
   const correccion = useCorreccionJornada(jornadas.recargar, arbitro);
+  const vendedores = useVendedoresJornada();
+  const apertura = useAperturaJornada(jornadas.recargar, vendedores.recargar);
   const { trasRelectura } = correccion;
+  const { trasRelectura: trasRelecturaApertura } = apertura;
   const lectura = jornadas.estado.lectura;
   // Cada lectura completa (`listo`) llega en un objeto nuevo y la generación de
   // la lectura descarta respuestas viejas: tras un éxito, el primer `listo` es
-  // de la relectura posterior. Sólo libera una NUEVA corrección; no relee.
+  // de la relectura posterior. Sólo libera una NUEVA corrección o apertura; no relee.
   useEffect(() => {
-    if (lectura.estado === "listo") trasRelectura();
-  }, [lectura, trasRelectura]);
+    if (lectura.estado === "listo") {
+      trasRelectura();
+      trasRelecturaApertura();
+    }
+  }, [lectura, trasRelectura, trasRelecturaApertura]);
   const { catalogo } = useCatalogoCamiones();
   const { usuario } = useAuth();
   // Sólo presentación: el acceso lo decide ProtectedRoute; las filas, RLS; y
@@ -128,6 +141,27 @@ export default function Jornadas() {
               </>
             )
           : undefined
+      }
+      apertura={
+        puedeAdministrar ? (
+          <JornadaAperturaPanel
+            fase={apertura.fase}
+            camionesActivos={camionesActivos}
+            vendedores={vendedores.estado}
+            hoy={fechaOperativaHoy()}
+            nombreCamion={nombreCamion}
+            onSolicitar={() => {
+              apertura.solicitar();
+              // La lista se lee al abrir el formulario: es la vigente ahora.
+              vendedores.recargar();
+            }}
+            onCancelar={apertura.cancelar}
+            onConfirmar={apertura.confirmar}
+            onReintentar={apertura.reintentar}
+            onRecargarVendedores={vendedores.recargar}
+            onVerFecha={jornadas.cambiarFecha}
+          />
+        ) : undefined
       }
       avisos={
         puedeAdministrar ? (

@@ -213,7 +213,8 @@ test.describe("roles y aislamiento (backend real, RLS real)", () => {
     const detalle = page.getByRole("region", { name: "Detalle de la jornada" });
     await expect(detalle).toContainText(c1.nombre);
     await expect(detalle).toContainText("Abierta por");
-    await expect(page.getByRole("button", { name: /Nueva jornada/ })).toBeDisabled();
+    // D-B2-1: la apertura real ya está habilitada para dueño y encargado.
+    await expect(page.getByRole("button", { name: "Nueva jornada", exact: true })).toBeEnabled();
     await expect(page.getByRole("button", { name: /Confirmar salida/ })).toBeDisabled();
 
     // Encargado: también ve las dos (la del vendedor y la suya).

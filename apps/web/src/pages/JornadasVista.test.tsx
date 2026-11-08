@@ -138,15 +138,29 @@ describe("JornadasVista", () => {
   // B-02b.2 / S1: «Confirmar salida» ya no es un botón deshabilitado de esta
   // vista; lo aporta `accionesDetalle` (JornadaSalidaPanel). Las demás
   // operaciones siguen deshabilitadas y explican por qué.
-  it("los botones mutadores que siguen pendientes están deshabilitados y explican por qué", () => {
+  // D-B2-1: la vista ya no tiene un botón «Nueva jornada» deshabilitado; la
+  // apertura real llega armada por `apertura`. Cargar y descargar siguen
+  // pendientes y la nota lo explica.
+  it("sin `apertura` la vista no ofrece botones mutadores propios; la nota explica lo pendiente", () => {
     const j = jornada(1);
     const html = vista(listo([j]), { seleccionadaId: j.id });
     const mutadores = botones(html).filter((b) => /Nueva jornada|Confirmar salida|Cargar mercader|Descargar|Abrir jornada/i.test(b.texto));
-    expect(mutadores.map((b) => b.texto.replace(/\s*\(.*$/, ""))).toEqual(["Nueva jornada"]);
-    expect(mutadores.every((b) => b.deshabilitado && b.atributos.includes("title="))).toBe(true);
-    expect(mutadores.every((b) => /no disponible todavía/.test(b.texto))).toBe(true);
+    expect(mutadores).toEqual([]);
+    expect(html).not.toContain("no disponible todavía");
+    expect(html).toContain('role="note"');
     expect(html).toContain(MENSAJE_NO_DISPONIBLE.slice(0, 30));
-    expect(MENSAJE_NO_DISPONIBLE).not.toMatch(/confirmar la salida de jornadas se habilitarán/);
+    expect(MENSAJE_NO_DISPONIBLE).toMatch(/cargar y descargar/);
+    expect(MENSAJE_NO_DISPONIBLE).toMatch(/Ya se puede abrir una jornada nueva/);
+    expect(MENSAJE_NO_DISPONIBLE).not.toMatch(/abrir, cargar y descargar jornadas se habilitarán/);
+  });
+
+  it("dueño/encargado: `apertura` se muestra fuera del listado y del detalle, también mientras la lista carga", () => {
+    const panel = <section aria-label="Nueva jornada">panel de apertura</section>;
+    const html = vista(listo([jornada(1)]), {}, { apertura: panel });
+    expect(html).toContain("panel de apertura");
+    expect(html.indexOf("panel de apertura")).toBeLessThan(html.indexOf("Fecha operativa"));
+    expect(vista({ estado: "cargando" }, {}, { apertura: panel })).toContain("panel de apertura");
+    expect(vista({ estado: "error", error: "x" }, {}, { apertura: panel })).toContain("panel de apertura");
   });
 
   it("sin `accionesDetalle` el detalle no ofrece ninguna acción mutadora", () => {
@@ -232,6 +246,15 @@ describe("JornadasVista para el vendedor/piloto (puedeAdministrar = false)", () 
     });
     expect(llamadas).toBe(0);
     expect(html).not.toContain("Confirmar salida");
+  });
+
+  it("aunque se pase `apertura`, el vendedor no ve el panel de nueva jornada (D-B2-1)", () => {
+    const html = vista(listo([j]), {}, {
+      puedeAdministrar: false,
+      apertura: <button type="button">Nueva jornada</button>,
+    });
+    expect(html).not.toContain("Nueva jornada");
+    expect(html).not.toContain("<form");
   });
 
   it("el detalle oculta quién abrió, la operación de apertura y el vendedor asignado", () => {
