@@ -16,7 +16,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(59);
+select plan(60);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -372,6 +372,10 @@ select case when (select f from o4) is null
                         aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
                        where p.oid = (select f from o4) and a.grantee = 0),
           'O-4: PUBLIC sin EXECUTE sobre rls_auto_enable()') end;
+select case when (select f from o4) is null
+  then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
+  else ok((select p.proacl = array['postgres=X/postgres'::aclitem] from pg_proc p where p.oid = (select f from o4)),
+          'E-O4-ACL: la ACL de rls_auto_enable() es exactamente {postgres=X/postgres}') end;
 select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
   else ok(not has_function_privilege('anon', (select f from o4), 'EXECUTE'),

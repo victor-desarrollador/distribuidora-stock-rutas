@@ -1073,11 +1073,14 @@ BEGIN
 
   --     Excepción O-4. Su existencia y la revocación de EXECUTE provienen de
   --     ADR-001 §18.2 VIGENTE; el contrato exacto que se exige abajo es el
-  --     RB + RA PROPUESTO Y NO APROBADO (ver la cabecera de DECLARE; el
-  --     contrato histórico B.1.2b/B.1.2c, 325ae266…, ya no se acepta):
+  --     RB + RA, APROBADO SÓLO COMO NORMA (ADR-001 §18.2.1; ver la cabecera
+  --     de DECLARE; el contrato histórico B.1.2b/B.1.2c, 325ae266…, ya no
+  --     se acepta):
   --       función: SECURITY DEFINER, prokind f, owner postgres, retorno
   --         event_trigger, proconfig exacto {search_path=pg_catalog, pg_temp},
-  --         sin EXECUTE para PUBLIC/anon/authenticated/service_role, lenguaje
+  --         sin EXECUTE para PUBLIC/anon/authenticated/service_role, ACL
+  --         exacta {postgres=X/postgres} (E-O4-ACL, aprobada por decisión
+  --         humana para LOCAL; ADR-001 §18.2.2), lenguaje
   --         plpgsql, prosqlbody y probin nulos y SHA-256 de prosrc igual a
   --         v_o4_sha256_prosrc;
   --       event trigger: ensure_rls único y asociado en forma exclusiva a la
@@ -1110,6 +1113,24 @@ BEGIN
              CASE WHEN pg_catalog.has_function_privilege('anon', p.oid, 'EXECUTE') THEN 'EXECUTE efectivo anon' END,
              CASE WHEN pg_catalog.has_function_privilege('authenticated', p.oid, 'EXECUTE') THEN 'EXECUTE efectivo authenticated' END,
              CASE WHEN pg_catalog.has_function_privilege('service_role', p.oid, 'EXECUTE') THEN 'EXECUTE efectivo service_role' END,
+             --   E-O4-ACL (ADR-001 §18.2.2, sólo LOCAL): la ACL tiene que ser
+             --   exactamente {postgres=X/postgres}: una única entrada, otorgante
+             --   y beneficiario postgres, sólo EXECUTE y sin opción de delegación.
+             --   Fail-closed: proacl NULL (ACL por defecto, que incluye PUBLIC),
+             --   un arreglo vacío, cualquier entrada adicional o WITH GRANT
+             --   OPTION son defecto. No se extiende a otras funciones.
+             CASE WHEN p.proacl IS NULL
+                    OR pg_catalog.array_ndims(p.proacl) IS DISTINCT FROM 1
+                    OR pg_catalog.array_length(p.proacl, 1) IS DISTINCT FROM 1
+                    OR (SELECT pg_catalog.count(*) FROM pg_catalog.aclexplode(p.proacl)) IS DISTINCT FROM 1
+                    OR NOT EXISTS (SELECT 1
+                                     FROM pg_catalog.aclexplode(p.proacl) AS ex
+                                    WHERE ex.grantor = v_oid_postgres
+                                      AND ex.grantee = v_oid_postgres
+                                      AND ex.privilege_type = 'EXECUTE'
+                                      AND NOT ex.is_grantable)
+                  THEN 'ACL distinta de {postgres=X/postgres} (E-O4-ACL; ACL actual: '
+                       || COALESCE(p.proacl::pg_catalog.text, 'NULL') || ')' END,
              CASE WHEN l.lanname::pg_catalog.text IS DISTINCT FROM v_o4_lenguaje
                   THEN 'lenguaje ' || l.lanname::pg_catalog.text END,
              CASE WHEN p.prosqlbody IS NOT NULL OR p.probin IS NOT NULL THEN 'prosqlbody/probin no nulos' END,

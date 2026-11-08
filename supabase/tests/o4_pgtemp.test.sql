@@ -8,9 +8,11 @@
 --     ensure_rls; EXECUTE revocado a PUBLIC/anon/authenticated/service_role;
 --     no se modifica el comportamiento funcional del event trigger.
 --   * El contrato RB + RA que verifica este archivo (SHA-256 de prosrc
---     e1b231fb…, search_path = pg_catalog, pg_temp) es una ENMIENDA PROPUESTA,
---     NO APROBADA. Su implementación local es la migración
---     20261110120000_o4_pgtemp_remediacion.sql.
+--     e1b231fb…, search_path = pg_catalog, pg_temp) está APROBADO SÓLO COMO
+--     NORMA (ADR-001 §18.2.1, 07/11/2026). Su implementación local es la
+--     migración 20261110120000_o4_pgtemp_remediacion.sql, no autorizada en
+--     staging ni en producción. La ACL exacta {postgres=X/postgres} es la
+--     enmienda E-O4-ACL (ADR-001 §18.2.2), aprobada sólo para LOCAL.
 --   * El cuerpo original de staging (325ae266…, search_path = pg_catalog) es
 --     vulnerable a la resolución de tipos en pg_temp y se rechaza.
 --
@@ -25,7 +27,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(9);
+select plan(10);
 
 -- 1. Coherencia (válida en cualquier entorno).
 select is(
@@ -89,6 +91,15 @@ select case when pg_catalog.to_regprocedure('public.rls_auto_enable()') is null
           and not pg_catalog.has_function_privilege('authenticated', pg_catalog.to_regprocedure('public.rls_auto_enable()'), 'EXECUTE')
           and not pg_catalog.has_function_privilege('service_role', pg_catalog.to_regprocedure('public.rls_auto_enable()'), 'EXECUTE'),
           'O-4: sin EXECUTE para PUBLIC, anon, authenticated ni service_role') end;
+
+-- 7b. E-O4-ACL (ADR-001 §18.2.2; decisión humana, sólo LOCAL): ACL exacta
+--     {postgres=X/postgres}, sin entradas adicionales ni opción de delegación.
+--     proacl NULL (por defecto) o distinta no cumple.
+select case when pg_catalog.to_regprocedure('public.rls_auto_enable()') is null
+  then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
+  else ok((select p.proacl = array['postgres=X/postgres'::aclitem]
+             from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.rls_auto_enable()')),
+          'E-O4-ACL: la ACL de rls_auto_enable() es exactamente {postgres=X/postgres}') end;
 
 -- 8. Event trigger: único, owner postgres, ddl_command_end, O y 3 tags exactas.
 select case when pg_catalog.to_regprocedure('public.rls_auto_enable()') is null

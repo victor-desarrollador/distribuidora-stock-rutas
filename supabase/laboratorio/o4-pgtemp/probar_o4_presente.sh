@@ -67,6 +67,15 @@ caso "B16 propietario incorrecto (rol ajeno): rechazo en O-4"  rem  "create role
 caso "B17 sin SECURITY DEFINER: rechazo"                     rem  "alter function public.rls_auto_enable() security invoker;" "$PF" '!0' "$R" "ESTADO_"
 caso "B18 proconfig sin pg_temp (RA ausente): rechazo"       rem  "alter function public.rls_auto_enable() set search_path = pg_catalog;" "$PF" '!0' "$R" "ESTADO_"
 caso "B19 marcador temporal junto con O-4: rechazo"          rem  "create temp table preflight_o4_ausente_laboratorio (modo text); insert into preflight_o4_ausente_laboratorio values ('LABORATORIO_LOCAL_SIN_O4');" "$PF" '!0' "[O4_MARCADOR_INVALIDO]" "ESTADO_"
+A="ACL distinta de {postgres=X/postgres}"
+# E-O4-ACL (decisión humana, sólo LOCAL; ADR-001 §18.2.2). Los identificadores BA16..BA20 corresponden
+# a los casos «B16–B20» de la decisión; se prefijan con «A» (ACL) porque B16..B19 ya designan otros casos.
+caso "BA16 ACL NULL (por defecto, incluye PUBLIC): rechazo fail-closed" rem  "grant execute on function public.rls_auto_enable() to public;" "$PF" '!0' "$A" "ESTADO_"
+caso "BA17 grantee adicional fuera de la lista (zz_acl): rechazo" rem  "create role zz_acl nologin; grant execute on function public.rls_auto_enable() to zz_acl;" "$PF" '!0' "$A" "ESTADO_"
+caso "BA18 WITH GRANT OPTION del propietario: rechazo"          rem  "grant execute on function public.rls_auto_enable() to postgres with grant option;" "$PF" '!0' "$A" "ESTADO_"
+caso "BA19 ACL vacía (propietario sin EXECUTE): rechazo"        rem  "revoke execute on function public.rls_auto_enable() from postgres;" "$PF" '!0' "$A" "ESTADO_"
+caso "BA20 grantee adicional con GRANT OPTION (zz_acl): rechazo" rem "create role zz_acl nologin; grant execute on function public.rls_auto_enable() to zz_acl with grant option;" "$PF" '!0' "$A" "ESTADO_"
+caso "BA21 ACL exacta {postgres=X/postgres}: sin defecto de ACL" rem  "" "$PF" 0 "[ESTADO_A]" "$A"
 
 echo "# Bloque C — migración 20261110120000 (negativos y positivos)"
 VERIF_PRE="create temp table zz_pre as select p.oid, p.proacl::text acl, p.proowner from pg_proc p where p.oid = to_regprocedure('public.rls_auto_enable()');"

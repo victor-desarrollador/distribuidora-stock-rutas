@@ -1,4 +1,38 @@
 ---
+## 07/11/2026 — T3-01-L: E-O4-ACL (ACL exacta de `public.rls_auto_enable()`) y registro de las decisiones normativas (rama `feat/t3-01-l-acl-exacta` desde `f33044d`; sin commit; T3-01-L NO cerrado)
+
+**Rama:** `feat/t3-01-l-acl-exacta`, creada desde `f33044db55ede0c57421a72a034d0d14e4047b4d` en la worktree `distribuidora-t3-01-l-acl`. `f33044d` y las ramas/worktrees congeladas no se tocaron. Sin commit, push, merge ni deploy; sin staging ni producción; sin `db push` ni `migration up`; sin crear roles ni cambiar permisos en entornos compartidos. **Superficie sensible (`AGENTS.md` §2.4):** RPC/funciones SQL, `SECURITY DEFINER`, grants, `service_role`, Supabase. Corresponde **security review** antes de cerrar; **no está hecha**.
+
+**Decisiones humanas registradas (07/11/2026):** PB12C-2 resuelto; E-O4-ACL aprobada normativamente para LOCAL; L5 aprobado como procedimiento (sin acceso remoto); secuencia LOGIN aprobada; separación T3-01-L / T3-01-R (R-STG, R-PROD); regla de ACL distinta en plataforma hospedada (sin excepciones por anticipado); F7, F8, B/C y H-04 siguen ABIERTOS. Texto en ADR-001 §18.2.2.
+
+### Cambios
+- **Documentación:** `docs/decisions/001-rpc-privilegiadas.md` (fila de historial y §18.2.2 con las decisiones, las condiciones L-01 a L-12 y los pendientes; no se tocó 18.2.1 ni el estado de la ADR), `supabase/laboratorio/o4-pgtemp/PROCEDIMIENTO_STAGING_RO.md` (§0: L5, secuencia LOGIN y regla de ACL) y esta entrada.
+- **Preflight** `supabase/scripts/validar_topologia_propietario_rpc.sql`: con O-4 presente exige `proacl` exactamente `{postgres=X/postgres}` (una sola entrada, otorgante y beneficiario `postgres`, sólo `EXECUTE`, sin `WITH GRANT OPTION`). `NULL`, vacía o distinta falla cerrado dentro de `[O4_RLS_AUTO_ENABLE]` con el texto «ACL distinta de {postgres=X/postgres}». Se conservan el inventario cerrado de 40 firmas y todos los controles previos. No se extiende a otras funciones. Además se corrigió un comentario que seguía diciendo «PROPUESTO Y NO APROBADO».
+- **Inventario RO:** `consultas_ro/Q2_funcion.sql` informa `acl_exacta_e_o4_acl`; `consultas_ro/Q6_veredicto.sql` aborta con «ACL distinta de {postgres=X/postgres} (E-O4-ACL)».
+- **Pruebas:** `probar_o4_presente.sh` agrega **BA16–BA20** (negativos) y **BA21** (positivo); `probar_consultas_ro.sh` agrega A01–A08; pgTAP: una aserción nueva en `hardening_adr001.test.sql` (plan 59→60) y en `o4_pgtemp.test.sql` (plan 9→10, y su cabecera ya no dice «PROPUESTA NO APROBADA»), y la exención de `pg_temp_rpc_privilegiadas.test.sql` exige la ACL exacta. *Nota de nombres:* los casos «B16–B20» de la decisión se registran como **BA16–BA20** porque B16–B19 ya designaban otros casos de `probar_o4_presente.sh`.
+- **No modificado:** las 25 migraciones (hashes idénticos a `f33044d`), RPC de stock, ADR-010.
+
+### Verificación (árbol sin commitear: evidencia NO VINCULADA a un commit)
+| Verificación | Resultado |
+|---|---|
+| `probar_o4_docker.sh` (M-01/B-01 + O-4 presente, imagen `.004`) | rc 0; O-4 presente **34 casos, 0 fallas** (28 previos + BA16–BA21) |
+| `probar_consultas_ro.sh` (Docker `.004`) | rc 0; **75 casos, 0 fallas** (67 previos + A01–A08) |
+| `probar_ejecutor_ro.sh` | rc 0; **87/87** |
+| Stack real de la CLI 2.120.0 (project_id propio, loopback): migraciones aplicadas | 25/25; hashes iguales a `f33044d` (`sha256sum -c` rc 0) |
+| `supabase test db --local` | rc 0; `Files=33, Tests=2165` (2163 + 2 aserciones nuevas), `Result: PASS` |
+| Preflight READ ONLY sobre la base de la CLI | rc 0; `RO|on`; `ESTADO_LOCAL_SIN_O4` (O-4 ausente por marcador de laboratorio; **no** es `ESTADO_A`) |
+| Cadena real + O-4 instalado en transacción con ROLLBACK | ACL exacta: `ESTADO_A`; ACL NULL / grantee adicional / `WITH GRANT OPTION` / ACL vacía: rechazo con el texto de E-O4-ACL |
+| pgTAP con O-4 instalado (ramas no SKIP) | `hardening_adr001` 60/60, `o4_pgtemp` 10/10, `pg_temp_rpc_privilegiadas` 42/42, 0 SKIP |
+| Sensibilidad pgTAP con ACL NULL | las aserciones nuevas de E-O4-ACL fallan en `hardening_adr001` y en `o4_pgtemp` |
+Evidencia (fuera del repo): `evidencias-t3-01-l-acl/`.
+
+### No hecho / pendiente
+- **Arnés de explotación X01–X08** y la **paridad `.003`** no se re-ejecutaron en esta tarea (L-05 y L-06 sobre H_L siguen pendientes).
+- No hay H_L designado, ni commit, ni auditoría de Codex y OpenCode sobre el hash final, ni security review. Ninguna evidencia está vinculada a un commit.
+- F7, F8, B/C, H-04 (reconstrucción puntual por Codex) y todo acceso remoto siguen abiertos. La cabecera de la migración `20261110120000…` conserva «PROPUESTA NO APROBADA» para no cambiar el hash auditado.
+- Sin ADR-010 ni cambios en las RPC de stock.
+
+---
 ## 07/11/2026 — T3-01: cierre local de hallazgos comprobados y registro del paquete Q0–Q6 (rama nueva desde `983ea69`; sin commit; T3-01 NO cerrada)
 
 **Rama:** `fix/t3-01-cierre-local`, desde `983ea696b079f3cddac5f44460f8f6f4267c155c`, en la worktree `distribuidora-t3-01-cierre-local`. El commit `983ea69` y su worktree no se tocaron. Sin commit, push, merge ni deploy; sin staging ni producción. Superficie sensible (SECURITY DEFINER, event triggers, RLS): **corresponde security review (pendiente)**.

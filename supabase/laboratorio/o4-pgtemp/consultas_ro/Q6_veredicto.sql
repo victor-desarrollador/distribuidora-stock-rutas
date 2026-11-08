@@ -64,6 +64,8 @@ select nullif(concat_ws('; ',
   case when exists (select 1 from f, ex where encode(sha256(convert_to(f.prosrc, 'UTF8')), 'hex') <> ex.hash) then 'sha256 de prosrc distinto del esperado' end,
   case when exists (select 1 from f, ex where f.proconfig::text is distinct from ex.cfg) then 'proconfig distinto del esperado' end,
   case when exists (select 1 from f, lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a where a.grantee = 0) then 'EXECUTE para PUBLIC' end,
+  case when exists (select 1 from f where f.proacl is distinct from array['postgres=X/postgres'::aclitem])
+       then 'ACL distinta de {postgres=X/postgres} (E-O4-ACL)' end,
   case when coalesce(has_function_privilege('anon', to_regprocedure('public.rls_auto_enable()'), 'EXECUTE'), false)
          or coalesce(has_function_privilege('authenticated', to_regprocedure('public.rls_auto_enable()'), 'EXECUTE'), false)
          or coalesce(has_function_privilege('service_role', to_regprocedure('public.rls_auto_enable()'), 'EXECUTE'), false)

@@ -3,7 +3,8 @@ select p.oid::bigint as oid, n.nspname as esquema, p.proowner::regrole::text as 
        l.lanname, p.prorettype::regtype::text as retorno, p.proconfig,
        encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') as sha256_prosrc,
        octet_length(convert_to(p.prosrc, 'UTF8')) as bytes,
-       (p.prosqlbody is null) as sqlbody_nulo, (p.probin is null) as probin_nulo, p.proacl::text as acl
+       (p.prosqlbody is null) as sqlbody_nulo, (p.probin is null) as probin_nulo, p.proacl::text as acl,
+       (p.proacl is not distinct from array['postgres=X/postgres'::aclitem]) as acl_exacta_e_o4_acl
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   join pg_language l on l.oid = p.prolang

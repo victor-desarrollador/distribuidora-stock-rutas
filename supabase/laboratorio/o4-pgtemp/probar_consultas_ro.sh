@@ -127,6 +127,20 @@ mut M13 remediado "homonimos"                          "create schema zz_h; crea
 mut M14 remediado "homonimos"                          "create function public.rls_auto_enable(int) returns int language sql as 'select 1';" "drop function public.rls_auto_enable(int);"
 mut M15 remediado "sha256 de prosrc distinto"          "create or replace function public.rls_auto_enable() returns event_trigger language plpgsql security definer set search_path = pg_catalog, pg_temp as \$x\$ BEGIN NULL; END \$x\$;" "$REINSTALAR"
 mut M16 remediado "tabla de public sin RLS"            "create table public.zz_sin_rls (i int); alter table public.zz_sin_rls disable row level security;" "drop table public.zz_sin_rls;"
+# E-O4-ACL (sólo LOCAL; ADR-001 §18.2.2): Q6 aborta con ACL distinta de {postgres=X/postgres}; Q2 la informa.
+AC="ACL distinta de {postgres=X/postgres}"
+mut A01 remediado "$AC" "grant execute on function public.rls_auto_enable() to public;" "revoke execute on function public.rls_auto_enable() from public;"
+mut A02 remediado "$AC" "create role zz_acl nologin; grant execute on function public.rls_auto_enable() to zz_acl;" "revoke execute on function public.rls_auto_enable() from zz_acl; drop role zz_acl;"
+mut A03 remediado "$AC" "grant execute on function public.rls_auto_enable() to postgres with grant option;" "revoke grant option for execute on function public.rls_auto_enable() from postgres;"
+mut A04 remediado "$AC" "revoke execute on function public.rls_auto_enable() from postgres;" "grant execute on function public.rls_auto_enable() to postgres;"
+mut A05 remediado "$AC" "create role zz_acl nologin; grant execute on function public.rls_auto_enable() to zz_acl with grant option;" "revoke execute on function public.rls_auto_enable() from zz_acl; drop role zz_acl;"
+r2="$(VARS=(-qtA -F '|'); ro "" "$Q/Q2_funcion.sql" | grep -c '|t$')"
+chk "$([ "$r2" -ge 1 ] && echo ok)" "A06 Q2 informa acl_exacta_e_o4_acl = t con la ACL exacta"
+printf 'grant execute on function public.rls_auto_enable() to postgres with grant option;\n' | lab_sql postgres -q >/dev/null 2>&1
+r3="$(VARS=(-qtA -F '|'); ro "" "$Q/Q2_funcion.sql" | grep -c '|f$')"
+printf 'revoke grant option for execute on function public.rls_auto_enable() from postgres;\n' | lab_sql postgres -q >/dev/null 2>&1
+chk "$([ "$r3" -ge 1 ] && echo ok)" "A07 Q2 informa acl_exacta_e_o4_acl = f con WITH GRANT OPTION"
+escenario "A08 ACL restaurada / esperado remediado"   remediado NULL
 # Q4: rama con historial de migraciones (como en un proyecto Supabase real)
 printf "%s\n" "create schema supabase_migrations; create table supabase_migrations.schema_migrations (version text primary key, name text); insert into supabase_migrations.schema_migrations values ('20261110120000', 'o4_pgtemp_remediacion');" | lab_sql postgres -q >/dev/null 2>"$OUT/hist.stderr"
 VARS=(); r="$(ro "" "$Q/Q4_version.sql")"; echo "$r" > "$OUT/Q4_version.con_historial.txt"

@@ -33,6 +33,7 @@
 | v1.5 + anexo §18.4 (E-SL1 propuesta) | Claude Code | Agrega 18.4.16: enmienda E-SL1 (paso 0 de rechazo de transacciones de sólo lectura en `abrir_jornada` y `reasignar_vendedor`, código `25006 jornada_metodo_no_permitido`), como **PROPUESTA TÉCNICA NO APROBADA**, con la dirección técnica humana del 03/11/2026 registrada sin aprobarla. No modifica 18.4.1 a 18.4.15 ni el estado de la ADR; no autoriza producción. |
 | v1.5 + anexo §18.4 (E-SL1 aprobada) | Claude Code | Registra la decisión humana del 04/11/2026: E-SL1 (18.4.16) queda **APROBADA PARA VALIDACIÓN CONTROLADA**, con el texto presentado y sin cambios, como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006 jornada_metodo_no_permitido`) y §16 T14. El punto 4 de la dirección técnica rige para `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida` en sus tareas autorizadas. No modifica 18.4.1 a 18.4.15, no cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. |
 | v1.5 + anexo §18.2.1 (O-4 RB + RA) | Claude Code | Registra la decisión humana del 07/11/2026 (14:13, America/Argentina/Tucuman) que aprueba, **para validación controlada y sólo como norma**, la alternativa A de la enmienda de O-4: contrato verificable RB + RA de `public.rls_auto_enable()` (§18.2.1). No cambia el estado de la ADR, no autoriza migraciones en staging ni en producción y no resuelve F7, F8, H-04 ni PB12C. |
+| v1.5 + anexo §18.2.2 (E-O4-ACL y T3-01-L/R) | Claude Code | Registra las decisiones humanas del 07/11/2026 sobre T3-01 (§18.2.2), **sólo para validación controlada y LOCAL**: E-O4-ACL (ACL exacta `{postgres=X/postgres}` de `public.rls_auto_enable()`), PB12C-2 resuelto, procedimiento L5 (sin acceso remoto autorizado), secuencia de creación del rol LOGIN, separación normativa T3-01-L / T3-01-R (R-STG y R-PROD), la regla de ACL distinta en plataforma hospedada y los puntos que siguen abiertos (F7, F8, B/C, H-04). No cambia el estado de la ADR, no modifica 18.2.1, no autoriza migraciones en staging ni en producción, no declara cerrado T3-01-L y no autoriza ADR-010. |
 
 ---
 
@@ -553,6 +554,49 @@ Implementación y evidencia local: `supabase/migrations/20261024232059_hardening
 - **F8:** los DDL de roles reservados y superusuario no disparan `ensure_rls`; para `supabase_admin` es una inferencia no registrada.
 - **H-04** y **PB12C:** pendientes de resolución humana.
 - Decisión entre las alternativas B (fail-closed de F7) y C (retirar O-4 con RLS explícita) a partir de evidencia de la plataforma; inventario read-only de roles con LOGIN del entorno destino; revisión de seguridad; auditoría independiente del hash que corresponda; y autorización humana explícita de staging y de producción (cada una por separado).
+
+#### 18.2.2 Decisiones humanas del 07/11/2026 sobre T3-01: E-O4-ACL, L5, secuencia LOGIN y separación T3-01-L / T3-01-R
+
+> **Alcance estricto.** Decisiones humanas **para validación controlada y LOCAL**. **No autorizan** ejecutar migraciones en staging ni en producción, **no cambian el estado de esta ADR** (APROBADA PARA VALIDACIÓN CONTROLADA), **no modifican el texto aprobado de 18.2.1**, no conceden accesos remotos y **no declaran cerrado T3-01-L**. No resuelven P8–P10 ni P12–P17 y no autorizan la implementación de ADR-010.
+
+**Base técnica auditada.** Commit `f33044db55ede0c57421a72a034d0d14e4047b4d`, rama `fix/t3-01-cierre-local`; auditoría de Codex: FAVORABLE (informada por el responsable del proyecto).
+
+**Decisiones aprobadas.**
+
+1. **PB12C-2 — RESUELTO.** Se confirma el contrato de 18.2.1: el event trigger `ensure_rls` tiene exactamente `CREATE TABLE`, `CREATE TABLE AS` y `SELECT INTO`, sin duplicados ni NULL. No requiere nueva enmienda.
+2. **E-O4-ACL — APROBADA normativamente para LOCAL.** La ACL de `public.rls_auto_enable()` debe ser **exactamente** `{postgres=X/postgres}`: una única entrada, otorgante y beneficiario `postgres`, sólo `EXECUTE`, **sin entradas adicionales ni opción de delegación** (`WITH GRANT OPTION`). Una ACL `NULL` (la ACL por defecto incluye a PUBLIC), vacía o distinta debe provocar **rechazo fail-closed**. **No se extiende a otras funciones.** Complementa el contrato RB + RA de 18.2.1; no cambia P11 ni el comportamiento de `ensure_rls`.
+3. **L5 — APROBADO como procedimiento, sin acceso remoto autorizado.** El historial de migraciones (`supabase_migrations.schema_migrations`, sólo `version` y `name`) lo consulta un **operador humano autorizado, con su propia identidad**, usando **SQL revisado y fijado por hash** (el hash del SQL exacto se consigna en la autorización humana de cada ejecución). **No se otorga `USAGE` ni `SELECT` sobre `supabase_migrations` al rol dedicado de lectura.** El resultado se deposita sanitizado en la carpeta de evidencia. Es un acto remoto: no se ejecuta en local. Mientras tanto Q4 sigue informando «DEPENDENCIA PENDIENTE», y es aceptable.
+4. **Secuencia LOGIN — APROBADA.** En entornos compartidos, **primero** se aplica y verifica RB + RA y **recién después**, con **autorización separada**, se crea el rol LOGIN dedicado de lectura. Motivo: crear un rol LOGIN con `TEMP` antes de aplicar RB + RA reabre la precondición de O4-PGTEMP. **No se crean roles nuevos ahora.**
+5. **T3-01-L / T3-01-R — APROBADA la separación normativa.** T3-01-L es la aceptación técnica **local** y exige cumplir las condiciones L-01 a L-12 sobre un **único hash H_L**. T3-01-R se divide en **R-STG** (staging) y **R-PROD** (producción), con autorizaciones independientes. **Aprobar la separación no significa que T3-01-L esté cerrado.**
+6. **F7, F8 y B/C — ABIERTOS.** No se elige la alternativa B ni la C. Siguen siendo bloqueos para la aceptación productiva.
+7. **H-04 — ABIERTO.** No se acepta ni se cierra un hallazgo cuyo contenido no fue recuperado. Se debe solicitar a Codex una reconstrucción puntual antes de decidir.
+8. **ACL en plataforma hospedada.** No se aprueba ninguna excepción por anticipado. Si la ACL real difiere de la exacta, **se detiene la secuencia** y se presenta cada diferencia (beneficiario, privilegio, opción de delegación) para **autorización nominada**. **Nunca** se admite `EXECUTE` para PUBLIC, `anon`, `authenticated` ni `service_role`. Ninguna corrección con `GRANT`/`REVOKE` se aplica sin autorización humana separada.
+
+**Condiciones de T3-01-L (todas, sobre un único hash H_L).**
+
+- L-01 Árbol limpio en H_L; todas las evidencias vinculadas estrictamente (`GIT_COMMIT_ESPERADO` / `GIT_ARBOL_ESPERADO`); evidencia con árbol sucio = «NO VINCULADA» y no cuenta.
+- L-02 Migraciones: las 25 de la línea T3-01 sin cambios de contenido respecto de `983ea69`, salvo decisión humana nominada. La migración O-4 (RB + RA, cuerpo SHA-256 `e1b231fb…`, `proconfig = {search_path=pg_catalog, pg_temp}`) no contiene el cuerpo vulnerable `325ae266…`.
+- L-03 Suite oficial `supabase test db` en H_L: 0 fallas (cifra a registrar).
+- L-04 Preflight `validar_topologia_propietario_rpc.sql` ejecutado en SOLO LECTURA sobre la base construida con el CLI desde H_L: exitoso; inventario cerrado de 40 firmas; etiquetas como multiconjunto ordenado; EXECUTE efectivo (PUBLIC/anon/authenticated/service_role); y, con O-4 presente, ACL exacta (E-O4-ACL).
+- L-05 Paquete de inventario RO (Q0–Q6, ejecutor, vínculo de evidencia): `probar_ejecutor_ro.sh` y `probar_consultas_ro.sh` sin fallas, digest de imagen del repositorio (.004) y paridad .003.
+- L-06 Arnés de explotación O-4 X01–X08 re-ejecutado contra la migración vigente, todos con el resultado esperado.
+- L-07 `probar_o4_docker.sh` (M-01/B-01) y O-4 presente sin fallas.
+- L-08 Decisiones humanas registradas: PB12C-2 (cierre), E-O4-ACL, H-04 (recuperar o caracterizar) y procedimiento L5. *Nota: H-04 sigue ABIERTO (decisión 7); mientras no se recupere o caracterice con aceptación humana, L-08 no se cumple.*
+- L-09 Security review (`AGENTS.md` §2.4: RLS, RPC, SECURITY DEFINER, grants, `service_role`, O-4) cerrada.
+- L-10 Auditoría independiente de Codex Y OpenCode sobre H_L, con dictámenes archivados; ningún hallazgo bloqueante abierto.
+- L-11 Aprobación humana explícita de H_L como «T3-01-L cerrado».
+- L-12 Cualquier cambio posterior a la auditoría genera un hash nuevo y se re-audita (`AGENTS.md` §2.3.4); máximo 3 ciclos.
+
+**T3-01-R.** R-STG (staging) y R-PROD (producción) son hitos separados; cada paso remoto requiere autorización humana propia y nominada. Nada de T3-01-L ni de R-STG habilita producción. El lote de migraciones a aplicar, el rol dedicado de lectura y la ejecución de Q0–Q6 son pasos remotos distintos y no están autorizados por esta sección.
+
+**Estado de las condiciones al registrar esta decisión.** La implementación local de E-O4-ACL (preflight, Q2/Q6, pruebas) está en la rama `feat/t3-01-l-acl-exacta`, **sin commit y sin auditar**. T3-01-L **no está cerrado**: no hay H_L designado, falta la verificación sobre ese hash, la security review, la auditoría de Codex y OpenCode sobre el hash final y la aprobación humana.
+
+**Pendientes (siguen abiertos).**
+
+- **F7, F8 y la decisión B/C**, con evidencia de plataforma (bloquean producción).
+- **H-04:** reconstrucción puntual por Codex y decisión humana posterior.
+- Todo acceso remoto: lecturas previas, lote de migraciones, rol dedicado y Q0–Q6, proyecto hospedado descartable para B/C; cada uno con autorización separada.
+- La cabecera de la migración `20261110120000_o4_pgtemp_remediacion.sql` sigue diciendo «PROPUESTA NO APROBADA»: no se modifica para preservar el hash auditado (L-02).
 
 ### 18.3 Decisiones acotadas al dominio Stock (25/10/2026)
 

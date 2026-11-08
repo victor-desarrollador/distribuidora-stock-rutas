@@ -160,6 +160,9 @@ select ok(
              = 'e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e'
          and not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
                           where a.grantee = 0)
+         -- E-O4-ACL (ADR-001 §18.2.2, sólo LOCAL): ACL exactamente {postgres=X/postgres};
+         -- proacl NULL (por defecto) o cualquier otra ACL no exime (coalesce → false).
+         and p.proacl = array['postgres=X/postgres'::aclitem]
          and not has_function_privilege('anon', p.oid, 'EXECUTE')
          and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
          and not has_function_privilege('service_role', p.oid, 'EXECUTE')
