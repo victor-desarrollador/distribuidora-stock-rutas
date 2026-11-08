@@ -1,6 +1,6 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 06/11/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 07/11/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
 **Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15; enmienda E-SL1 en 18.4.16, **aprobada para validación controlada el 04/11/2026**)
 
@@ -33,6 +33,7 @@
 | v1.5 + anexo §18.4 (E-SL1 propuesta) | Claude Code | Agrega 18.4.16: enmienda E-SL1 (paso 0 de rechazo de transacciones de sólo lectura en `abrir_jornada` y `reasignar_vendedor`, código `25006 jornada_metodo_no_permitido`), como **PROPUESTA TÉCNICA NO APROBADA**, con la dirección técnica humana del 03/11/2026 registrada sin aprobarla. No modifica 18.4.1 a 18.4.15 ni el estado de la ADR; no autoriza producción. |
 | v1.5 + anexo §18.4 (E-SL1 aprobada) | Claude Code | Registra la decisión humana del 04/11/2026: E-SL1 (18.4.16) queda **APROBADA PARA VALIDACIÓN CONTROLADA**, con el texto presentado y sin cambios, como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006 jornada_metodo_no_permitido`) y §16 T14. El punto 4 de la dirección técnica rige para `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida` en sus tareas autorizadas. No modifica 18.4.1 a 18.4.15, no cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. |
 | v1.5 + remisión ADR-010 | Claude Code | Registra, por decisión humana del 06/11/2026, una nota de remisión al final de §18.3 hacia ADR-010 (APROBADA, normativa): excepción acotada a P15-stock para las intenciones persistidas de stock y su relación con P13-stock y P16-stock. No modifica ninguna decisión de §18.1–§18.4, no cambia el estado de la ADR ni autoriza implementación ni producción. |
+| v1.5 + anexo §18.4 (E-PL1) | Claude Code | Formaliza E-PL1 (18.4.2.2), **APROBADA PARA VALIDACIÓN CONTROLADA** (local/staging) por decisión humana expresa (A-1, A-2, A-3, A-4): agrega la RPC de lectura `listar_vendedores_jornada()` y amplía **expresamente** D-2 (18.4.2.1) de cuatro a cinco columnas (`nombre`) para `lector_perfiles_rpc` y la vista `privado.perfiles_empresa_gestion`. No cambia ninguna política de RLS, ningún rol autorizado ni el estado de la ADR; no autoriza staging ni producción. |
 
 ---
 
@@ -623,6 +624,7 @@ Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotenci
 | `registrar_carga(uuid, uuid, uuid[], integer[])` | `uuid` operación | `dueno`, `encargado` | `abierta`, `cargada` |
 | `registrar_descarga(uuid, uuid, uuid[], integer[], text)` | `uuid` operación | `dueno`, `encargado` | `cargada` |
 | `confirmar_salida(uuid, uuid)` | `uuid` operación | `dueno`, `encargado` | `cargada`, carga neta > 0 |
+| `listar_vendedores_jornada()` — sin parámetros (E-PL1, 18.4.2.2) | `TABLE (usuario_id uuid, nombre text, rol text)` | `dueno`, `encargado` (activos) | lectura pura; sin estado de jornada |
 
 **Grants.** En ninguno de estos objetos reciben privilegios `service_role` ni `anon`; `authenticated` no recibe DML.
 
@@ -632,7 +634,7 @@ Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotenci
 | Historiales | `SELECT` | `INSERT` por columna (todas salvo `id`, `tipo_operacion` y `creado_en`). Sin `SELECT`. | — |
 | `operaciones` | sin cambios | se agrega `INSERT (jornada_id)` | — |
 | `movimientos_stock` | sin cambios | se agrega `INSERT (jornada_id)` | — |
-| `perfiles` | sin cambios | **sin cambios** (sólo `SELECT`; sus políticas no cambian) | `SELECT (usuario_id, empresa_id, rol, activo)` |
+| `perfiles` | sin cambios | **sin cambios** (sólo `SELECT`; sus políticas no cambian) | `SELECT (usuario_id, empresa_id, rol, activo, nombre)` (cinco columnas desde E-PL1, 18.4.2.2; antes cuatro) |
 | `privado.perfiles_empresa_gestion` (vista) | — | `SELECT` | owner |
 | `privado.empresa_gestion_actual()` | — | `EXECUTE` | — |
 | esquema `privado` | `USAGE` (sin cambios) | `USAGE` (sin cambios) | **ninguno** en el estado final; `CREATE` sólo transitorio durante la migración (18.4.2.1) |
@@ -664,9 +666,9 @@ Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotenci
 
 | Pieza | Especificación |
 |---|---|
-| **Rol `lector_perfiles_rpc`** | `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`. No es miembro de ningún rol. Su único miembro es `postgres`, con las dos filas del patrón O-3 (ver «Membresía»). No es propietario de tablas ni de funciones. Su único privilegio es `SELECT (usuario_id, empresa_id, rol, activo)` sobre `public.perfiles`. En el estado final no tiene `USAGE` ni `CREATE` en ningún esquema: no los necesita para resolver la vista ni la política. Se crea en la misma migración que su único objeto (P2–P4: sin objetos anticipados). |
+| **Rol `lector_perfiles_rpc`** | `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`. No es miembro de ningún rol. Su único miembro es `postgres`, con las dos filas del patrón O-3 (ver «Membresía»). No es propietario de tablas ni de funciones. Su único privilegio es `SELECT (usuario_id, empresa_id, rol, activo, nombre)` sobre `public.perfiles` (cinco columnas desde E-PL1, 18.4.2.2; el texto aprobado originalmente de D-2 fijaba cuatro y excluía `nombre`). En el estado final no tiene `USAGE` ni `CREATE` en ningún esquema: no los necesita para resolver la vista ni la política. Se crea en la misma migración que su único objeto (P2–P4: sin objetos anticipados). |
 | **Capa 1: helper `privado.empresa_gestion_actual() returns uuid`** | `LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''`, owner `propietario_rpc`. Cuerpo: `select p.empresa_id from public.perfiles p where p.usuario_id = privado.usuario_actual() and p.activo and p.rol in ('dueno','encargado')`. Devuelve NULL si el llamador no es dueño o encargado activo. `REVOKE ALL` de `PUBLIC`, `anon`, `authenticated` y `service_role`; `GRANT EXECUTE` sólo a `propietario_rpc`. Corre como `propietario_rpc` y sólo lo alcanza la política vigente `perfiles_select_propio_propietario_rpc`, que no llama a ninguna función. Por ser `SECURITY DEFINER` y tener `proconfig`, no se inlinea. Sin parámetros: no deriva empresa ni rol del JWT, sólo de `perfiles` (P5–P7). |
-| **Capa 2: vista `privado.perfiles_empresa_gestion`** | `WITH (security_invoker = false, security_barrier = true) AS select usuario_id, empresa_id, rol, activo from public.perfiles`. Owner `lector_perfiles_rpc`, así que la RLS de `perfiles` se le aplica a ese rol. `REVOKE ALL` de `PUBLIC`, `anon`, `authenticated` y `service_role`; `GRANT SELECT` sólo a `propietario_rpc`. Vive en `privado`, que no está expuesto. |
+| **Capa 2: vista `privado.perfiles_empresa_gestion`** | `WITH (security_invoker = false, security_barrier = true) AS select usuario_id, empresa_id, rol, activo, nombre from public.perfiles` (cinco columnas desde E-PL1, 18.4.2.2; `nombre` va al final). Owner `lector_perfiles_rpc`, así que la RLS de `perfiles` se le aplica a ese rol. `REVOKE ALL` de `PUBLIC`, `anon`, `authenticated` y `service_role`; `GRANT SELECT` sólo a `propietario_rpc`. Vive en `privado`, que no está expuesto. |
 | **Política `perfiles_select_empresa_lector`** | `ON public.perfiles FOR SELECT TO lector_perfiles_rpc USING (empresa_id = (select privado.empresa_gestion_actual()))`. Llamador no gestor, inactivo, sin perfil o sin `sub` ⇒ 0 filas. Sólo perfiles de la empresa del llamador. |
 
 **Por qué no hay recursión.**
@@ -688,7 +690,7 @@ No se introduce `INHERIT` ni ningún permiso para roles de la Data API.
 **Procedimiento de migración (orden obligatorio).**
 1. `CREATE ROLE lector_perfiles_rpc NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` (si ya existe por ser global del clúster, se verifican sus atributos y se falla si difieren, como con `propietario_rpc`).
 2. `GRANT lector_perfiles_rpc TO postgres WITH INHERIT FALSE, SET TRUE`.
-3. `GRANT SELECT (usuario_id, empresa_id, rol, activo) ON public.perfiles TO lector_perfiles_rpc`.
+3. `GRANT SELECT (usuario_id, empresa_id, rol, activo) ON public.perfiles TO lector_perfiles_rpc` (procedimiento original de D-2; `nombre` se agrega después con la migración de E-PL1, 18.4.2.2).
 4. Helper (patrón O-3): `CREATE FUNCTION` → `GRANT CREATE ON SCHEMA privado TO propietario_rpc` → `ALTER FUNCTION … OWNER TO propietario_rpc` → `REVOKE CREATE ON SCHEMA privado FROM propietario_rpc` → `SET ROLE propietario_rpc` → `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role` → `GRANT EXECUTE … TO propietario_rpc` → `RESET ROLE`.
 5. Vista: `CREATE VIEW` → `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role` → `GRANT SELECT … TO propietario_rpc` → **`GRANT CREATE ON SCHEMA privado TO lector_perfiles_rpc`** → `ALTER VIEW … OWNER TO lector_perfiles_rpc` → **`REVOKE CREATE ON SCHEMA privado FROM lector_perfiles_rpc`**. Sin el `CREATE` temporal, el `ALTER … OWNER` falla con `42501` (18.4.12).
 6. `CREATE POLICY perfiles_select_empresa_lector`.
@@ -718,6 +720,37 @@ No se introduce `INHERIT` ni ningún permiso para roles de la Data API.
 | `USING (true)` | Permite lectura entre empresas |
 | GUC de sesión | Lo puede fijar la propia sesión |
 | FK con `activo` | Bloquea la baja posterior que ADR-007 §2.3 admite |
+
+##### 18.4.2.2 Enmienda E-PL1 — `listar_vendedores_jornada()` y ampliación de D-2 (APROBADA PARA VALIDACIÓN CONTROLADA, local/staging)
+
+**Registro.** Decisión humana expresa (A-1, A-2, A-3 y A-4, con E-PL1 corregida), registrada el 07/11/2026. Alcance: jornadas (ADR-007 §2.3). **No autoriza staging ni producción**, no cambia el estado de la ADR, no cambia ninguna política de RLS ni los roles autorizados, y no es una regla funcional nueva: sólo da al dueño o encargado una lectura protegida de los candidatos a vendedor que ADR-007 §2.3 ya define.
+
+**E-PL1.1 — RPC de lectura.** Se agrega al catálogo de 18.4.2 la RPC `listar_vendedores_jornada()`: fachada `public.listar_vendedores_jornada()` (`SECURITY INVOKER`, `search_path = ''`, owner `postgres`, `LANGUAGE sql`, `STABLE`) que delega en `privado.listar_vendedores_jornada()` (`SECURITY DEFINER`, `STABLE`, `search_path = ''`, owner `propietario_rpc`, `LANGUAGE plpgsql`). Sin parámetros y sin sobrecargas (18.4.6). Es una lectura pura: no crea `operaciones`, no usa clave de idempotencia ni bloqueos, y se admite en transacciones de sólo lectura (E-SL1 no le aplica).
+
+**E-PL1.2 — Autorización y errores.**
+- Sin identidad (`privado.usuario_actual()` NULL): `PT401 jornada_no_autenticado`.
+- Llamador que no es `dueno` o `encargado` activo (vendedor, sin perfil, perfil inactivo): `PT403 jornada_no_autorizado`.
+- Los códigos son los ya definidos en 18.4.7; no se agregan códigos nuevos.
+- `anon` y `service_role` reciben `42501` (sin `EXECUTE`).
+
+**E-PL1.3 — Respuesta.** `TABLE (usuario_id uuid, nombre text, rol text)`, exactamente esas tres columnas y en ese orden. Filas: perfiles con `activo = true` de la **empresa del llamador** cuyo `rol` es `dueno`, `encargado` o `vendedor_piloto` (los tres roles que ADR-007 §2.3 admite como vendedor), incluido el propio llamador. Orden: `ORDER BY nombre COLLATE "C", usuario_id`. Defensa en profundidad (H-01): además de la RLS del lector, la implementación compara el `empresa_id` de cada perfil con el de la empresa del llamador obtenida una sola vez de `privado.empresa_gestion_actual()` (sin cambiar el resultado esperado ni los permisos); declara sus variables con tipos calificados (`pg_catalog.uuid`) por la regla de `pg_temp` (P7). `nombre` se devuelve tal como está almacenado, sin transformación: el esquema garantiza que no es nulo ni vacío (`NOT NULL` y `CHECK perfiles_nombre_no_vacio`). No se expone `usuario` (identificador de login), ni `creado_en`, ni datos de otra empresa.
+
+**E-PL1.4 — Ampliación expresa de D-2.** Esta enmienda **modifica la exclusión de `nombre` de 18.4.2.1**: `lector_perfiles_rpc` pasa a tener `SELECT` sobre cinco columnas de `public.perfiles` (`usuario_id`, `empresa_id`, `rol`, `activo`, `nombre`) y `privado.perfiles_empresa_gestion` pasa a exponer esas cinco, en ese orden. No se exponen `usuario` ni `creado_en`. La política `perfiles_select_empresa_lector` y las demás políticas de `perfiles` no cambian. Ningún otro rol recibe privilegios nuevos sobre `perfiles` ni sobre la vista.
+
+**E-PL1.5 — Mecánica de la migración.** Antes de cualquier cambio la migración verifica fail-closed el contrato de D-2 vigente (copia literal de la sección 1b de `20261030120000_jornadas_esquema.sql`: atributos del rol `lector_perfiles_rpc`, membresías, privilegios efectivos, ACL por defecto, helper `empresa_gestion_actual()` —definición, owner y ACL—, política `perfiles_select_empresa_lector` —expresión, roles y comando—, vista y sus opciones) más los atributos de `propietario_rpc` y la ausencia de configuración propia de ambos roles (`pg_db_role_setting`); si algo difiere, aborta sin aplicar grants ni cambiar la vista. Luego ejecuta, en un único bloque `DO` (atómico aunque el ejecutor no envuelva el archivo en una transacción), en este orden:
+1. `GRANT SELECT (nombre) ON public.perfiles TO lector_perfiles_rpc`.
+2. `GRANT CREATE ON SCHEMA privado TO lector_perfiles_rpc` (transitorio; no se concede `USAGE`).
+3. `SET ROLE lector_perfiles_rpc`.
+4. `CREATE OR REPLACE VIEW privado.perfiles_empresa_gestion WITH (security_invoker = false, security_barrier = true) AS SELECT usuario_id, empresa_id, rol, activo, nombre FROM public.perfiles`. Las opciones `WITH` son obligatorias: `CREATE OR REPLACE VIEW` las descarta si se omiten.
+5. `RESET ROLE`.
+6. `REVOKE CREATE ON SCHEMA privado FROM lector_perfiles_rpc`.
+7. Verificación fail-closed dentro del mismo bloque: `lector_perfiles_rpc` sin `USAGE` ni `CREATE` en `privado`, sin `CREATE` en `public` y sin entradas propias en la ACL de ningún esquema; vista de tipo `v`, dueña `lector_perfiles_rpc`, con exactamente `security_barrier=true` y `security_invoker=false`; columnas exactas y ordenadas; ACL de la vista igual a `propietario_rpc:SELECT`; `lector_perfiles_rpc` dueño de una sola relación y de ninguna función; sin privilegios de escritura sobre `perfiles`; columnas con `SELECT` exactamente las cinco.
+
+Las migraciones ya aplicadas no se editan (ADR-009): el precheck de cuatro columnas de `20261030120000_jornadas_esquema.sql` corre antes de esta migración y no se rompe. Toda verificación futura del contrato de D-2 usa el de cinco columnas.
+
+**E-PL1.6 — Acceso a la implementación privada.** `authenticated` conserva `EXECUTE` sobre `privado.listar_vendedores_jornada()` y `USAGE` sobre `privado`: ambos son necesarios para que la fachada `SECURITY INVOKER` funcione (verificado: sin cualquiera de los dos la fachada falla con `42501`). No existe una ruta con menos controles: la llamada directa a la función privada aplica las mismas comprobaciones y devuelve lo mismo. La barrera de exposición externa es que `privado` no está expuesto por la Data API (`schemas = ["public", "graphql_public"]` en `supabase/config.toml`). `anon`, `service_role` y `lector_perfiles_rpc` no tienen `USAGE` sobre `privado` ni `EXECUTE`; `propietario_rpc` no tiene `EXECUTE` sobre la fachada. `service_role` no recibe ninguna excepción nueva (P11).
+
+**E-PL1.7 — Pruebas obligatorias** (`supabase/tests/jornadas_listar_vendedores.test.sql`, más los ajustes de P2, P4 y P14 en `lector_perfiles_rpc.test.sql`, y las pruebas negativas de deriva del precheck en `supabase/laboratorio/e-pl1/precheck_drift.sh`, que necesitan superusuario y un contenedor aislado): positivos (dueño y encargado, tres roles, sólo activos y de la empresa propia, orden y columnas exactas); negativos (`anon` y `service_role` `42501`; vendedor, sin perfil, dueño inactivo y encargado inactivo `PT403`; sin `sub` `PT401`; otra empresa); acceso directo a la función privada (mismas comprobaciones) y a la vista (`42501`); defensa en profundidad con la política del lector alterada (`USING (true)`); privilegios efectivos (`has_*_privilege`, no sólo ACL) y ACL exactas de ambas funciones; `authenticated` ve únicamente su perfil por `public.perfiles`; columnas y `reloptions` exactas de la vista, dueño y ACL; `lector_perfiles_rpc` sin `USAGE`/`CREATE` en `privado`; atomicidad con fallo inyectado; `nombre` no nulo ni vacío; transacción de sólo lectura; `privado` no expuesto por la API; políticas de `perfiles` sin cambios.
 
 #### 18.4.3 Orden de ejecución de cada implementación
 
@@ -948,9 +981,9 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 | # | Caso | Esperado |
 |---|---|---|
 | P1 | **Membresía (patrón O-3)**, igual que para `propietario_rpc` en `hardening_adr001`: exactamente dos filas para `roleid = lector_perfiles_rpc`, ambas con `member = postgres`: (a) grantor con `rolsuper`, `admin = t`, `inherit = f`, `set = f`; (b) grantor `postgres`, `admin = f`, `inherit = f`, `set = t`. Ninguna fila con `inherit = t`. `lector_perfiles_rpc` no es miembro de ningún rol. `pg_has_role(postgres, …, 'SET') = t` y `'USAGE' = f`. `anon`, `authenticated`, `authenticator`, `service_role` y `propietario_rpc` sin SET ni USAGE | exacto |
-| P2 | Atributos NOLOGIN/NOSUPERUSER/NOBYPASSRLS/NOCREATEDB/NOCREATEROLE/NOREPLICATION; privilegio de 4 columnas `SELECT` sobre `perfiles`; ningún otro privilegio de tabla; sin `USAGE` ni `CREATE` sobre `privado` ni `public`; dueño de exactamente una relación (la vista) y de ninguna función | exacto |
+| P2 | Atributos NOLOGIN/NOSUPERUSER/NOBYPASSRLS/NOCREATEDB/NOCREATEROLE/NOREPLICATION; privilegio de 5 columnas `SELECT` sobre `perfiles` (`usuario_id`, `empresa_id`, `rol`, `activo`, `nombre`; E-PL1); ningún otro privilegio de tabla; sin `USAGE` ni `CREATE` sobre `privado` ni `public`; dueño de exactamente una relación (la vista) y de ninguna función | exacto |
 | P3 | Helper: `SECURITY DEFINER`, owner `propietario_rpc`, `search_path=""`, `STABLE`, sin parámetros, ACL exacta (sólo `propietario_rpc`) y sin sobrecargas; `has_function_privilege` falso para `lector_perfiles_rpc`, `authenticated`, `anon`, `service_role` y `postgres` | exacto |
-| P4 | Vista: owner `lector_perfiles_rpc`, `security_invoker=false`, `security_barrier=true`, 4 columnas, ACL sólo con owner y `SELECT` de `propietario_rpc` | exacto |
+| P4 | Vista: owner `lector_perfiles_rpc`, `security_invoker=false`, `security_barrier=true`, 5 columnas (`nombre` al final; E-PL1), ACL sólo con owner y `SELECT` de `propietario_rpc` | exacto |
 | P5 | Políticas de `perfiles`: las de `authenticated` y de `propietario_rpc` iguales a hoy; una sola nueva, `SELECT TO lector_perfiles_rpc`; ninguna de escritura | exacto |
 | P6 | Como `propietario_rpc`, con el claim de un dueño de A, se lee la vista | todos los perfiles de A, incluidos inactivos y vendedores; ninguno de B; sin `42P17` ni `54001` |
 | P7 | Lo mismo con encargado de A, vendedor de A, dueño inactivo, sin perfil y sin `sub` | encargado: los de A; los otros cuatro: 0 filas |

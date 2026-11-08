@@ -59,14 +59,14 @@ select ok(
 
 select ok(
   (select bool_and(has_column_privilege('lector_perfiles_rpc', 'public.perfiles', c, 'SELECT'))
-     from unnest(array['usuario_id', 'empresa_id', 'rol', 'activo']) c),
-  'P2: SELECT por columna sobre usuario_id, empresa_id, rol y activo de perfiles');
+     from unnest(array['usuario_id', 'empresa_id', 'rol', 'activo', 'nombre']) c),
+  'P2 (E-PL1): SELECT por columna sobre usuario_id, empresa_id, rol, activo y nombre de perfiles');
 
 select ok(
   not exists (
-    select 1 from unnest(array['usuario', 'nombre', 'creado_en']) c
+    select 1 from unnest(array['usuario', 'creado_en']) c
      where has_column_privilege('lector_perfiles_rpc', 'public.perfiles', c, 'SELECT')),
-  'P2: sin SELECT sobre usuario, nombre ni creado_en');
+  'P2 (E-PL1): sin SELECT sobre usuario ni creado_en');
 
 select ok(
   not has_table_privilege('lector_perfiles_rpc', 'public.perfiles',
@@ -150,8 +150,8 @@ select is(
          where attrelid = 'privado.perfiles_empresa_gestion'::regclass
            and attnum > 0 and not attisdropped
          order by attnum),
-  array['usuario_id', 'empresa_id', 'rol', 'activo'],
-  'P4: la vista expone exactamente usuario_id, empresa_id, rol y activo');
+  array['usuario_id', 'empresa_id', 'rol', 'activo', 'nombre'],
+  'P4 (E-PL1): la vista expone exactamente usuario_id, empresa_id, rol, activo y nombre');
 
 select is(
   array(select a.grantee::regrole::text || ':' || a.privilege_type
@@ -366,18 +366,18 @@ reset role;
 -- ===========================================================================
 -- P14 — leer perfiles como lector_perfiles_rpc falla cerrado
 -- ===========================================================================
--- Para llegar a la política hay que pedir sólo las cuatro columnas concedidas:
--- con `select *` el rechazo es anterior (privilegio de columna sobre usuario,
--- nombre y creado_en) y no demuestra nada sobre la política. Los mensajes se
+-- Para llegar a la política hay que pedir sólo las cinco columnas concedidas
+-- (E-PL1: con `nombre`): con `select *` el rechazo es anterior (privilegio de
+-- columna sobre usuario y creado_en) y no demuestra nada sobre la política. Los mensajes se
 -- comparan además del SQLSTATE para fijar la causa; dependen de lc_messages
 -- en inglés (Supabase local: en_US.UTF-8).
 set local role lector_perfiles_rpc;
 select throws_ok(
-  $$select usuario_id, empresa_id, rol, activo from public.perfiles$$,
+  $$select usuario_id, empresa_id, rol, activo, nombre from public.perfiles$$,
   '42501', 'permission denied for function empresa_gestion_actual',
-  'P14: lector_perfiles_rpc, SELECT de las cuatro columnas concedidas de public.perfiles: 42501 por falta de EXECUTE del helper de la política (falla cerrado, sin recursión)');
+  'P14: lector_perfiles_rpc, SELECT de las cinco columnas concedidas de public.perfiles: 42501 por falta de EXECUTE del helper de la política (falla cerrado, sin recursión)');
 select throws_ok('select * from public.perfiles', '42501', 'permission denied for table perfiles',
-  'P14 (privilegio de columna): SELECT * de public.perfiles como lector falla antes de evaluar la política, porque usuario, nombre y creado_en no están concedidas');
+  'P14 (privilegio de columna): SELECT * de public.perfiles como lector falla antes de evaluar la política, porque usuario y creado_en no están concedidas');
 select throws_ok(
   $$insert into public.perfiles (usuario_id, empresa_id, usuario, nombre, rol)
     values ('c2c2c2c2-0000-4000-8000-000000000001', 'a2a2a2a2-0000-4000-8000-000000000000',
@@ -387,14 +387,14 @@ reset role;
 
 -- Con USAGE transitorio sobre public y privado (dentro de la transacción de
 -- prueba) el resultado no cambia: `public` ya es usable por herencia de PUBLIC,
--- y la lectura de las cuatro columnas y la de la vista fallan por el EXECUTE
+-- y la lectura de las cinco columnas y la de la vista fallan por el EXECUTE
 -- del helper de la política; `select *` sigue fallando por las columnas.
 grant usage on schema public, privado to lector_perfiles_rpc;
 set local role lector_perfiles_rpc;
 select throws_ok(
-  $$select usuario_id, empresa_id, rol, activo from public.perfiles$$,
+  $$select usuario_id, empresa_id, rol, activo, nombre from public.perfiles$$,
   '42501', 'permission denied for function empresa_gestion_actual',
-  'P14: con USAGE de esquema, leer las cuatro columnas de perfiles como lector falla con 42501 por el EXECUTE del helper (no recursa)');
+  'P14: con USAGE de esquema, leer las cinco columnas de perfiles como lector falla con 42501 por el EXECUTE del helper (no recursa)');
 select throws_ok('select * from public.perfiles', '42501', 'permission denied for table perfiles',
   'P14 (privilegio de columna): con USAGE de esquema, SELECT * de public.perfiles sigue fallando por las columnas no concedidas');
 select throws_ok('select * from privado.perfiles_empresa_gestion', '42501',
