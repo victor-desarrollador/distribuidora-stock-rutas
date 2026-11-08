@@ -15,9 +15,14 @@ import {
   MENSAJE_CAMION_NO_OFRECIDO,
   MENSAJE_INFO_SIN_COINCIDENCIA,
   MENSAJE_INFO_SIN_LECTURA,
+  MENSAJE_RECUPERACION_DUPLICADA,
+  MENSAJE_RECUPERACION_VENDEDOR_OCUPADO,
+  MENSAJE_RIESGO_RECARGA,
   MENSAJE_VENDEDOR_INVALIDO,
   crearControladorApertura,
   crearControladorVendedores,
+  faseConRiesgoApertura,
+  recuperacionPara,
   validarApertura,
   type EntradaApertura,
   type EstadoVendedores,
@@ -34,6 +39,14 @@ import fuenteHook from "../hooks/useAperturaJornada.ts?raw";
 import fuenteHookVendedores from "../hooks/useVendedoresJornada.ts?raw";
 import fuentePanel from "./JornadaAperturaPanel.tsx?raw";
 import fuentePantalla from "./Jornadas.tsx?raw";
+import { instalarAvisoSalida } from "../hooks/useAvisoSalidaPagina";
+import fuenteAviso from "../hooks/useAvisoSalidaPagina.ts?raw";
+
+// T-2: orientación esperada por código (sólo estos dos la llevan).
+const RECUPERACION_ESPERADA: Readonly<Record<string, string>> = {
+  jornada_duplicada: MENSAJE_RECUPERACION_DUPLICADA,
+  jornada_vendedor_ocupado: MENSAJE_RECUPERACION_VENDEDOR_OCUPADO,
+};
 
 const CAMION = "22222222-2222-4222-8222-222222222222";
 const CAMION_2 = "44444444-4444-4444-8444-444444444444";
@@ -258,7 +271,12 @@ describe("abrir jornada: rechazos definitivos del servidor", () => {
     const m = armar({ respuestas: [rechazo(codigo)] });
     m.c.solicitar();
     await m.c.confirmar(ENTRADA, PERMITIDAS);
-    expect(m.fase()).toEqual({ fase: "error", mensaje: `msg:${codigo}` });
+    const orientacion = RECUPERACION_ESPERADA[codigo];
+    expect(m.fase()).toEqual(
+      orientacion
+        ? { fase: "error", mensaje: `msg:${codigo}`, recuperacion: { fecha: HOY, mensaje: orientacion } }
+        : { fase: "error", mensaje: `msg:${codigo}` }
+    );
     expect(m.envios).toHaveLength(1);
     expect(m.lecturas).toHaveLength(0);
     expect(m.c.claveEnCurso()).toBeNull();
@@ -387,7 +405,11 @@ describe("abrir jornada: respuesta desconocida (sólo el replay confirma)", () =
     m.c.solicitar();
     await m.c.confirmar(ENTRADA, PERMITIDAS);
     await m.c.reintentar();
-    expect(m.fase()).toEqual({ fase: "error", mensaje: "msg:jornada_duplicada" });
+    expect(m.fase()).toEqual({
+      fase: "error",
+      mensaje: "msg:jornada_duplicada",
+      recuperacion: { fecha: HOY, mensaje: MENSAJE_RECUPERACION_DUPLICADA },
+    });
     expect(m.publicadas.some((p) => p.fase === "exito")).toBe(false);
   });
 
@@ -542,5 +564,133 @@ describe("abrir jornada: evidencia estructural", () => {
     expect(p).toMatch(/apertura=\{\s*puedeAdministrar \? \(\s*<JornadaAperturaPanel/);
     expect(p).toMatch(/apertura\.solicitar\(\);\s*vendedores\.recargar\(\);/);
     expect(p).toMatch(/useAperturaJornada\(jornadas\.recargar, vendedores\.recargar\)/);
+  });
+});
+
+describe("T-1: aviso al recargar o cerrar durante una apertura con riesgo", () => {
+  const FASES: Array<[FaseApertura, boolean]> = [
+    [{ fase: "inactiva" }, false],
+    [{ fase: "editando" }, false],
+    [{ fase: "editando", error: "x" }, false],
+    [{ fase: "enviando", datos: ENTRADA }, true],
+    [{ fase: "verificando", datos: ENTRADA }, true],
+    [{ fase: "desconocido", datos: ENTRADA, mensaje: "m", informacion: null }, true],
+    [{ fase: "exito", jornadaId: JORNADA, datos: ENTRADA, mensaje: "ok" }, false],
+    [{ fase: "exito", jornadaId: JORNADA, datos: ENTRADA, mensaje: "ok", releida: true }, false],
+    [{ fase: "error", mensaje: "e" }, false],
+    [{ fase: "error", mensaje: "e", recuperacion: { fecha: HOY, mensaje: "r" } }, false],
+  ];
+
+  it.each(FASES)("%o → aviso %s", (fase, esperado) => {
+    expect(faseConRiesgoApertura(fase)).toBe(esperado);
+  });
+
+  it("el controlador recorre fases con y sin riesgo: activo al enviar y en la duda; inactivo al resolverse", async () => {
+    const m = armar({ respuestas: [perdida, ok()] });
+    m.c.solicitar();
+    await m.c.confirmar(ENTRADA, PERMITIDAS);
+    await m.c.reintentar();
+    expect(m.publicadas.map((f) => [f.fase, faseConRiesgoApertura(f)])).toEqual([
+      ["editando", false],
+      ["enviando", true],
+      ["verificando", true],
+      ["desconocido", true],
+      ["enviando", true],
+      ["exito", false],
+    ]);
+  });
+
+  it("instalarAvisoSalida pide confirmación con beforeunload y la quita al limpiar", () => {
+    const destino = new EventTarget();
+    const quitar = instalarAvisoSalida(destino);
+    const conAviso = new Event("beforeunload", { cancelable: true });
+    destino.dispatchEvent(conAviso);
+    expect(conAviso.defaultPrevented).toBe(true);
+    // `returnValue` depende del entorno (en Node es el indicador booleano heredado):
+    // el aviso real del navegador se comprueba en el E2E.
+    quitar();
+    const sinAviso = new Event("beforeunload", { cancelable: true });
+    destino.dispatchEvent(sinAviso);
+    expect(sinAviso.defaultPrevented).toBe(false);
+  });
+
+  it("sólo escucha beforeunload: otros eventos no se cancelan", () => {
+    const destino = new EventTarget();
+    instalarAvisoSalida(destino);
+    const otro = new Event("unload", { cancelable: true });
+    destino.dispatchEvent(otro);
+    expect(otro.defaultPrevented).toBe(false);
+  });
+
+  it("la advertencia visible no promete que el navegador muestre su aviso", () => {
+    expect(MENSAJE_RIESGO_RECARGA).toMatch(/puede pedirte confirmación/);
+    expect(MENSAJE_RIESGO_RECARGA).toMatch(/no siempre/);
+  });
+
+  it("evidencia estructural: la pantalla activa el aviso según la fase de la apertura; sin almacenamiento", () => {
+    const sin = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(sin(fuentePantalla)).toMatch(/useAvisoSalidaPagina\(faseConRiesgoApertura\(apertura\.fase\)\)/);
+    expect(/localStorage|sessionStorage|indexedDB/i.test(sin(fuenteAviso))).toBe(false);
+    expect([...sin(fuenteAviso).matchAll(/addEventListener\("beforeunload"/g)]).toHaveLength(1);
+    expect(sin(fuenteAviso)).toMatch(/removeEventListener\("beforeunload"/);
+  });
+});
+
+describe("T-2: orientación ante una posible apertura anterior", () => {
+  it("sólo jornada_duplicada y jornada_vendedor_ocupado la llevan, con la fecha de la apertura rechazada", () => {
+    expect(recuperacionPara("jornada_duplicada", "2026-11-12")).toEqual({
+      fecha: "2026-11-12", mensaje: MENSAJE_RECUPERACION_DUPLICADA,
+    });
+    expect(recuperacionPara("jornada_vendedor_ocupado", "2026-11-12")).toEqual({
+      fecha: "2026-11-12", mensaje: MENSAJE_RECUPERACION_VENDEDOR_OCUPADO,
+    });
+    for (const codigo of [
+      null, "jornada_camion_con_jornada_abierta", "jornada_conflicto_idempotencia",
+      "jornada_fecha_invalida", "jornada_no_autorizado", "42501", "toString", "__proto__",
+    ]) {
+      expect(recuperacionPara(codigo, HOY)).toBeUndefined();
+    }
+  });
+
+  it("los mensajes plantean una posibilidad, nunca afirman que la apertura se registró", () => {
+    for (const m of [MENSAJE_RECUPERACION_DUPLICADA, MENSAJE_RECUPERACION_VENDEDOR_OCUPADO]) {
+      expect(m).toMatch(/^Puede que/);
+      expect(m).toMatch(/Revisá las jornadas de esa fecha/);
+      expect(m).not.toMatch(/se abrió correctamente|registrada|confirmad/i);
+    }
+  });
+
+  it("la orientación usa la fecha de la intención (no hoy) y no lee jornadas ni declara éxito", async () => {
+    const futura = { ...ENTRADA, fecha: "2026-11-20" };
+    const m = armar({
+      respuestas: [rechazo("jornada_duplicada")],
+      lectura: { ok: true, datos: [jornada({ fecha: "2026-11-20" })], intentos: 1 },
+    });
+    m.c.solicitar();
+    await m.c.confirmar(futura, PERMITIDAS);
+    expect(m.fase()).toEqual({
+      fase: "error",
+      mensaje: "msg:jornada_duplicada",
+      recuperacion: { fecha: "2026-11-20", mensaje: MENSAJE_RECUPERACION_DUPLICADA },
+    });
+    expect(m.lecturas).toHaveLength(0);
+    expect(m.publicadas.some((f) => f.fase === "exito")).toBe(false);
+    expect(m.c.claveEnCurso()).toBeNull();
+  });
+
+  it("no cambia la idempotencia: tras la orientación, un nuevo envío es otra intención con otra clave y el mismo contrato", async () => {
+    const m = armar({ respuestas: [rechazo("jornada_vendedor_ocupado"), ok()] });
+    m.c.solicitar();
+    await m.c.confirmar(ENTRADA, PERMITIDAS);
+    await m.c.confirmar({ ...ENTRADA, vendedorId: VENDEDOR_2 }, PERMITIDAS);
+    expect(m.envios.map((e) => e.clave)).toEqual([
+      "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+      "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+    ]);
+    expect(m.envios.map((e) => Object.keys(e.comando).sort())).toEqual([
+      ["camionId", "fecha", "tipo", "vendedorId"],
+      ["camionId", "fecha", "tipo", "vendedorId"],
+    ]);
+    expect(m.fase().fase).toBe("exito");
   });
 });
