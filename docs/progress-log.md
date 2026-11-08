@@ -1,4 +1,35 @@
 ---
+## 08/11/2026 — B-01: cierre de observaciones no bloqueantes de Codex sobre 2a0aa43 (sólo tests y documentación; sin commit; B-01 sigue BLOQUEADA por D-IDEM-0)
+
+**Contexto:** dictámenes sobre `2a0aa43c6791fead5061622af6c7b3a82fdd5767`. OpenCode: FAVORABLE con reservas. Codex: DESFAVORABLE para integrar B-01 como funcionalidad completa. Ambos consideran correctos los reintentos P13 y las agregaciones con BigInt. **Decisión del responsable:** no integrar B-01, no implementar ADR-010, no modificar `2a0aa43` y cerrar sólo las observaciones no bloqueantes. Rama `test/b-01-observaciones-codex`, en la worktree nueva `../distribuidora-b01-observaciones`, desde `2a0aa43`.
+
+**1. Evidencia vinculada al commit exacto** (`../evidencias-entrega-b/b01-observaciones-codex/verificaciones-2a0aa43/`). Corrida sobre `2a0aa43` con la worktree limpia antes y después (árbol `373e7ae2…`): `typecheck` rc 0; `lint` rc 0; Vitest rc 0, **35 archivos / 1288 pruebas**, 0 fallidas; `build` rc 0. Logs completos, `vitest.json`, códigos de salida y `SHA256SUMS`.
+
+**2. Prueba negativa: dueño y encargado inactivos, aislando `activo` del rol.** El seed sólo tiene un vendedor inactivo, así que en el E2E el rechazo podía atribuirse al rol. Los pgTAP existentes ya rechazaban a un *dueño* inactivo (`stock_ingreso.test.sql`, `stock_cuarentena_merma.test.sql`), pero no a un encargado, ni probaban que el mismo perfil volviera a ser aceptado. Nuevo `supabase/tests/stock_inactivo_gestion.test.sql` (40 aserciones):
+- el mismo dueño y el mismo encargado, activos, operan las tres RPC (control positivo);
+- con `activo = false` y el rol intacto, reciben `PT403 stock_no_autorizado` en `registrar_ingreso`, `mover_a_cuarentena` y `registrar_merma`, también en el replay de su propia clave ya confirmada; no ven stock, operaciones ni movimientos; no queda ninguna operación ni movimiento nuevo;
+- reactivados, vuelven a ser aceptados;
+- los roles nunca cambian durante la prueba.
+
+No modifica RPC, migraciones, RLS, permisos, seed ni lógica de producción. Usa la misma técnica que los pgTAP de stock (identidad por `request.jwt.claims` y `set local role authenticated`, transacción revertida) y da `EXECUTE` a PUBLIC sólo sobre su ayudante `pg_temp.como_usuario` de la transacción, como `stock_ingreso.test.sql`.
+
+**Ejecución de pgTAP** (`../evidencias-entrega-b/b01-observaciones-codex/pgtap/`):
+- **Qué se ejecutó:** `supabase test db` sobre `2a0aa43` **más** el archivo nuevo. Es decir, sobre el contenido de esta rama sin commit, no sobre `2a0aa43` solo.
+- **Laboratorio descartable:** project_id `b01-obs-pgtap`; red propia con `host_binding_ipv4=127.0.0.1` pasada con `--network-id` (también a `test db`); db y GoTrue; publicado sólo `127.0.0.1:63022`; 25/25 migraciones y seed; sin vínculo remoto.
+- **Resultado:** **PASS, rc 0, 34 archivos (1 omitido: bootstrap del arnés de concurrencia), 2203 pruebas**, incluidas las 40 nuevas.
+- **Intentos previos conservados:** el 1 falló al lanzar `pg_prove` sin `--network-id` (no corrió ningún test); el 2 falló en el archivo nuevo por falta del grant del ayudante (los demás archivos, en verde). Ambos fueron defectos del arnés y del test, no del sistema.
+- **Limpieza:** inventarios Docker y de puertos idénticos antes y después.
+- **Alcance de lo verificado:** no se afirma ninguna ejecución de pgTAP sobre `2a0aa43` sin el archivo nuevo. Tampoco se repitió Playwright: no cambió código de la aplicación ni de los E2E.
+
+**3. D-IDEM-0 sigue siendo el bloqueo de aceptación de B-01** (ADR-010 §0.2, decisión 15). Hasta implementar ADR-010 (después del cierre de T3-01, D-IDEM-7), una respuesta perdida seguida de una recarga, un cierre de pestaña o un cambio de dispositivo puede duplicar un movimiento de stock. Las mitigaciones de `c0528a3` (mensaje con la salvedad de recarga y `beforeunload`) lo reducen, no lo eliminan. La recomendación de `sessionStorage` registrada en la entrada de `c0528a3` quedó **superada** por ADR-010 (C-mínima, sin almacenamiento del navegador).
+
+**Pruebas y garantías que siguen pendientes de ADR-010** (§10.B; nada de esto existe):
+- **Backend:** tabla `intenciones_operacion` y las cuatro RPC `crear_`, `ejecutar_`, `cancelar_` y `listar_intenciones_operacion`; pgTAP de estructura, ACL, políticas, identidad y `SECURITY DEFINER`; concurrencia CC-01 a CC-05 y límites LM-05 a LM-07; actualización del preflight T3-01 (§8.2.1).
+- **Frontend:** Vitest VT-01 a VT-07 (protocolo crear → ejecutar → listar, P13 en las tres RPC, rechazos por código, consulta tras 3 intentos sin respuesta, restricción ante pendientes, cambio de usuario y ningún almacenamiento del navegador); Playwright PW-01 a PW-06 (respuesta perdida de `crear` y de `ejecutar`, con recarga, cierre u otro contexto → un solo movimiento; `cancelar` retrasado; vencimiento; aislamiento por usuario; sesión vencida; PC y Android con `1,250 kg`).
+- **Garantía que hoy no existe:** recuperación del estado real de una operación después de recargar o cambiar de dispositivo, con un único movimiento por intención.
+
+**Otras observaciones que siguen abiertas:** el tope de 500 caracteres del motivo es sólo de la interfaz (decisión de backend pendiente); los `40001`, `40P01`, `55P03` y `57014` del E2E siguen simulados con `route.fulfill` (no hubo un deadlock real); security review de B-01 pendiente.
+---
 ## 06/11/2026 — ADR-010 v1.0: cierre de las observaciones documentales de Codex (documental, sin commit)
 
 **Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230`; ADR-010 inicial SHA-256 `cbf7b2a1…1f29`. Dictamen de Codex: **FAVORABLE CON OBSERVACIONES** (cuatro hallazgos documentales). Correcciones en `docs/decisions/010-intenciones-persistidas-de-operacion.md`:
