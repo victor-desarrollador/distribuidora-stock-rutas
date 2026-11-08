@@ -129,7 +129,61 @@ mut M15 remediado "sha256 de prosrc distinto"          "create or replace functi
 mut M16 remediado "tabla de public sin RLS"            "create table public.zz_sin_rls (i int); alter table public.zz_sin_rls disable row level security;" "drop table public.zz_sin_rls;"
 # E-O4-ACL (sólo LOCAL; ADR-001 §18.2.2): Q6 aborta con ACL distinta de {postgres=X/postgres}; Q2 la informa.
 AC="ACL distinta de {postgres=X/postgres}"
-mut A01 remediado "$AC" "grant execute on function public.rls_auto_enable() to public;" "revoke execute on function public.rls_auto_enable() from public;"
+# ACL REALMENTE NULL (pg_proc.proacl IS NULL) con el contrato RB + RA completo, por DDL y sin tocar el catálogo:
+# GRANT EXECUTE … TO PUBLIC NO produce NULL (deja una ACL explícita con «=X/postgres»). PostgreSQL deja
+# proacl NULL sólo cuando la función se crea con exactamente los privilegios por defecto de PostgreSQL. La cadena de migraciones
+# (20261024010921) revoca EXECUTE de PUBLIC por defecto para postgres, así que una función nueva nace con {postgres=X/postgres}:
+# para obtener NULL hay que deshacer transitoriamente ese REVOKE. Se reconstruye la función
+# remediada con su propia definición (pg_get_functiondef) bajo ALTER DEFAULT PRIVILEGES transitorio y se restauran los
+# privilegios por defecto originales dentro del mismo bloque (se recuerda qué había antes). Precondiciones
+# fail-closed: si proacl no es NULL, o el hash/proconfig no son los de RB + RA, el bloque aborta con PRECONDICION_BA16.
+NULL_REAL="do \$n\$
+declare d text; v_acl aclitem[]; v_hash text; v_cfg text[]; v_glob boolean; v_sch aclitem[]; v_pub boolean; v_anon boolean; v_auth boolean; v_srv boolean;
+begin
+  v_glob := exists (select 1 from pg_default_acl a where a.defaclrole = 'postgres'::regrole and a.defaclnamespace = 0 and a.defaclobjtype = 'f');
+  select a.defaclacl into v_sch from pg_default_acl a where a.defaclrole = 'postgres'::regrole and a.defaclnamespace = 'public'::regnamespace and a.defaclobjtype = 'f';
+  v_pub := v_sch is null or exists (select 1 from unnest(v_sch) x where x::text = '=X/postgres');
+  v_anon := v_sch is not null and exists (select 1 from unnest(v_sch) x where x::text = 'anon=X/postgres');
+  v_auth := v_sch is not null and exists (select 1 from unnest(v_sch) x where x::text = 'authenticated=X/postgres');
+  v_srv := v_sch is not null and exists (select 1 from unnest(v_sch) x where x::text = 'service_role=X/postgres');
+  select pg_get_functiondef(p.oid) into d from pg_proc p where p.oid = to_regprocedure('public.rls_auto_enable()');
+  drop event trigger ensure_rls;
+  drop function public.rls_auto_enable();
+  alter default privileges for role postgres grant execute on functions to public;
+  alter default privileges for role postgres in schema public revoke execute on functions from anon, authenticated, service_role, public;
+  execute d;
+  if v_glob then alter default privileges for role postgres revoke execute on functions from public; end if;
+  if v_pub then alter default privileges for role postgres in schema public grant execute on functions to public; else alter default privileges for role postgres in schema public revoke execute on functions from public; end if;
+  if v_anon then alter default privileges for role postgres in schema public grant execute on functions to anon; end if;
+  if v_auth then alter default privileges for role postgres in schema public grant execute on functions to authenticated; end if;
+  if v_srv then alter default privileges for role postgres in schema public grant execute on functions to service_role; end if;
+  create event trigger ensure_rls on ddl_command_end when tag in ($TAGS) execute function public.rls_auto_enable();
+  select p.proacl, encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex'), p.proconfig into v_acl, v_hash, v_cfg
+    from pg_proc p where p.oid = to_regprocedure('public.rls_auto_enable()');
+  if v_acl is not null then raise exception 'PRECONDICION_BA16: proacl no es NULL (%)', v_acl; end if;
+  if v_hash <> 'e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e' or v_cfg::text <> '{\"search_path=pg_catalog, pg_temp\"}' then
+    raise exception 'PRECONDICION_BA16: hash o proconfig distintos de RB + RA'; end if;
+  raise notice 'PRECONDICION_BA16_OK: proacl IS NULL, hash e1b231fb…, proconfig RA';
+end \$n\$;"
+# A01 NO es transaccional: igual que el resto de las mutaciones M/A, el setup y el deshacer son sentencias confirmadas en el
+# laboratorio descartable (loopback, sin red) y la restauración depende de este arnés; una interrupción abrupta puede dejar
+# residuos. El chequeo siguiente verifica, sin revisar logs, que tras A01 el estado quedó exactamente como estaba.
+# (Se compara el CONTENIDO de pg_default_acl —rol, esquema, tipo y ACL—, no su oid: restaurar una fila de privilegios por defecto la
+# vuelve a crear con otro oid, que no es parte del estado semántico.)
+ESTADO_ACL_SQL="select md5(coalesce((select string_agg(concat_ws(',', d.defaclrole::regrole::text, d.defaclnamespace::regnamespace::text, d.defaclobjtype::text, d.defaclacl::text), '|' order by d.defaclrole::regrole::text, d.defaclnamespace::regnamespace::text, d.defaclobjtype::text) from pg_default_acl d), '')) || '|' || coalesce((select p.proacl::text from pg_proc p where p.oid = to_regprocedure('public.rls_auto_enable()')), 'NULL');"
+estado_acl() { printf '%s\n' "$ESTADO_ACL_SQL" | lab_sql postgres -qtA; }
+A01_ANTES="$(estado_acl)"
+A01_UNDO="revoke all on function public.rls_auto_enable() from public, anon, authenticated, service_role;"
+if printf '%s\n' "$NULL_REAL" | lab_sql postgres -q >/dev/null 2>"$OUT/mut_A01.stderr"; then
+  A01_NULO="$(printf "select (p.proacl is null)::text from pg_proc p where p.oid = to_regprocedure('public.rls_auto_enable()');\n" | lab_sql postgres -qtA)"
+  chk "$([ "$A01_NULO" = true ] && echo ok)" "A01a durante el escenario pg_proc.proacl IS NULL (comprobado en la base: $A01_NULO)"
+  escenario "A01" remediado "$AC"
+else
+  chk no "A01: setup falló ($(head -c 150 "$OUT/mut_A01.stderr"))"
+fi
+printf '%s\n' "$A01_UNDO" | lab_sql postgres -q >/dev/null 2>"$OUT/undo_A01.stderr" || chk no "A01: undo falló"
+A01_DESPUES="$(estado_acl)"
+chk "$([ -n "$A01_ANTES" ] && [ "$A01_ANTES" = "$A01_DESPUES" ] && echo ok)" "A01b sin residuos: pg_default_acl y ACL de rls_auto_enable() idénticos antes y después (antes=$A01_ANTES despues=$A01_DESPUES)"
 mut A02 remediado "$AC" "create role zz_acl nologin; grant execute on function public.rls_auto_enable() to zz_acl;" "revoke execute on function public.rls_auto_enable() from zz_acl; drop role zz_acl;"
 mut A03 remediado "$AC" "grant execute on function public.rls_auto_enable() to postgres with grant option;" "revoke grant option for execute on function public.rls_auto_enable() from postgres;"
 mut A04 remediado "$AC" "revoke execute on function public.rls_auto_enable() from postgres;" "grant execute on function public.rls_auto_enable() to postgres;"

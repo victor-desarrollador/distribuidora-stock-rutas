@@ -1,4 +1,43 @@
 ---
+## 07/11/2026 — T3-01-L / E-O4-ACL: corrección de M-01 (BA16 con `proacl IS NULL` real) y de la trazabilidad de la evidencia (rama `fix/t3-01-l-acl-ba16` desde `abfa1b7`; sin commit; T3-01-L NO cerrado)
+
+**Rama:** `fix/t3-01-l-acl-ba16`, desde `abfa1b79a045e0b7f7e071504457dafbccbe7815` (worktree `distribuidora-t3-01-l-acl-fix`). `abfa1b7` y `feat/t3-01-l-acl-exacta` no se tocaron. Sin commit, push, merge ni deploy; sin staging ni producción; sin `db push` ni `migration up`; sin roles reales. Superficie sensible: RPC/funciones SQL, `SECURITY DEFINER`, grants. Corresponde security review; no está hecha.
+
+**Hallazgos de Codex sobre `abfa1b7` (informados por el responsable):** M-01 (media, bloqueante): BA16 no producía `pg_proc.proacl IS NULL`, sino una ACL explícita con `EXECUTE` para PUBLIC (el mismo estado que B15); M-02 (media, bloqueante): la evidencia consolidada conserva `rc_global=1` aunque el reintento válido de paridad terminó bien; B-01 (baja): etiqueta antigua «SIN COMMIT (NO VINCULADA)». El dictamen de OpenCode revisó otro commit (`0aa2f03`) y no se usó.
+
+### M-01 — cómo se obtiene un `proacl IS NULL` real
+- `GRANT EXECUTE … TO PUBLIC` deja una ACL **explícita** `{postgres=X/postgres,=X/postgres}` (PostgreSQL no la normaliza a NULL). Además, la migración `20261024010921` revoca `EXECUTE` de PUBLIC por defecto para `postgres` (forma global), así que en la cadena real una función nueva nace con `{postgres=X/postgres}`, tampoco NULL.
+- Camino reproducible, sólo por DDL y sin tocar el catálogo, en el laboratorio descartable: dentro de la transacción de cada caso se reconstruye la función RB + RA con su propia definición (`pg_get_functiondef`) bajo un `ALTER DEFAULT PRIVILEGES … GRANT EXECUTE ON FUNCTIONS TO PUBLIC` transitorio (más el revoke por esquema), se restauran los privilegios por defecto que había antes y se recrea `ensure_rls`. El bloque aborta con `PRECONDICION_BA16` si `proacl` no es NULL o si el hash/`proconfig` no son los de RB + RA, y emite `PRECONDICION_BA16_OK` cuando se cumplen.
+- `probar_o4_presente.sh`: BA16 ahora verifica la precondición (`PRECONDICION_BA16_OK`); **BA16b** exige que el preflight falle con `ACL actual: NULL` (B15 deja `ACL actual: {postgres=X/postgres,=X/postgres}`, así que ya no se duplican); **R01** verifica que no quedan residuos (md5 de `pg_default_acl`, O-4 ausente, event triggers y roles `zz_*` iguales antes y después).
+- `probar_consultas_ro.sh`: A01 usa el mismo NULL real y se restaura con `REVOKE` explícito. **A01 no es transaccional**: como el resto de las mutaciones M/A, su setup y su deshacer son sentencias confirmadas en el laboratorio descartable (loopback, sin red) y la restauración depende del arnés; una interrupción abrupta puede dejar residuos. Por eso se agregaron **A01a** (comprueba en la base `proacl IS NULL` durante el escenario) y **A01b** (el contenido de `pg_default_acl` —rol, esquema, tipo y ACL, sin el oid de la fila— y la ACL de `rls_auto_enable()` deben ser idénticos antes y después; si no, FALLA y el script termina con código distinto de cero, sin revisar logs). A08 confirma el estado restaurado.
+- *Hallazgos del propio chequeo durante el desarrollo:* A01b detectó dos defectos reales de la restauración propuesta al principio: (1) comparaba el oid de las filas de `pg_default_acl`, que cambia al recrearlas; (2) la restauración suponía que la fila por esquema incluía `anon`/`authenticated`/`service_role`, y en ese laboratorio no los incluía. La restauración ahora recuerda y reproduce exactamente PUBLIC, `anon`, `authenticated` y `service_role` de la fila original por esquema (mismo bloque en `probar_o4_presente.sh`).
+- *Sabotajes deliberados (copias temporales fuera del repo):* si el deshacer no restaura la ACL, o si deja una deriva en los privilegios por defecto globales, A01b FALLA y el script devuelve rc 1 (en el primer caso fallan además A08, S3, G2, L2 y el preflight READ ONLY).
+- **No se modificó** el contrato de ACL exacta ni el preflight, ni Q2/Q6, ni las migraciones, ni los pgTAP.
+
+### M-02 y B-01 — trazabilidad de la evidencia (arnés temporal fuera del repo)
+- Causa del intento inválido de paridad `.003` en `abfa1b7`: el arnés creó `paridad_003/` con modo 775 y `dir_evidencia_seguro` lo rechazó (error del arnés, no del producto). El arnés nuevo usa `umask 077`.
+- El arnés nuevo registra cada paso en `PASOS.tsv` (un solo intento, sin reintentos automáticos) y `rc_global` es 0 sólo si todos los pasos pasan. La evidencia histórica de `abfa1b7` **no se modifica** (conserva `rc_global=1`, el intento inválido y el reintento válido); su aclaración vive en un archivo aparte, `evidencias-t3-01-l-acl/ACLARACION_rc_global_abfa1b7.txt`.
+- La etiqueta «SIN COMMIT (NO VINCULADA)» del arnés del stack se reemplazó por una derivada del estado real del árbol.
+
+### Verificación (árbol sin commitear: evidencia NO VINCULADA hasta que haya commit)
+| Verificación | Resultado |
+|---|---|
+| Migraciones | 25/25 idénticas a `f33044d` y a `abfa1b7` (0 diferencias) |
+| `probar_o4_docker.sh` (M-01/B-01 + O-4 presente, `.004`) | rc 0; **36 casos, 0 fallas** (BA16 precondición, BA16b y R01 sin residuos incluidos) |
+| `probar_consultas_ro.sh` (`.004`) / ejecutor RO | **77/77** (incluye A01a y A01b) · **87/87** |
+| Arnés de explotación X01–X08 | rc 0, `fallas=0` |
+| Paridad `.003` | consultas 77/77 y O-4 presente rc 0, 0 diferencias *(valores definitivos: ver la evidencia vinculada al hash)* |
+| `supabase test db` (stack real CLI 2.120.0) | rc 0; `Files=33, Tests=2165`, `Result: PASS` |
+| Sesión en la cadena real con `proacl IS NULL` real | confirmado `proacl_is_null=true acl=NULL`; el preflight falla con «ACL distinta de {postgres=X/postgres}» |
+| pgTAP con `proacl IS NULL` real | `hardening_adr001` 7 `not ok` (incluye la aserción E-O4-ACL) y `o4_pgtemp` 2 `not ok` (incluye E-O4-ACL); con ACL exacta: 60/60, 10/10, 42/42, 0 SKIP |
+| Residuos | R01 (md5 de `pg_default_acl`, O-4 ausente, event triggers y roles `zz_*` iguales antes y después); stack final `t|0|0`; 0 contenedores |
+| Arnés | `PASOS.tsv`: 7 pasos, 1 intento cada uno, 0 inválidos; `rc_global=0` |
+Evidencia (fuera del repo): `evidencias-t3-01-l-acl/precommit_ba16/` (**NO VINCULADA**: árbol con cambios; la vinculada al hash definitivo se genera después del commit). Las cifras de consultas (77) y A01a/A01b provienen de la corrida posterior `a01_residuos_v3/` (también no vinculada); la evidencia vinculada al hash las reconfirma.
+
+### No hecho / pendiente
+Commit, evidencia vinculada al hash definitivo, security review, auditoría de Codex y OpenCode sobre el hash final, H-04, F7, F8, B/C y todo acceso remoto siguen pendientes. T3-01-L NO está cerrado.
+
+---
 ## 07/11/2026 — T3-01-L: E-O4-ACL (ACL exacta de `public.rls_auto_enable()`) y registro de las decisiones normativas (rama `feat/t3-01-l-acl-exacta` desde `f33044d`; sin commit; T3-01-L NO cerrado)
 
 **Rama:** `feat/t3-01-l-acl-exacta`, creada desde `f33044db55ede0c57421a72a034d0d14e4047b4d` en la worktree `distribuidora-t3-01-l-acl`. `f33044d` y las ramas/worktrees congeladas no se tocaron. Sin commit, push, merge ni deploy; sin staging ni producción; sin `db push` ni `migration up`; sin crear roles ni cambiar permisos en entornos compartidos. **Superficie sensible (`AGENTS.md` §2.4):** RPC/funciones SQL, `SECURITY DEFINER`, grants, `service_role`, Supabase. Corresponde **security review** antes de cerrar; **no está hecha**.
@@ -21,9 +60,9 @@
 | Stack real de la CLI 2.120.0 (project_id propio, loopback): migraciones aplicadas | 25/25; hashes iguales a `f33044d` (`sha256sum -c` rc 0) |
 | `supabase test db --local` | rc 0; `Files=33, Tests=2165` (2163 + 2 aserciones nuevas), `Result: PASS` |
 | Preflight READ ONLY sobre la base de la CLI | rc 0; `RO|on`; `ESTADO_LOCAL_SIN_O4` (O-4 ausente por marcador de laboratorio; **no** es `ESTADO_A`) |
-| Cadena real + O-4 instalado en transacción con ROLLBACK | ACL exacta: `ESTADO_A`; ACL NULL / grantee adicional / `WITH GRANT OPTION` / ACL vacía: rechazo con el texto de E-O4-ACL |
+| Cadena real + O-4 instalado en transacción con ROLLBACK | ACL exacta: `ESTADO_A`; grantee adicional / `WITH GRANT OPTION` / ACL vacía y ACL con PUBLIC explícito: rechazo con el texto de E-O4-ACL. *(Corrección posterior, hallazgo M-01 de Codex: el caso llamado «ACL NULL» en esta corrida era una ACL explícita con `=X/postgres`, no `proacl IS NULL`; ver la entrada siguiente.)* |
 | pgTAP con O-4 instalado (ramas no SKIP) | `hardening_adr001` 60/60, `o4_pgtemp` 10/10, `pg_temp_rpc_privilegiadas` 42/42, 0 SKIP |
-| Sensibilidad pgTAP con ACL NULL | las aserciones nuevas de E-O4-ACL fallan en `hardening_adr001` y en `o4_pgtemp` |
+| Sensibilidad pgTAP con ACL con PUBLIC explícito | las aserciones nuevas de E-O4-ACL fallan en `hardening_adr001` y en `o4_pgtemp` *(repetida con `proacl IS NULL` real en la entrada siguiente)* |
 Evidencia (fuera del repo): `evidencias-t3-01-l-acl/`.
 
 ### No hecho / pendiente
