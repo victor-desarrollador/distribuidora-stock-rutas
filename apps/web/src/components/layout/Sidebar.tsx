@@ -5,6 +5,7 @@ import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   Package,
+  Boxes,
   Users,
   Truck,
   ShoppingCart,
@@ -26,6 +27,7 @@ import { nombreRol } from "../../auth/roles";
 const menu = [
   { nombre: "Inicio", icono: LayoutDashboard, ruta: "/" },
   { nombre: "Productos", icono: Package, ruta: "/productos" },
+  { nombre: "Stock", icono: Boxes, ruta: "/stock" },
   { nombre: "Clientes", icono: Users, ruta: "/clientes" },
   { nombre: "Camiones", icono: Truck, ruta: "/camiones" },
   { nombre: "Jornadas", icono: ClipboardList, ruta: "/jornadas" },

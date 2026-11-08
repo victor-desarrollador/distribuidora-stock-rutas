@@ -166,6 +166,218 @@ PB12C-1..5, H-04 (la bitácora lo usa con dos sentidos; sin resolver), F7, F8, d
 - **Staging y producción no autorizados.** Push, PR, merge y deploy: no autorizados. **T3-01 no está cerrada.**
 
 ---
+## 08/11/2026 — B-01: cierre de observaciones no bloqueantes de Codex sobre 2a0aa43 (sólo tests y documentación; sin commit; B-01 sigue BLOQUEADA por D-IDEM-0)
+
+**Contexto:** dictámenes sobre `2a0aa43c6791fead5061622af6c7b3a82fdd5767`. OpenCode: FAVORABLE con reservas. Codex: DESFAVORABLE para integrar B-01 como funcionalidad completa. Ambos consideran correctos los reintentos P13 y las agregaciones con BigInt. **Decisión del responsable:** no integrar B-01, no implementar ADR-010, no modificar `2a0aa43` y cerrar sólo las observaciones no bloqueantes. Rama `test/b-01-observaciones-codex`, en la worktree nueva `../distribuidora-b01-observaciones`, desde `2a0aa43`.
+
+**1. Evidencia vinculada al commit exacto** (`../evidencias-entrega-b/b01-observaciones-codex/verificaciones-2a0aa43/`). Corrida sobre `2a0aa43` con la worktree limpia antes y después (árbol `373e7ae2…`): `typecheck` rc 0; `lint` rc 0; Vitest rc 0, **35 archivos / 1288 pruebas**, 0 fallidas; `build` rc 0. Logs completos, `vitest.json`, códigos de salida y `SHA256SUMS`.
+
+**2. Prueba negativa: dueño y encargado inactivos, aislando `activo` del rol.** El seed sólo tiene un vendedor inactivo, así que en el E2E el rechazo podía atribuirse al rol. Los pgTAP existentes ya rechazaban a un *dueño* inactivo (`stock_ingreso.test.sql`, `stock_cuarentena_merma.test.sql`), pero no a un encargado, ni probaban que el mismo perfil volviera a ser aceptado. Nuevo `supabase/tests/stock_inactivo_gestion.test.sql` (40 aserciones):
+- el mismo dueño y el mismo encargado, activos, operan las tres RPC (control positivo);
+- con `activo = false` y el rol intacto, reciben `PT403 stock_no_autorizado` en `registrar_ingreso`, `mover_a_cuarentena` y `registrar_merma`, también en el replay de su propia clave ya confirmada; no ven stock, operaciones ni movimientos; no queda ninguna operación ni movimiento nuevo;
+- reactivados, vuelven a ser aceptados;
+- los roles nunca cambian durante la prueba.
+
+No modifica RPC, migraciones, RLS, permisos, seed ni lógica de producción. Usa la misma técnica que los pgTAP de stock (identidad por `request.jwt.claims` y `set local role authenticated`, transacción revertida) y da `EXECUTE` a PUBLIC sólo sobre su ayudante `pg_temp.como_usuario` de la transacción, como `stock_ingreso.test.sql`.
+
+**Ejecución de pgTAP** (`../evidencias-entrega-b/b01-observaciones-codex/pgtap/`):
+- **Qué se ejecutó:** `supabase test db` sobre `2a0aa43` **más** el archivo nuevo. Es decir, sobre el contenido de esta rama sin commit, no sobre `2a0aa43` solo.
+- **Laboratorio descartable:** project_id `b01-obs-pgtap`; red propia con `host_binding_ipv4=127.0.0.1` pasada con `--network-id` (también a `test db`); db y GoTrue; publicado sólo `127.0.0.1:63022`; 25/25 migraciones y seed; sin vínculo remoto.
+- **Resultado:** **PASS, rc 0, 34 archivos (1 omitido: bootstrap del arnés de concurrencia), 2203 pruebas**, incluidas las 40 nuevas.
+- **Intentos previos conservados:** el 1 falló al lanzar `pg_prove` sin `--network-id` (no corrió ningún test); el 2 falló en el archivo nuevo por falta del grant del ayudante (los demás archivos, en verde). Ambos fueron defectos del arnés y del test, no del sistema.
+- **Limpieza:** inventarios Docker y de puertos idénticos antes y después.
+- **Alcance de lo verificado:** no se afirma ninguna ejecución de pgTAP sobre `2a0aa43` sin el archivo nuevo. Tampoco se repitió Playwright: no cambió código de la aplicación ni de los E2E.
+
+**3. D-IDEM-0 sigue siendo el bloqueo de aceptación de B-01** (ADR-010 §0.2, decisión 15). Hasta implementar ADR-010 (después del cierre de T3-01, D-IDEM-7), una respuesta perdida seguida de una recarga, un cierre de pestaña o un cambio de dispositivo puede duplicar un movimiento de stock. Las mitigaciones de `c0528a3` (mensaje con la salvedad de recarga y `beforeunload`) lo reducen, no lo eliminan. La recomendación de `sessionStorage` registrada en la entrada de `c0528a3` quedó **superada** por ADR-010 (C-mínima, sin almacenamiento del navegador).
+
+**Pruebas y garantías que siguen pendientes de ADR-010** (§10.B; nada de esto existe):
+- **Backend:** tabla `intenciones_operacion` y las cuatro RPC `crear_`, `ejecutar_`, `cancelar_` y `listar_intenciones_operacion`; pgTAP de estructura, ACL, políticas, identidad y `SECURITY DEFINER`; concurrencia CC-01 a CC-05 y límites LM-05 a LM-07; actualización del preflight T3-01 (§8.2.1).
+- **Frontend:** Vitest VT-01 a VT-07 (protocolo crear → ejecutar → listar, P13 en las tres RPC, rechazos por código, consulta tras 3 intentos sin respuesta, restricción ante pendientes, cambio de usuario y ningún almacenamiento del navegador); Playwright PW-01 a PW-06 (respuesta perdida de `crear` y de `ejecutar`, con recarga, cierre u otro contexto → un solo movimiento; `cancelar` retrasado; vencimiento; aislamiento por usuario; sesión vencida; PC y Android con `1,250 kg`).
+- **Garantía que hoy no existe:** recuperación del estado real de una operación después de recargar o cambiar de dispositivo, con un único movimiento por intención.
+
+**Otras observaciones que siguen abiertas:** el tope de 500 caracteres del motivo es sólo de la interfaz (decisión de backend pendiente); los `40001`, `40P01`, `55P03` y `57014` del E2E siguen simulados con `route.fulfill` (no hubo un deadlock real); security review de B-01 pendiente.
+---
+## 06/11/2026 — ADR-010 v1.0: cierre de las observaciones documentales de Codex (documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230`; ADR-010 inicial SHA-256 `cbf7b2a1…1f29`. Dictamen de Codex: **FAVORABLE CON OBSERVACIONES** (cuatro hallazgos documentales). Correcciones en `docs/decisions/010-intenciones-persistidas-de-operacion.md`:
+- **G-01:** §5.13 «Listado»: «mínimo 30 días» → ventana máxima de 30 días; los valores anteriores se recortan al límite permitido (7 días por defecto y 100 filas, sin cambios).
+- **G-02:** §8.2.1 f: N-COL pasa de «se propone agregar» a obligación normativa con `has_any_column_privilege(rol, 'public.intenciones_operacion', 'SELECT')` para `anon` y `authenticated`; se mantiene explícito que no está implementado ni probado.
+- **G-03:** §7 y §8.3: `BLUEPRINT.md` v2.6 ya incorpora la entidad y la excepción a P15, y el README ya registra ADR-010 aprobada; la implementación actualizará migraciones, RPC, preflight, tests y código sin volver a aprobar estas decisiones.
+- **G-04:** terminología fuera del historial («si alguna vez se aprueba», «esta propuesta», «se propone») → «cuando se autorice su implementación», «con esta ADR implementada», «esta ADR exige probar». El historial v0.1–v0.3 no se tocó.
+
+**Sin cambios funcionales:** las 16 decisiones aprobadas, los valores, las firmas y los contratos técnicos no cambian; Blueprint y ADR-001 no requieren cambios. Sin cambios en `apps/web` ni en `supabase/`. **La implementación de ADR-010 sigue sin autorizar.**
+---
+## 06/11/2026 — ADR-010 v1.0 APROBADA (normativa): formalización de la decisión humana (documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230` (verificado); cambios B-01 sin commit y los tres `AUDIT_REPORT_*.md` preservados.
+
+**Decisión humana (06/11/2026).** El responsable del proyecto aprobó ADR-010 con el paquete completo: C-mínima; excepción acotada a P15 de ADR-001; alternativa A (sin `SELECT` ni otro acceso directo de `authenticated` a `intenciones_operacion`); rechazos definitivos de negocio como `rechazada` con HTTP 200, solo lista cerrada; vencimiento de 24 h como límite de admisión; retención indefinida sin purga; ≤ 20 pendientes por actor; ≤ 120 creaciones por actor por hora; listado de 100 filas, 7 días por defecto y 30 días como máximo; `motivo` ≤ 500 caracteres; visibilidad exclusiva del actor; aceptación temporal del bypass por RPC directas de stock en la Fase 1; implementación después del cierre de T3-01; numeración 010; B-01 abierta hasta completar la recuperación; payload ≤ 4096 bytes con `octet_length(p_payload::text)`. **La autorización es exclusivamente normativa.**
+
+**Cambios:**
+1. `docs/decisions/010-intenciones-persistidas-de-operacion.md` → **v1.0, APROBADA**: §0.2 (registro de la aprobación y diferencia entre aprobación normativa y aceptación técnica), §0.3 (obligaciones de implementación), §5.4 (`octet_length(p_payload::text) <= 4096`), §5.10 (política de `UPDATE` con `USING` y **`WITH CHECK` explícitos**: `WITH CHECK (actor_id = usuario_actual AND estado IN ('confirmada','rechazada','cancelada'))`, porque sin `WITH CHECK` PostgreSQL aplicaría `USING (estado = 'pendiente')` a la fila nueva e impediría toda transición), §5.13 y §12 con valores aprobados (D-IDEM-16 nuevo: tamaño del payload; D-IDEM-13 sigue pendiente). El texto aclara que nada está implementado.
+2. `BLUEPRINT.md` → **v2.6**: excepción a P15 en §7.9.1, entidad `intenciones_operacion` en §8, pruebas en §12, historial §17 (y pie corregido, decía v2.3).
+3. `docs/decisions/001-rpc-privilegiadas.md`: nota de **remisión** a ADR-010 al final de §18.3 (excepción P15 y su relación con P13/P16 en la vía de intenciones) y fila de historial. No cambia ninguna decisión ni el estado de ADR-001.
+4. `docs/decisions/README.md`: ADR-010 1.0 APROBADA (normativa).
+
+**No se tocaron** migraciones, SQL, RPC, RLS, permisos, el preflight, tests ni frontend; no se ejecutó ninguna base ni operación remota.
+
+**Pendiente:** implementación (tarea propia, autorizada, después del cierre de T3-01), con pgTAP, concurrencia, Vitest y Playwright (ADR-010 §0.3 y §10.B), security review, auditoría independiente sobre un hash y aceptación técnica humana. Revisión independiente de este cambio documental y autorización de commit.
+---
+## 06/11/2026 — ADR-010 v0.3: incorporación del laboratorio PR-01 a PR-13 y correcciones C-1 a C-8 (PROPUESTA NO APROBADA; documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230` (verificado); los cambios B-01 sin commit y los tres `AUDIT_REPORT_*.md` se preservan. Evidencia del laboratorio verificada con `sha256sum -c MANIFIESTO.sha256` (74 archivos, 0 discrepancias); la copia del preflight usada como línea base es idéntica al archivo del repo (`e9d49e09…ed6b`). ADR-010 sigue en **PROPUESTA — NO APROBADA**.
+
+**Cambios en `docs/decisions/010-intenciones-persistidas-de-operacion.md` (v0.2 → v0.3):**
+1. **C-1 (§5.1 R-13, §5.5.1, §5.8, §5.13).** `crear` serializa con `pg_advisory_xact_lock(hashtextextended('intenciones:<empresa>:<actor>',0))` (nivel 0) después de validar y antes del replay y de los conteos; `VOLATILE` y `READ COMMITTED` obligatorio (`PT500` si no); orden actor → intención → stock; argumento de ausencia de deadlocks; liberación transaccional. PR-11/H-LM: sin lock, exceso en 10/10 rondas; con lock, exactamente el tope. Los valores 20 y 120 siguen pendientes.
+2. **C-2 (§8.1).** 20 `SECURITY DEFINER` = 20 funciones en `privado` (19 implementaciones con fachada + `empresa_gestion_actual()`); `public.rls_auto_enable()` no integra la cifra ni existe en el laboratorio; +4 → 24.
+3. **C-3 (§5.10, §8.2.1).** Inventario completo del preflight: 7 bloques con la lista de relaciones, manifiestos de funciones y políticas, lista 3.4, inventario 3.7, conteos 40→48 / 20→24 / 11→12 / 33→36, `NOTICE` y comentarios, hashes con `search_path = pg_catalog, pg_temp`, pruebas negativas. **Alternativa A propuesta** (sin `SELECT` de `authenticated`) con excepción por nombre literal. **Hallazgo nuevo, deducido de la lectura del preflight y no probado:** el bloque de columnas no controla `SELECT` por columna de `authenticated`; la excepción A necesita ese complemento solo para la tabla nueva (negativo N-COL). Brechas N12/N13 → pgTAP ES-02.
+4. **C-4 (§5.9).** Identidad solo por `privado.usuario_actual()`; `auth.uid()` falla en definer de `propietario_rpc`; validación de usuario, empresa, rol y actividad según `privado.mover_a_cuarentena`.
+5. **C-5 a C-8 (§5.4, §5.12).** Contrato numérico de `jsonb`; `p_payload jsonb` obligatorio (R-11); sin normalización Unicode; `22P05`/`PGRST102`/`22003`; mapeo SQLSTATE → HTTP observado.
+6. **§10.A** con resultados y **§10.A.1** con los límites (prototipo invoker, no se probaron CC-02, CC-03, PL-11, PW-05, NG-04, N-COL, RC-01; deadlocks simulados). **§10.B** suma ES-09, SD-01, LM-05 a LM-07, NG-09, NG-10, RC-01 y amplía ES-02, ES-05, ES-06, NG-05, CC-02. **§11** suma R-17 a R-22. **§12** tabla de 16 decisiones pendientes (nueva D-IDEM-15: alternativa A/B; D-IDEM-5d: creaciones por hora separada de 5b).
+
+**Archivos modificados:** `docs/decisions/010-intenciones-persistidas-de-operacion.md`, `docs/decisions/README.md` (versión 0.3 en el índice), `docs/progress-log.md`; evidencia externa: nota `../evidencias-entrega-b/d-idem-supabase/ADR010_v0.3_INCORPORACION.md` (no altera el laboratorio ni su manifiesto). **No se tocaron** Blueprint, ADR aprobadas, migraciones, SQL, RPC, RLS, permisos, preflight, código ni tests. No se ejecutó ninguna base ni se levantó ningún stack.
+
+**Pendiente (decisión humana):** ADR-010 §12. Para pedir aprobación falta la decisión humana de D-IDEM-1, -2, -7, -10 y -15, y la revisión independiente de v0.3.
+---
+## 06/11/2026 — ADR-010 v0.2: corrección de los hallazgos de Codex (PROPUESTA NO APROBADA; documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230`; los cambios B-01 sin commit y los tres `AUDIT_REPORT_*.md` se preservan. El dictamen «APTA CON CORRECCIONES» **no está en el repositorio ni en `~/Documentos`**: los ocho hallazgos se tomaron del pedido. ADR-010 sigue en **PROPUESTA — NO APROBADA**; no autoriza SQL, migraciones, RPC, tablas ni pruebas que la asuman vigente.
+
+**Cambios en `docs/decisions/010-intenciones-persistidas-de-operacion.md` (v0.1 → v0.2):**
+1. **Vencimiento (§5.3, 5.6, 5.8, 5.13, 6).** Es el límite para **admitir** nuevas ejecuciones, no para completarlas. Con la fila bloqueada por `FOR UPDATE` se compara `clock_timestamp()` (no `now()`, que es el inicio de la transacción). Una ejecución admitida antes puede completar después. Se eliminaron «nunca se ejecutará» tras vencer y «tras cancelar/vencer no se ejecuta».
+2. **Referencia a `operaciones` (§5.2, 5.11).** FK compuesta `(empresa_id, operacion_id, tipo, actor_id)` → `operaciones (empresa_id, id, tipo, actor_id)`. **La UNIQUE ya existe**: `operaciones_referencia_apertura` (`20261030120000_jornadas_esquema.sql:447`, inventariada en `stock_ingreso.test.sql:167`, ya usada por una FK en `:483`). **No se modifica `operaciones`.** Límite explícito: la FK no puede expresar `idempotency_key = id`; se garantiza por `ejecutar` y se comprueba con pruebas.
+3. **P15 (§7, 7.1).** Se reconoce la **segunda representación durable** de la clave; se propone una **excepción acotada** con justificación y cambios normativos, y se retira la afirmación de compatibilidad plena.
+4. **Payload (§5.4).** Conjunto exacto de claves por tipo, tipos PostgreSQL, enteros estrictos 1…2147483647, normalización de `motivo`, tope de tamaño y **reconstrucción con `jsonb_build_object`**; nunca se almacena `p_payload`. Validación en línea (sin auxiliar `SECURITY DEFINER`).
+5. **Concurrencia y errores (§5.6–5.8).** Sin cambios de fondo: locks intención → stock, transición atómica a `confirmada`, lista cerrada de rechazos, relanzamiento de errores de identidad y transitorios, sin `WHEN OTHERS`, RPC de stock reutilizadas.
+6. **T3-01 (§8).** Impacto cuantificado con líneas del preflight: firmas 40→48 (`:879`), `SECURITY DEFINER` 20→24 (`:1041`, `:1050`), relaciones RLS 11→12 (`:1411`), políticas 33→36 (retención indefinida) o 37 (con purga) (`:1406`); más ACL, owner, `proconfig`, hashes de `USING`/`WITH CHECK`, grants y pruebas negativas. **Preflight sin modificar.**
+7. **Decisiones (§12).** Tabla compacta con valores **propuestos, no aprobados**. **La retención recomendada pasó de «purga perezosa» a «indefinida»** (menos superficie, sin `DELETE`, 36 políticas); la purga queda como variante.
+8. **Pruebas (§10).** Separadas en 10.A (premisas PR-01 a PR-13, **antes** de aprobar, laboratorio descartable) y 10.B (**después** de implementar), con casos de vencimiento, FK, payload, límites, P15, inventarios y seguridad negativa.
+
+**Archivos modificados:** `docs/decisions/010-intenciones-persistidas-de-operacion.md`, `docs/progress-log.md`; evidencia externa en `../evidencias-entrega-b/d-idem-supabase/` (notas de supremacía). **No se tocaron** Blueprint, ADR aprobadas, migraciones, SQL, RPC, tablas, RLS, permisos, código, tests ni el preflight. No se ejecutó ningún comando SQL ni se levantó ningún stack.
+
+**Pendiente (decisión humana):** ver ADR-010 §12. La ADR no autoriza nada; B-01 sigue bloqueada por la idempotencia tras recarga.
+---
+## 06/11/2026 — ADR-010 redactada como PROPUESTA NO APROBADA: intenciones persistidas (C-mínima) para D-IDEM (documental, sin commit)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230`; los cambios B-01 sin commit se preservan y los tres `AUDIT_REPORT_*.md` siguen intactos.
+
+**Qué se hizo.** Se redactó `docs/decisions/010-intenciones-persistidas-de-operacion.md` (v0.1, estado **PROPUESTA — NO APROBADA**) y se agregó su fila al índice de `docs/decisions/README.md`. **Número:** 010; el 008 no está libre porque ADR-009 lo cita como propuesta de rollback (fuera del repo) y el 010 no figuraba en ningún archivo. La ADR define: el problema de la respuesta perdida con clave no recuperable; las alternativas descartadas (A0, B0, D1, D2, A, B, C3) con su razón; el modelo de intenciones con payload canónico; estados y transiciones atómicas; `crear`/`ejecutar`/`cancelar`/`listar`; el orden de locks intención → stock; la serialización de `ejecutar` y `cancelar`; empresa, actor, rol y sesión; permisos y RLS; la relación con `operaciones` e `idempotency_key`; los reintentos P13; la separación de errores de negocio frente a transitorios e identidad; vencimiento, retención y limpieza; la compatibilidad con ADR-001 y T3-01; la compatibilidad futura con ventas y cobros (sin implementarla); pruebas y criterios de aceptación; riesgos residuales y decisiones abiertas.
+
+**Restricciones técnicas fijadas en la propuesta.** Sin SQL dinámico (`CASE` estático); sin `WHEN OTHERS` (solo SQLSTATE nombrados `PT400/PT404/PT409` y lista cerrada de códigos `stock_*`; todo lo demás se relanza); `PT401`, `PT403` y `42501` nunca se convierten en HTTP 200; RPC de stock, permisos y RLS vigentes sin cambios; sin acceso directo del frontend a tablas; sin `localStorage`, `sessionStorage` ni IndexedDB.
+
+**Hecho verificado relevante para T3-01.** El preflight `supabase/scripts/validar_topologia_propietario_rpc.sql` exige una cardinalidad de funciones `SECURITY DEFINER` de **exactamente 20** (líneas 1041 y 1050; 19 privadas del manifiesto + `public.rls_auto_enable()` de O-4). Las 4 funciones privadas de esta propuesta la llevarían a 24 y las 8 funciones nuevas deberían figurar en el manifiesto; sin ese ajuste el preflight fallaría con `[SD_INVENTARIO]`. T3-01 no se modificó (su Fase 1 sigue sin aprobación).
+
+**Archivos modificados:** `docs/decisions/010-intenciones-persistidas-de-operacion.md` (nuevo), `docs/decisions/README.md` (una fila de índice), `docs/progress-log.md`. **No se tocaron** `BLUEPRINT.md`, ADR aprobadas, migraciones, SQL, RPC, tablas, RLS, permisos, código ni tests. No se ejecutó ningún comando SQL ni se levantó ningún stack.
+
+**Pendiente (decisión humana):** D-IDEM-0, -1, -2, -3, -5, -7, -10, -11, -12, -13 y -14 (ver ADR-010 §12). La ADR no autoriza nada hasta que el dueño del proyecto la apruebe; B-01 sigue bloqueada por la idempotencia tras recarga.
+---
+## 06/11/2026 — B-01: correcciones tras la auditoría de Codex (sin commit; B-01 BLOQUEADA en idempotencia tras recarga)
+
+**Base:** `feat/b-01-stock-real`, HEAD `358bb7c58dd318c20acc5ab078da94e470532230` (auditado), sin commit nuevo; AUDIT_REPORT_* intactos. Sin cambios de SQL, migraciones, RPC, RLS, permisos ni ADR. Blueprint v2.5 / ADR-005: unidad entera, peso en kg (≤ 3 decimales) → gramos enteros, `p_cantidad integer`.
+
+### Defectos resueltos
+1. **P13 — reintentos.** Texto exacto de ADR-001 §18.3 (P13-stock): «máximo 3, misma clave y mismo payload, ante `40001`, `40P01`, conexión perdida o timeout con resultado desconocido; `55P03` sólo si proviene de la política explícita de locks; `57014` sólo si es un timeout o cancelación recuperable; `PTxxx` nunca». Implementado en `lib/stock.ts` (`clasificarErrorStock`, `MAX_INTENTOS = 3`): `40001`/`40P01` y errores sin `code` (supabase-js devuelve `code` vacío ante un fallo de red) o excepciones se reintentan; `PTxyz`, `stock_*`, `42501`, `55P03`, `57014` y el resto **no**. «Máximo 3» se toma como **3 intentos en total** (cumple las dos lecturas posibles). La ADR **no define espera entre intentos** y no se agregó. `55P03`: las RPC de stock usan `pg_advisory_xact_lock` sin `lock_timeout`/`NOWAIT`, no hay «política explícita de locks». `57014`: el cliente no puede distinguir un timeout «recuperable». Agotamiento: `40001/40P01` → mensaje de concurrencia (sin efectos, la transacción se revierte); sin respuesta → resultado incierto. Misma clave y payload en todos los intentos (verificado en Vitest y E2E).
+2. **Sumas bigint.** `armarFilasStock`, `saldoDeposito` y `formatearCantidad` operan en `BigInt`; nunca se convierte un total a `Number`; una cantidad no entera lanza (falla cerrado). Prueba con saldos individualmente seguros cuya suma (27021597764222974 g = 27021597764222,974 kg) supera `Number.MAX_SAFE_INTEGER` y no es representable como double. Un saldo individual inseguro ya se rechazaba en `filaASaldo`.
+3. **Consulta innecesaria a `camiones`.** Confirmado que `datos.camiones` no lo consumía ninguna pantalla (la columna «En camiones» sale de `stock_actual`). Eliminados la consulta, `CamionStock`, `filaACamion` y el campo; no se tocó el catálogo de camiones.
+4. **Tests de permisos débiles.** El spec ahora afirma estado HTTP y código exacto, por la Data API (sin la interfaz): vendedor → `403 PT403 stock_no_autorizado` en ingreso, cuarentena y merma; inactivo → ídem; sin sesión → `42501`; otra empresa → `404 stock_producto_no_encontrado` / `stock_ubicacion_no_encontrada` (en los dos sentidos) y lecturas vacías de `stock_actual`, `productos` y `ubicaciones`; misma clave con payload distinto o con otro tipo → `409 PT409 stock_conflicto_idempotencia`; replay → mismo id; la clave es por usuario; cantidades 0/−1 → `stock_cantidad_invalida`, 1,5 y 2147483648 → 400 de PostgREST; origen y destino reales en `movimientos_stock` (ingreso null→depósito, cuarentena depósito→cuarentena, merma depósito→null con `vencido`).
+
+### Parcialmente mitigado
+- **Idempotencia tras recarga / cierre de pestaña (hallazgo 1 de Codex): NO RESUELTO.** Mitigaciones sin persistencia: (a) el mensaje de resultado desconocido ya no afirma «no se registra dos veces» sin condiciones: dice que vale sólo sin recargar y que, si se recargó, hay que revisar el stock antes de volver a cargar; (b) aviso del navegador (`beforeunload`) mientras hay una operación en vuelo o de resultado incierto, verificado en E2E. Ambas reducen el riesgo, **no lo eliminan**: si el usuario confirma salir y repite los mismos datos, se genera otra clave y el servidor puede duplicar. Se mantiene BLOQUEADA a la espera de la decisión D-IDEM.
+
+### Decisión pendiente D-IDEM (no implementada; requiere decisión humana)
+Ni el Blueprint ni ninguna ADR aprobada definen cómo conserva o reconcilia el cliente la clave tras una recarga. AGENTS.md §5 prohíbe «incorporar un nuevo sistema de persistencia en localStorage». Opciones:
+- **A. Persistencia acotada en el navegador** (`sessionStorage`; no `localStorage`): guarda `{clave, firma del intento, usuario_id, empresa_id, creado_en}`. Se vincula al usuario/empresa con el perfil protegido; la firma impide reusar la clave con otro payload (si la firma difiere, clave nueva). Tras recargar se recupera y el reintento reusa la clave (replay del servidor). Logout/cambio de usuario: se descarta si el `usuario_id` no coincide. Sesión vencida: la clave sigue siendo válida al volver a entrar con el mismo usuario. Riesgos: datos de la operación en el navegador (sin secretos), pestañas duplicadas con la misma clave (el servidor la serializa), borrado manual del storage. Cambios: sólo frontend (`stock_formulario.ts`, `Stock.tsx`, tests). **Sin SQL, pero contradice la regla de AGENTS.md §5 si se usa localStorage, y `sessionStorage` es un sistema de persistencia nuevo: requiere decisión humana expresa.**
+- **B. Reconciliación en el servidor por clave:** `operaciones` ya es legible por dueño/encargado de la empresa (RLS), pero sin la clave guardada no hay cómo preguntar por ella; reconciliar por contenido (producto, cantidad, fecha) es heurístico y puede confundir operaciones legítimas iguales. Resolver por clave exigiría una RPC o vista nueva de consulta: **cambio de backend, ADR y aprobación**. Por sí sola no resuelve la recarga; sólo sirve junto con A.
+- **C. Otra solución prevista en el contrato vigente:** ninguna. La ADR-001 sólo exige reintentar «con la misma clave» y no dice dónde se guarda.
+- **Recomendación (no aplicada):** A con `sessionStorage`, TTL corto, vinculada a `usuario_id`+`empresa_id`+firma y limpiada en logout, como mínimo cambio y sin tocar el backend. Decisión humana necesaria: ¿se autoriza `sessionStorage` para este único fin?
+
+### Motivo de 500 caracteres
+No tiene carácter normativo: ni el Blueprint ni las ADR lo mencionan. Es solo `maxLength` del `<input>` en la interfaz. El backend (RPC y tabla) sólo exige motivo no vacío tras `btrim`; no hay tope. Un cliente que omita la interfaz puede enviar un motivo de cualquier longitud. Decisión pendiente (backend/ADR); no se modificó SQL ni se agregó una restricción.
+
+### Verificación realmente ejecutada (logs y manifiestos fuera del repo)
+- `npm run typecheck` exit 0; `npm run lint` exit 0; `npm test` 35 archivos / **1288** pruebas, exit 0; `npm run build` exit 0.
+- Playwright `tests/b01-stock.spec.ts --project=chromium` contra un stack **descartable** (`project_id` `b01-e2e-lab`, puertos 58xxx, copia fuera del repo; migraciones y seed verificados idénticos a los del repo; inventario Docker previo y posterior idéntico, sin residuos): **27 aprobadas (26 de B-01 + `setup`), 0 fallidas, 0 omitidas, en 3 corridas seguidas.** La corrida inicial dio 26/27: un test del aviso de cierre intentaba provocar el diálogo real del navegador; se reemplazó por una comprobación determinista del manejador `beforeunload`.
+- Base tras las corridas: 95 movimientos (todos `cantidad > 0`), 0 claves de idempotencia duplicadas, 0 operaciones sin movimiento (los rechazos de negocio no dejan reservas).
+- Los fallos 40001/40P01/55P03/57014 se **simulan** en la capa HTTP del navegador (`route.fulfill`) porque no se pueden provocar de forma determinista desde la UI; el efecto en la base (un solo movimiento) sí se lee de la base real. No se provocó un deadlock real.
+- No se repitió pgTAP (evidencia histórica). No se ejecutó la suite Playwright completa del repo. Sin dispositivo Android real ni sesión vencida durante la operación.
+- Fixture de «inactivo»: el seed sólo tiene un vendedor inactivo; no aísla el control `activo` de un dueño/encargado.
+
+### Archivos modificados (sin commit)
+`apps/web/src/lib/stock.ts`, `lib/stock.test.ts`, `pages/Stock.tsx`, `pages/stock_formulario.ts`, `pages/stock_formulario.test.ts`, `pages/StockVista.test.tsx`, `pages/stock_controlador.test.ts`, `tests/b01-stock.spec.ts`, `docs/progress-log.md`.
+
+**Estado:** B-01 sigue **bloqueada** por la idempotencia tras recarga (D-IDEM). Security review independiente y re-auditoría del hash nuevo pendientes.
+---
+## 06/11/2026 — B-01: integración real y Playwright en stack descartable (sin commit; NO aprobada)
+
+**Rama/HEAD:** `feat/b-01-stock-real`, `a1d29640a67d1846673f794bed2a754d98c229e5`; AUDIT_REPORT_* intactos. Reglas respetadas: Blueprint v2.5 §7.1 y ADR-005 (unidad entera; peso en kg con hasta 3 decimales de entrada, gramos enteros persistidos, `p_cantidad integer`).
+
+**Corrección a la entrada anterior.** Allí se dijo que no había un stack de este repo corriendo. Era falso: `distribuidora-stock-rutas` (puerto 54321) estaba activo; el `docker ps | head -20` lo había cortado. No se tocó.
+
+**Aislamiento.** Inventario previo: 65 recursos Docker (contenedores, redes, volúmenes) y puertos 54321–54327, 55321–55324, 56322–56324, 57321–57324, 59221–59222 ocupados. Se creó una copia de trabajo **fuera del repo** (`…/scratchpad/b01/stack-b01-e2e/supabase`: `config.toml`, `seed.sql` y las 25 migraciones copiadas, sin modificar el repo) con `project_id = "b01-e2e-lab"`, puertos 58320–58329, y studio, analytics y edge runtime desactivados. `supabase start --workdir <copia>` (nunca desde el repo, sin `db reset`, sin `link`). Resultado comprobado: 4 contenedores, 1 volumen y 1 red nuevos, todos `*_b01-e2e-lab`; ningún recurso preexistente cambió. Fin: `supabase stop --no-backup --workdir <copia>` (sólo ese `project_id`); el inventario final es **idéntico** al previo (`diff` vacío), sin contenedores ni puertos 58xxx residuales. El servidor Vite se levantó con `VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY` del stack descartable pasadas por entorno (no se leyeron ni modificaron `.env*`). Sin staging ni producción. Los logs, manifiestos y la copia están fuera del repo.
+
+**Spec nuevo:** `apps/web/tests/b01-stock.spec.ts` (16 pruebas con la `setup`). Cada prueba crea su propio producto vía `crear_producto` y verifica con lecturas reales a la Data API (`stock_actual`, `movimientos_stock`), no con mocks: dueño consulta; ingreso con saldo y persistencia tras recargar; peso 1,250 kg → un movimiento de 1250 g y saldo 1250; cuarentena (15/5) y merma (12/5, `vencido`) desde el depósito; cuarentena por más del depósito → error de negocio y sin efectos; unidad rechaza `1,5`, `1.5`, `0`, `-3` y vacío sin llamar a la RPC; peso rechaza `1,2345`, `1.250`, `0,000`; cuarentena sin motivo y merma «Otro» sin detalle; doble clic con respuesta lenta → una sola llamada y un movimiento; respuesta perdida + reintento → un solo movimiento (misma clave); encargado opera ingreso/cuarentena/merma en peso (saldo 7250 g/2500 g); vendedor: «Acceso no permitido», sin menú Stock y la RPC lo rechaza sin efectos; dueño de otra empresa no ve ni mueve el stock; PC 1280×800 (tabla) y Android 412×915 (tarjetas, sin scroll horizontal, botón ≥ 44 px, operación completa).
+
+**Defecto de frontend encontrado y corregido.** Con la respuesta perdida, `supabase-js` no lanza: devuelve `error` con `code` vacío, y B-01 lo mostraba como «No se pudo registrar… Intentá de nuevo» (engañoso: la operación pudo registrarse). `mensajeErrorStock` (`lib/stock.ts`) ahora trata un error sin código como **resultado desconocido** (mensaje «revisá el stock o reintentá con los mismos datos»); los errores con código de PostgREST siguen siendo genéricos. Regresión en `lib/stock.test.ts`. El reintento ya era seguro (misma clave, `operaciones` sin claves duplicadas); sólo era el texto.
+
+**Resultados.** Playwright `tests/b01-stock.spec.ts --project=chromium`: primera corrida 15 aprobadas / 1 fallida (el defecto anterior); tras la corrección, **16 aprobadas, 0 fallidas, 0 omitidas, dos corridas seguidas** (exit 0). `npm run typecheck` 0; `npm run lint` 0; `npm test` 35 archivos / 1246 pruebas, exit 0; `npm run build` 0. Evidencia de la base tras 3 corridas: 48 movimientos, todos `cantidad > 0` y de tipo `integer`; 3 ingresos de peso de exactamente 1250 g; 0 claves de idempotencia duplicadas en `operaciones`.
+
+**Fuera de esta verificación.** No se ejecutó la suite Playwright completa del repo ni se repitió pgTAP (la suite oficial anterior de T3-01 es evidencia histórica, no corrida de nuevo). La validación móvil usa viewport de Chromium, no un dispositivo Android real.
+
+**Riesgos pendientes.** Security review formal de B-01 (Supabase, roles, `movimientos_stock`, idempotencia) y auditoría independiente del hash. El spec depende de `crear_producto` y de las cuentas del seed local; no es apto para staging. Un test no cubre la sesión vencida durante la operación.
+---
+## 06/11/2026 — B-01: revisión previa al E2E y contradicción de unidades (sin commit; NO aprobada)
+
+**Rama/HEAD:** `feat/b-01-stock-real`, `a1d29640a67d1846673f794bed2a754d98c229e5` (sin cambios; AUDIT_REPORT_* intactos).
+
+**Contradicción planteada y resolución.** Se pidió quitar de B-01 toda entrada en kg, por supuesta prohibición del Blueprint, y respetar «pieza = 2 medias piezas». **No se aplicó:** esa regla es la del Blueprint v1.2–v2.0, superada. El Blueprint vigente (v2.5, §7.1) y la ADR-005 (aprobada) establecen que no existen pieza ni media pieza; el fiambre (`peso`) se ingresa en kg con hasta 3 decimales, se muestra con 3 decimales fijos y se guarda como **gramos enteros**; más de 3 decimales se rechaza sin redondear (§12: `1,250 kg` → `1250` g). Las RPC reciben `p_cantidad integer` en unidad mínima (gramos en `peso`), por lo que no contradicen el Blueprint. B-01 ya cumple: el kg es sólo texto de entrada/presentación; la conversión usa BigInt, nunca float. Si el humano quiere cambiar esa regla, corresponde una ADR en estado `propuesta`.
+
+**Contratos RPC verificados** (migraciones `20261025021032`, `20261025033454`): `registrar_ingreso(uuid, uuid, integer, text)`, `mover_a_cuarentena(uuid, uuid, uuid, integer, text)`, `registrar_merma(uuid, uuid, uuid, integer, text, text)`; sólo dueño/encargado activos (`stock_no_autorizado`); empresa y actor desde `perfiles`; `stock_actual` es `security_invoker`.
+
+**Cambios:** sólo `apps/web/src/pages/stock_formulario.test.ts` (+3 pruebas: toda cantidad enviada es entero positivo en unidad mínima, sin «1/2» ni decimales en `unidad`, `peso` rechaza punto, notación científica, >3 decimales y signos). No se tocó código de producción, SQL, RLS ni permisos.
+
+**Verificación** (logs fuera del repo): typecheck exit 0; lint exit 0; `npm test` 35 archivos / 1245 pruebas; build exit 0. Playwright **no ejecutado**.
+
+**Revisión de seguridad B-01 (frontend; no reemplaza el security review formal):**
+- Autorización: ruta sólo `ROLES_GESTION` + ítem de menú oculto al vendedor; la autoridad real es la RPC (`stock_no_autorizado`/`42501`). El cliente nunca envía `empresa_id` ni actor.
+- Idempotencia: una clave por intento (misma firma → misma clave hasta el éxito); fallo de red/respuesta sin id = «resultado desconocido», no se asume éxito; reintento no duplica (P12).
+- Doble envío: guarda en el controlador (independiente del render) y botones deshabilitados.
+- Cantidades: enteros seguros ≤ `integer`; sin float; origen de cuarentena/merma fijado al depósito.
+- Aislamiento: lectura sólo por RLS; saldos de ubicaciones/productos desconocidos invalidan la lectura (falla cerrado).
+- Escrituras: ninguna directa a `movimientos_stock` ni `operaciones`; sólo `rpc()`.
+- Errores: sólo códigos `stock_*` conocidos; el resto, mensaje genérico.
+- Límite: nada de esto se probó contra una base real.
+
+**Preparación E2E (no ejecutada).** Escenarios Playwright: 1) dueño consulta stock; 2) dueño registra ingreso; 3) encargado opera; 4) cuarentena y merma modifican depósito/cuarentena y el saldo esperado (incluye `stock_insuficiente`); 5) vendedor no accede a `/stock`; 6) saldos persisten tras recargar; 7) PC y móvil (viewport Android). Requisitos de entorno aislado: stack propio del repo (`npx supabase start --workdir ../..`, `project_id` `distribuidora-stock-rutas`, puertos 54321+), seed con dueño, encargado y vendedor de prueba, y `VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY` de ese stack. Antes de levantarlo hay que confirmar que ningún stack ajeno ocupa esos puertos y no resetear bases compartidas. No se inició ningún stack.
+
+**Estado:** B-01 **no** está terminada: falta integración real y revisión favorable.
+---
+## 06/11/2026 — B-01: pantalla real de stock (sin commit; NO aprobada)
+
+**Rama:** `feat/b-01-stock-real`, desde `a1d29640a67d1846673f794bed2a754d98c229e5` (HEAD verificado; rama original `feat/t3-01-preflight-migraciones` intacta). Los tres `AUDIT_REPORT_*.md` siguen sin trackear y fuera de todo commit.
+
+**Alcance implementado.** Nueva ruta `/stock` (sólo dueño y encargado, igual que las RPC) con: saldo por producto y ubicación (depósito, cuarentena, camiones, total), ingreso, paso a cuarentena y merma. Estados de carga, error de lectura con reintento, error de operación, confirmación y refresco del saldo desde la base después de cada éxito. Responsive: tabla en PC y tarjetas en móvil, controles de 44 px.
+- Lectura: `SELECT` con RLS sobre `ubicaciones`, `productos`, `camiones` y la vista `stock_actual`. Falla cerrado ante una fila inesperada.
+- Escritura: sólo `registrar_ingreso`, `mover_a_cuarentena`, `registrar_merma` (contratos verificados contra `20261025021032_stock_operaciones_ingreso.sql` y `20261025033454_stock_cuarentena_merma.sql`). `empresa_id` y actor no se envían. Sin escrituras directas a `movimientos_stock`, sin edición de saldos.
+- Cantidades en unidad mínima (unidades o gramos enteros, ADR-005), entradas validadas con `kg_a_gramos` (BigInt, coma decimal, hasta 3 decimales); sin float, sin redondeo, tope `integer`.
+- Idempotencia (P12): una clave por intento, reutilizada en reintentos del mismo intento tras un error, renovada tras un éxito o al cambiar los datos. Guarda de doble envío independiente del render.
+- Cuarentena y merma salen siempre del depósito (origen no editable).
+- Errores `stock_*` traducidos a español; cualquier otro error se reemplaza por un mensaje genérico (nunca detalle de SQL/PostgREST).
+
+**Archivos.** Nuevos: `apps/web/src/lib/stock.ts`, `hooks/useStock.ts`, `pages/Stock.tsx`, `pages/StockVista.tsx`, `pages/stock_controlador.ts`, `pages/stock_formulario.ts` y sus tests `lib/stock.test.ts`, `pages/stock_formulario.test.ts`, `pages/stock_controlador.test.ts`, `pages/StockVista.test.tsx`. Modificados: `App.tsx` (ruta), `components/layout/Sidebar.tsx` (ítem «Stock»). No se tocaron migraciones, SQL, RLS, permisos, ADR, preflight T3-01, ventas ni rendición; no se agregaron dependencias. La pantalla demo `Movimientos` y sus datos no se tocaron.
+
+**Verificación** (desde `apps/web/`, log en el scratchpad de la sesión, fuera del repo): `npm run typecheck` exit 0; `npm run lint` exit 0; `npm test` 35 archivos / 1242 pruebas pasan (74 nuevas de stock); `npm run build` exit 0.
+
+**NO verificado.**
+- `npx playwright test` **no se ejecutó**: requiere un stack Supabase local propio de este repo (puerto 54321, seed y variables del stack). No estaba levantado; los stacks activos en la máquina son laboratorios de otras tareas y no se reutilizaron. Sin stack no se probó de punta a punta ninguna operación contra la base ni se hizo validación real de escritorio/móvil.
+- No se agregó spec E2E de stock: no se versiona un spec que no se pudo ejecutar.
+- Las pruebas de vista usan `renderToStaticMarkup` (no hay jsdom ni testing-library y no se agregaron dependencias): verifican marcado y clases responsive, no interacción en un navegador.
+
+**Pendientes y riesgos.**
+- Correr `supabase start` + seed y un spec Playwright de stock (ingreso, cuarentena, merma, permisos de encargado, vendedor sin acceso) antes de dar B-01 por probado.
+- Superficie sensible (Supabase, roles, `movimientos_stock`, idempotencia): corresponde **security review**; B-01 no está cerrada sin ella. El cambio es sólo frontend y no altera la seguridad de la base.
+- No se marca stock bajo mínimo: no hay regla aprobada para ello; sólo se muestra el stock mínimo.
+- El stock de la jornada/camión y los demás módulos siguen con datos demo hasta sus propias tareas.
+---
 ## 06/11/2026 — T3-01 G-01: cierre de la aclaración textual (mensaje ESTADO_B; commit local; T3-01 Fase 1 NO aprobada)
 
 **Rama:** `feat/t3-01-preflight-migraciones`, base `9384b7d4211d3e50bfb59dc1e93ef33901c995a3`. Completa G-01.
