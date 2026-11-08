@@ -217,5 +217,27 @@ LIN="$(grep -n '^unset FICHA CA' "$EJ" | cut -d: -f1)"
 chk "$([ -n "$LIN" ] && ! tail -n +$((LIN+1)) "$EJ" | grep -vE '^\s*#' | grep -qE '\$(\{)?(FICHA|CA)([^A-Za-z0-9_]|$)' && echo ok)" "T13 estático: ninguna referencia a las rutas de origen (FICHA/CA) después de 'unset FICHA CA'"
 chk "$(grep -q 'set -uo pipefail' "$EJ" && echo ok)" "T14 'set -u' activo: una referencia posterior a las rutas de origen abortaría"
 
+
+echo "# 8. probar_o4_docker.sh: el directorio de evidencia se valida ANTES de crear nada (observación de Codex sobre 468b772)"
+# Sin docker en el PATH: la validación de OUT ocurre antes; si fallara, el script crearía OUT y recién entonces abortaría por docker.
+O4D="$DIR/probar_o4_docker.sh"; NOD="$T/nodocker"; mkdir "$NOD"
+for u in dirname basename realpath ls mkdir; do ln -s "$(command -v $u)" "$NOD/$u"; done
+o4d() { SAL="$(/usr/bin/env -i PATH="$NOD" HOME="$T" /bin/bash "$O4D" "$@" 2>&1)"; RC=$?; }
+rm -rf "$REPO/zz_o4d_prueba"
+o4d "$REPO/zz_o4d_prueba/a/b"; ok15="$([ $RC -eq 2 ] && has 'fuera del repositorio' && [ ! -e "$REPO/zz_o4d_prueba" ] && echo ok)"; rm -rf "$REPO/zz_o4d_prueba"
+chk "$ok15" "T15 OUT dentro del repo con padre inexistente: rechazado y nada creado en el repo (rc=$RC)"
+ln -s "$REPO" "$T/aRepo2"; o4d "$T/aRepo2/zz_o4d_prueba"; ok16="$([ $RC -eq 2 ] && has 'enlaces simbólicos' && [ ! -e "$REPO/zz_o4d_prueba" ] && echo ok)"; rm -rf "$REPO/zz_o4d_prueba"
+chk "$ok16" "T16 OUT bajo un enlace simbólico hacia el repo: rechazado y nada creado en el repo (rc=$RC)"
+o4d "$REPO/supabase/../zz_o4d_prueba"; ok17="$([ $RC -eq 2 ] && has 'caracteres no admitidos' && [ ! -e "$REPO/zz_o4d_prueba" ] && echo ok)"; rm -rf "$REPO/zz_o4d_prueba"
+chk "$ok17" "T17 OUT con '..' que resuelve dentro del repo: rechazado y nada creado (rc=$RC)"
+o4d "relativa/ruta"; chk "$([ $RC -eq 2 ] && has 'absoluta' && echo ok)" "T18 ruta relativa: rechazada (rc=$RC)"
+o4d "$T/o4d_legitimo/ev"; chk "$([ $RC -eq 2 ] && has 'docker no disponible' && ! has 'fuera del repositorio' && echo ok)" "T19 OUT legítimo fuera del repo: pasa la validación y recién después aborta por falta de docker (rc=$RC)"
+# Estático: los comentarios de estado normativo del preflight y de los tests coinciden con ADR-001 §18.2.1 (aprobada sólo como
+# norma, 07/11/2026). La migración 20261110… NO se incluye a propósito: su archivo no se edita (hash auditado, ADR-009 §2.4); su
+# comentario de cabecera queda como está hasta que otra tarea autorizada modifique esa migración.
+OBS=0; for f in supabase/scripts/validar_topologia_propietario_rpc.sql supabase/tests/hardening_adr001.test.sql supabase/tests/pg_temp_rpc_privilegiadas.test.sql; do
+  grep -qE 'PROPUEST[OA],? NO APROBAD|PROPUESTA NO APROBADA' "$REPO/$f" && { echo "  comentario obsoleto en $f"; OBS=1; }; done
+chk "$([ $OBS -eq 0 ] && echo ok)" "T20 estático: ningún comentario del preflight ni de los tests O-4 llama «PROPUESTO/PROPUESTA NO APROBADO/A» al contrato RB + RA (ADR-001 §18.2.1)"
+
 echo "--- casos: $TOTAL, fallas: $FALLAS"
 [ "$FALLAS" -eq 0 ]

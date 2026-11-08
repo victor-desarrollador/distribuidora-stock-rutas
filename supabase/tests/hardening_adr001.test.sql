@@ -399,7 +399,8 @@ select case when (select f from o4) is null
           and not exists (select 1 from pg_trigger where tgfoid = (select f from o4)),
           'O-4: ensure_rls es el único event trigger de rls_auto_enable(): owner postgres, ddl_command_end, evtenabled O y exactamente las 3 tags, sin duplicados') end;
 -- Identidad exacta de la función remediada (O4-PGTEMP, RB: cuerpo de staging
--- con 3 referencias calificadas; PROPUESTA NO APROBADA). El cuerpo anterior
+-- con 3 referencias calificadas; contrato aprobado sólo como norma, ADR-001
+-- §18.2.1). El cuerpo anterior
 -- 325ae266… es vulnerable y queda rechazado. El hash identifica el cuerpo; no
 -- certifica su seguridad funcional (F7/F8 siguen abiertos).
 select case when (select f from o4) is null

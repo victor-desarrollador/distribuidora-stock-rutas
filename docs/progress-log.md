@@ -1,4 +1,39 @@
 ---
+## 07/11/2026 — T3-01: cierre local de hallazgos comprobados y registro del paquete Q0–Q6 (rama nueva desde `983ea69`; sin commit; T3-01 NO cerrada)
+
+**Rama:** `fix/t3-01-cierre-local`, desde `983ea696b079f3cddac5f44460f8f6f4267c155c`, en la worktree `distribuidora-t3-01-cierre-local`. El commit `983ea69` y su worktree no se tocaron. Sin commit, push, merge ni deploy; sin staging ni producción. Superficie sensible (SECURITY DEFINER, event triggers, RLS): **corresponde security review (pendiente)**.
+
+### Paquete Q0–Q6 (entrada de bitácora que estaba sin escribir)
+- `d3bd526`: ADR-001 §18.2.1, contrato RB + RA aprobado sólo como norma (decisión humana del 07/11/2026).
+- `8893dd0`: paquete de consultas de **sólo lectura** Q0–Q6 (`consultas_ro/`), procedimiento de staging de sólo lectura y `probar_consultas_ro.sh`.
+- `f481c63`: identidad fail-closed y compuerta LOGIN+TEMP en el inventario.
+- `97a305c`: ficha de identidad, huella canónica LOGIN+TEMP y evidencia vinculada.
+- `983ea69`: cierre de TOCTOU del ejecutor RO y del vínculo de evidencia.
+- Resultado en `983ea69`: ejecutor 81/81 y consultas Q0–Q6 67/67 (Docker); evidencia vinculada `evidencias-t3-01/vinculada-983ea69`; dictamen FAVORABLE de Codex sobre el delta `97a305c..983ea69` (informado por el responsable). L5 (privilegio de lectura de `supabase_migrations.schema_migrations` para el rol de staging) sigue sin definir ni otorgar.
+
+### Hallazgos locales corregidos (comprobados)
+1. **Validación del directorio de evidencia en `probar_o4_docker.sh`** (observación baja de Codex sobre `468b772`). La comprobación usaba `cd "$(dirname "$OUT")" && pwd` (ruta lógica): con un padre inexistente la `cd` fallaba en silencio y el chequeo se salteaba, y con un enlace simbólico hacia el repo no detectaba que la evidencia caería dentro; `mkdir -p` la creaba allí. Ahora exige ruta absoluta, rechaza `..` y saltos de línea, compara `realpath -m` con `realpath -m -s` (sin enlaces simbólicos) y rechaza cualquier ruta dentro del repo, **antes de crear nada**. Pruebas nuevas en `probar_ejecutor_ro.sh` (sección 8, sin Docker en el `PATH`): T15 padre inexistente dentro del repo, T16 enlace hacia el repo, T17 `..`, T18 ruta relativa, T19 caso legítimo (pasa la validación y recién después aborta por falta de docker). **Cambio de comportamiento documentado:** ahora rechaza rutas relativas y con `..` (antes las aceptaba si el padre existía); sigue admitiendo un directorio existente vacío. **No contradice ningún contrato aprobado:** ni el Blueprint, ni las ADR, ni `AGENTS.md`, ni `CLAUDE.md` regulan el argumento de `probar_o4_docker.sh`; la única convención escrita (`PROCEDIMIENTO_STAGING_RO.md` punto 7 y `dir_evidencia_seguro`, que usan los otros tres scripts del paquete) exige ruta absoluta, fuera del repo y sin enlaces simbólicos, que es lo que ahora cumple; ninguna invocación documentada usa una ruta relativa. La cabecera de uso del script se actualizó.
+2. **Comentarios que seguían llamando «PROPUESTO/PROPUESTA NO APROBADO/A» al contrato RB + RA** en **4 ubicaciones** que no son migraciones: `validar_topologia_propietario_rpc.sql` ×2, `hardening_adr001.test.sql` y `pg_temp_rpc_privilegiadas.test.sql`. Ahora dicen «aprobado sólo como norma (ADR-001 §18.2.1, 07/11/2026); no autoriza staging ni producción». **Sólo cambian líneas de comentario** (verificado con el hash del archivo sin comentarios, idéntico antes y después en los tres archivos SQL). T20 evita la regresión en esos archivos. **La migración `20261110120000_o4_pgtemp_remediacion.sql` no se modificó** (decisión del responsable): conserva su hash auditado `7068ddb38b037580413fba88b418ca89b92923c91710195081fcfabff7abef64` y las 25 migraciones son idénticas a `983ea69`. Su comentario de cabecera sigue diciendo «PROPUESTA NO APROBADA» (deuda documental conocida, fuera de T20 a propósito); se corrige cuando otra tarea autorizada modifique esa migración, con su re-auditoría (ADR-009 §2.4).
+3. **«Huella documental de `progress-log.md` en `hashes_finales.txt`»: no se reproduce en el código vigente.** `hashes_finales.txt` sólo existe en la evidencia histórica `evidencias-t3-01/m01-b01-docker` (armada a mano para `468b772`). `vinculo_git` hashea únicamente el paquete ejecutable (`VINCULO_RUTAS`: laboratorio, preflight y migración O-4) y la evidencia vinculada `vinculada-983ea69` no contiene la bitácora. Sin cambio de código.
+4. **Paridad de imagen `.003` frente a `.004`** (laboratorio local; la `.003` es la registrada para el remoto vinculado): con los mismos scripts y sólo el digest cambiado (copia temporal fuera del repo), consultas Q0–Q6 67/67 y M-01/B-01 + O-4 presente en rc 0, **0 diferencias** en los resultados normalizados. Límite: es paridad de la imagen local, no del entorno remoto. Se corrió cuando la cabecera de la migración O-4 todavía tenía el comentario editado (luego revertido); el SQL era idéntico y la paridad depende de la imagen, no del comentario, por lo que no se repitió.
+
+### Verificación (árbol sin commitear: evidencia NO VINCULADA a un commit)
+| Verificación | Antes (`983ea69`) | Después |
+|---|---|---|
+| `probar_ejecutor_ro.sh` | 81/81 | **87/87** (81 + T15–T20) |
+| `probar_consultas_ro.sh` (Docker, `.004`) | 67/67 | 67/67 |
+| `probar_o4_docker.sh` (M-01/B-01 + O-4 presente) | rc 0 | rc 0 |
+| Paridad `.003` (consultas / M-01·B-01 + O-4) | n/a | 67/67 · rc 0 · 0 diferencias |
+| Sensibilidad: pruebas nuevas contra el código de `983ea69` | n/a | fallan exactamente T15, T16, T17, T18 y T20; T19 pasa (repetida tras el ajuste final) |
+
+Las filas del ejecutor, las consultas y M-01/B-01 + O-4 presente (28 casos, 0 fallas) se **repitieron sobre el árbol final**, ya con la migración O-4 revertida. Evidencia (fuera del repo): `evidencias-t-t1-cierre-local/` (primera pasada y paridad) y `evidencias-t-t1-ajuste-final/` (pasada final). Dos intentos intermedios inválidos se conservan aparte con prefijo `_`: la sensibilidad sin repositorio git y la paridad de consultas abortada por el modo 775 del directorio padre (que el script rechazó correctamente).
+
+### No tocado (decisión humana pendiente o acceso remoto)
+**Pendiente documental (sin modificar la migración):** el comentario de cabecera de `supabase/migrations/20261110120000_o4_pgtemp_remediacion.sql` (líneas 2–4) todavía dice «La enmienda de ADR-001 §18.2 que la respalda es una PROPUESTA NO APROBADA». Es obsoleto frente a ADR-001 §18.2.1 (aprobada sólo como norma, 07/11/2026), pero la migración conserva su hash auditado `7068ddb38b037580413fba88b418ca89b92923c91710195081fcfabff7abef64` por decisión del responsable; se corrige únicamente cuando otra tarea autorizada modifique esa migración, con su re-auditoría (ADR-009 §2.4).
+
+PB12C-1..5, H-04 (la bitácora lo usa con dos sentidos; sin resolver), F7, F8, decisión B/C, L5, inventario de roles LOGIN y evidencia de la plataforma en staging, tests `pg_temp_*` con objetos hostiles, security review, auditoría independiente de este delta y autorizaciones de staging y de producción (cada una por separado).
+
+---
 ## 07/11/2026 — ADR-001 §18.2.1: aprobación normativa de la enmienda O-4 RB + RA (documental, sin commit; T3-01 NO cerrada)
 
 **Rama:** `feat/t3-01-preflight-migraciones`, HEAD `468b772bb4cd7be33674ab5346d9de7d95c266ac`. Cambio **exclusivamente documental**: sólo `docs/decisions/001-rpc-privilegiadas.md` y esta bitácora. No se modificó SQL, migraciones, RLS, RPC, tests ni scripts, y no se ejecutó Docker ni SQL.

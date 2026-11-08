@@ -141,8 +141,8 @@ select ok(
        --   * HISTÓRICO — B.1.2b/B.1.2c (06/11/2026): el cuerpo de staging
        --     325ae266… con search_path=pg_catalog; vulnerable (O4-PGTEMP), ya
        --     no se exime.
-       --   * PROPUESTO, NO APROBADO — contrato RB + RA (hash e1b231fb… y
-       --     search_path=pg_catalog, pg_temp): es el que se exige abajo.
+       --   * APROBADO SÓLO COMO NORMA (ADR-001 §18.2.1) — contrato RB + RA (hash
+       --     e1b231fb… y search_path=pg_catalog, pg_temp): es el que se exige abajo.
        -- Se exime sólo public.rls_auto_enable(), identificada por OID y con el
        -- contrato completo de la función y de ensure_rls. Fuera de contrato no
        -- se exime y la aserción falla. En local la función no existe y la

@@ -5,13 +5,20 @@
 # nombre exclusivo; aplica las migraciones del repo; ejecuta probar_m01_b01.sh y
 # probar_o4_presente.sh; guarda la evidencia en <dir_salida> (fuera del repo) y
 # elimina únicamente SU contenedor (por ID).
-# Uso: probar_o4_docker.sh <dir_salida_vacío_o_inexistente>
+# Uso: probar_o4_docker.sh <dir_salida>   (ruta ABSOLUTA, sin '..' ni enlaces simbólicos, fuera del repo; inexistente o vacío)
 set -uo pipefail
 [ "$#" -eq 1 ] || { echo "uso: $0 <dir_salida>" >&2; exit 2; }
 OUT="$1"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$DIR/../../.." && pwd)"
-case "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" in "$REPO"/*) echo "abortado: la evidencia debe quedar fuera del repositorio" >&2; exit 2 ;; esac
+# El directorio de evidencia debe quedar FUERA del repositorio y sin enlaces simbólicos en la ruta. La comprobación
+# anterior usaba `cd "$(dirname "$OUT")" && pwd` (ruta lógica): con un padre inexistente o con un enlace simbólico
+# hacia el repo no detectaba que la evidencia caería dentro (y `mkdir -p` la creaba allí).
+case "$OUT" in /*) ;; *) echo "abortado: la ruta de evidencia debe ser absoluta" >&2; exit 2 ;; esac
+case "$OUT" in *$'\n'*|*..*) echo "abortado: ruta de evidencia con caracteres no admitidos" >&2; exit 2 ;; esac
+OUT_FISICO="$(realpath -m -- "$OUT")"; OUT_LEXICO="$(realpath -m -s -- "$OUT")"
+[ "$OUT_FISICO" = "$OUT_LEXICO" ] || { echo "abortado: la ruta de evidencia contiene enlaces simbólicos" >&2; exit 2; }
+case "$OUT_FISICO/" in "$(realpath -- "$REPO")"/*) echo "abortado: la evidencia debe quedar fuera del repositorio" >&2; exit 2 ;; esac
 unset PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER PGPASSWORD PGSERVICE PGSERVICEFILE DATABASE_URL SUPABASE_DB_URL || true
 . "$DIR/lab_comun.sh"
 if [ -e "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then echo "abortado: $OUT no está vacío" >&2; exit 2; fi

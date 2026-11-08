@@ -13,7 +13,7 @@
 --   3. Bloque A: funciones por firma exacta y OID (40 firmas, B.1.2a) e
 --      inventario exhaustivo de funciones SECURITY DEFINER (3.7, ADR-001 §17.3),
 --      con la excepción O-4 (ADR-001 §18.2 vigente) sujeta al contrato RB + RA
---      PROPUESTO, NO APROBADO (O4-PGTEMP; ver la cabecera de DECLARE).
+--      APROBADO SÓLO COMO NORMA (ADR-001 §18.2.1; O4-PGTEMP; ver la cabecera de DECLARE).
 --   4. T3P-08: service_role y la excepción P11-productos (conjunto exacto).
 --   5. T3P-06: manifiesto exacto de políticas RLS.
 -- Cada rechazo indica el invariante violado entre corchetes.
@@ -68,8 +68,9 @@ DECLARE
   --      para este preflight): hash 325ae266… y proconfig {search_path=pg_catalog}
   --      del cuerpo observado en staging. O4-PGTEMP demostró que ese cuerpo es
   --      vulnerable; ya no es la referencia y el preflight lo rechaza.
-  --   3. PROPUESTO, NO APROBADO — contrato RB + RA (enmienda propuesta a
-  --      §18.2; migración local 20261110120000): el mismo cuerpo con
+  --   3. APROBADO SÓLO COMO NORMA — contrato RB + RA (ADR-001 §18.2.1,
+  --      07/11/2026; migración local 20261110120000, no autorizada en staging
+  --      ni producción): el mismo cuerpo con
   --      cmd pg_catalog.record, tbl pg_catalog.name y
   --      FROM pg_catalog.pg_event_trigger_ddl_commands(), y proconfig
   --      {search_path=pg_catalog, pg_temp}. Los valores de abajo son los de
