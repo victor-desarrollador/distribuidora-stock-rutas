@@ -23,12 +23,17 @@
 //   se cancela). Una respuesta tardía se resuelve sólo en el estado interno
 //   (sin verificar ni releer) y `iniciar` la publica; si fue un éxito del
 //   servidor, relee una vez.
+// - FE-2E: la identidad se fija por intención (el usuario de su primer envío
+//   real). Un reintento que no llega a salir no borra una intención ya enviada:
+//   sigue desconocida, con la misma clave y los mismos datos.
 // El servidor decide siempre permisos, estados y reglas de negocio.
 
 import {
+  MENSAJE_REINTENTO_NO_ENVIADO,
   nuevaClaveIdempotencia,
   type ComandoJornada,
   type Jornada,
+  type OpcionesEjecucion,
   type PuertoJornadas,
 } from "../lib/jornadas";
 
@@ -140,16 +145,29 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
   let fase: FaseOperacion = OPERACION_INACTIVA;
   // Última fase entregada a `publicar` (para republicar al reanudar).
   let publicada: FaseOperacion = fase;
-  let intencion: { datos: D; clave: string } | null = null;
+  // FE-2E (D-2): la intención lógica guarda su identidad. `actor` es el
+  // usuario de su primer envío real (todos sus reintentos, automáticos y
+  // manuales, salen con él o no salen); `enviada` indica que alguna vez salió
+  // un envío y, por lo tanto, pudo registrarse.
+  type Intencion = { datos: D; clave: string; actor: string | null; enviada: boolean };
+  let intencion: Intencion | null = null;
   // Jornada elegida en el paso de confirmación (todavía sin clave).
   let candidata: Jornada | null = null;
   let activo = true;
   // Identidad de este controlador ante el árbitro.
   const yo = Symbol("operacion");
-  const opcionesEnvio = {
-    continuar: () => activo,
-    ...(usuarioEsperado !== undefined ? { usuarioEsperado } : {}),
-  };
+
+  function opcionesEnvio(i: Intencion): OpcionesEjecucion {
+    const esperado = i.actor ?? usuarioEsperado;
+    return {
+      continuar: () => activo,
+      ...(esperado !== undefined ? { usuarioEsperado: esperado } : {}),
+      alFijarActor: (u) => {
+        if (i.actor === null) i.actor = u;
+        i.enviada = true;
+      },
+    };
+  }
 
   function emitir(nueva: FaseOperacion) {
     fase = nueva;
@@ -196,7 +214,7 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
       emitir({ fase: "confirmando", jornadaId: candidata.id, error: preparada.mensaje });
       return Promise.resolve();
     }
-    intencion = { datos: preparada.datos, clave: generarClave() };
+    intencion = { datos: preparada.datos, clave: generarClave(), actor: null, enviada: false };
     candidata = null;
     return enviar(intencion);
   }
@@ -225,10 +243,20 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
     }
   }
 
-  async function enviar(i: { datos: D; clave: string }): Promise<void> {
+  async function enviar(i: Intencion): Promise<void> {
     const jornadaId = i.datos.jornadaId;
     emitir({ fase: "enviando", jornadaId });
-    const r = await puerto.ejecutar(definicion.comando(i.datos), i.clave, opcionesEnvio);
+    const r = await puerto.ejecutar(definicion.comando(i.datos), i.clave, opcionesEnvio(i));
+    // Además del aviso del wrapper: si el resultado cuenta intentos, salió algo.
+    if (r.intentos > 0) i.enviada = true;
+    // FE-2E (H-1): esta llamada no envió nada, pero la intención YA tuvo un
+    // envío que pudo registrarse. No es un rechazo: se conservan clave, datos
+    // e identidad, y sigue desconocida (también detenido; sin verificar ni
+    // releer). Sólo un reintento del mismo usuario o una verificación la resuelven.
+    if (!r.ok && r.intentos === 0 && i.enviada) {
+      emitir({ fase: "desconocido", jornadaId, mensaje: MENSAJE_REINTENTO_NO_ENVIADO, reintentable: true });
+      return;
+    }
     // Detenido: la respuesta se resuelve en el estado interno (sin publicar,
     // verificar ni releer); `iniciar` la publica si vuelve el mismo contexto.
     if (r.ok) {
@@ -246,13 +274,14 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
       await verificarYDecidir(i);
       return;
     }
-    // Rechazo definitivo (o nada enviado): sin efectos y la clave no se consumió.
+    // Rechazo definitivo, o una intención que NUNCA llegó a enviarse: sin
+    // efectos y la clave no se consumió.
     intencion = null;
     emitir({ fase: "error", jornadaId, mensaje: r.error.mensaje });
     if (activo && definicion.releerTrasRechazo(r.error.codigo)) alCambiarJornada();
   }
 
-  async function verificarYDecidir(i: { datos: D; clave: string }): Promise<void> {
+  async function verificarYDecidir(i: Intencion): Promise<void> {
     const jornadaId = i.datos.jornadaId;
     emitir({ fase: "verificando", jornadaId });
     const v = await definicion.verificar(i.datos);

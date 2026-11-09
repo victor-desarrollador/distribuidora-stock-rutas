@@ -535,6 +535,46 @@ describe("FE-2D H-1: ejecutar fija la identidad y no emite intentos tras detener
   });
 });
 
+// FE-2E (D-2): `alFijarActor` permite fijar la identidad de la intención lógica.
+describe("FE-2E: alFijarActor (identidad por intención)", () => {
+  const OTRO = "77777777-7777-4777-8777-777777777777";
+
+  it("U9: se invoca UNA vez, con el usuario, antes del primer despacho (aunque haya reintentos)", async () => {
+    const avisos: Array<{ usuario: string; enviadosAntes: number }> = [];
+    const { cliente, llamadas } = clienteFalso({ rpc: ["lanzar", "lanzar", { data: OP, error: null }] });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE, {
+      alFijarActor: (usuario) => avisos.push({ usuario, enviadosAntes: llamadas.length }),
+    });
+    expect(r.ok).toBe(true);
+    expect(llamadas).toHaveLength(3);
+    expect(avisos).toEqual([{ usuario: DUENO, enviadosAntes: 0 }]);
+  });
+
+  it.each([
+    ["sin sesión", { sesiones: [null] }, {}],
+    ["otro usuario que el esperado", {}, { usuarioEsperado: OTRO }],
+    ["getSession falla", { sesiones: ["lanzar" as const] }, {}],
+    ["detenido", {}, { continuar: () => false }],
+  ])("U10: no se invoca si no sale ningún intento (%s)", async (_caso, cli, opciones) => {
+    const avisos: string[] = [];
+    const { cliente, llamadas } = clienteFalso({ rpc: [{ data: OP, error: null }], ...cli });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE, {
+      ...opciones,
+      alFijarActor: (u) => avisos.push(u),
+    });
+    expect(llamadas).toHaveLength(0);
+    expect(avisos).toEqual([]);
+    expect(r).toMatchObject({ ok: false, intentos: 0 });
+  });
+
+  it("U11: el token sale sólo en la cabecera de la petición; no se guarda en el navegador ni en encabezados globales", () => {
+    const codigo = fuenteJornadas.replace(/\/\/.*$/gm, "");
+    expect(codigo).toMatch(/\.setHeader\("Authorization", `Bearer \$\{token\}`\)/);
+    expect(codigo).not.toMatch(/localStorage|sessionStorage|indexedDB|console\./);
+    expect(codigo).not.toMatch(/global\.headers|\.headers\s*=|setSession|setAuth/);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Lectura paginada. Base falsa en memoria que interpreta la cadena de consultas
 // (select/eq/or/order/order/limit), aplica un tope `max_rows` como PostgREST y

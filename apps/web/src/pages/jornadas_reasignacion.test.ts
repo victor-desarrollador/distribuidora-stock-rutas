@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  MENSAJE_REINTENTO_NO_ENVIADO,
   MENSAJE_RESULTADO_DESCONOCIDO,
   MENSAJE_SIN_PERMISO,
   llamadaRpcJornada,
@@ -626,6 +627,131 @@ describe("FE-2D H-2: detener → respuesta tardía → iniciar", () => {
     expect(o.continuar!()).toBe(true);
   });
 });
+
+// FE-2E (H-1 por intención) en el motor, vía reasignación.
+describe("FE-2E: reintento manual sin envío (motor)", () => {
+  const nadaEnviado = (): ResultadoJornada<string> => ({
+    ok: false, intentos: 0, error: { codigo: null, mensaje: "sesión cambiada", resultadoDesconocido: false },
+  });
+
+  /** Envía, pierde la respuesta, verifica «sin efecto» y queda reintentable. */
+  async function desconocidaReintentable(m: ReturnType<typeof armar>) {
+    const { p } = await perderRespuesta(m);
+    m.busquedas[0].resolver(jornada(1));
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true });
+  }
+
+  it("M1: el reintento manual no envía nada → la intención (clave y datos) se conserva en desconocido", async () => {
+    const arbitro = crearArbitroJornadas();
+    const m = armar(arbitro);
+    await desconocidaReintentable(m);
+    const clave = m.c.claveEnCurso();
+    const datos = m.c.datosEnCurso();
+    const r = m.c.reintentar();
+    await tick();
+    m.envios[1].resolver(nadaEnviado());
+    await r;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true, mensaje: MENSAJE_REINTENTO_NO_ENVIADO });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.c.datosEnCurso()).toBe(datos);
+    // Sigue reteniendo la jornada y no se puede iniciar otra intención.
+    expect(arbitro.retenidaPorOtra(Symbol("salida"), jornada(1).id)).toBe(true);
+    m.c.solicitar(jornada(2));
+    expect(m.ultima().fase).toBe("desconocido");
+    expect(m.releer).not.toHaveBeenCalled();
+    expect(m.busquedas).toHaveLength(1);
+  });
+
+  it("M2: el reintento manual exige el usuario que hizo el primer envío (identidad por intención)", async () => {
+    const m = armar();
+    const { p } = await enviar(m);
+    // El wrapper informa el actor justo antes de despachar el primer envío.
+    m.envios[0].opciones?.alFijarActor?.(USUARIO_A_E2E);
+    m.envios[0].resolver(sinRespuesta());
+    await tick();
+    m.busquedas[0].resolver(jornada(1));
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true });
+    const r = m.c.reintentar();
+    await tick();
+    expect(m.envios[1].opciones?.usuarioEsperado).toBe(USUARIO_A_E2E);
+    expect(m.envios[1].clave).toBe(m.envios[0].clave);
+    m.envios[1].resolver(exito());
+    await r;
+  });
+
+  it("M3: el actor del primer envío prevalece sobre el del controlador y no se reemplaza en llamadas posteriores", async () => {
+    const m = armar(undefined, USUARIO_A_E2E);
+    const { p } = await enviar(m);
+    expect(m.envios[0].opciones?.usuarioEsperado).toBe(USUARIO_A_E2E);
+    m.envios[0].opciones?.alFijarActor?.(USUARIO_A_E2E);
+    m.envios[0].resolver(sinRespuesta());
+    await tick();
+    m.busquedas[0].resolver(jornada(1));
+    await p;
+    const r = m.c.reintentar();
+    await tick();
+    // Un aviso posterior con otro usuario no reemplaza el actor de la intención.
+    m.envios[1].opciones?.alFijarActor?.("bbbbbbbb-2222-4222-8222-222222222222");
+    m.envios[1].resolver(nadaEnviado());
+    await r;
+    const r2 = m.c.reintentar();
+    await tick();
+    expect(m.envios[2].opciones?.usuarioEsperado).toBe(USUARIO_A_E2E);
+    m.envios[2].resolver(exito());
+    await r2;
+  });
+
+  it("M4: una intención NUEVA cuyo primer envío no sale (nada enviado nunca) → error y se descarta (sin cambios)", async () => {
+    const arbitro = crearArbitroJornadas();
+    const m = armar(arbitro);
+    const { p } = await enviar(m);
+    m.envios[0].resolver(nadaEnviado());
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "error", mensaje: "sesión cambiada" });
+    expect(m.c.claveEnCurso()).toBeNull();
+    expect(arbitro.retenidaPorOtra(Symbol("salida"), jornada(1).id)).toBe(false);
+    expect(m.busquedas).toHaveLength(0);
+  });
+
+  it("M5: detenido, un reintento que no envía nada conserva la intención sin publicar; al reanudar se publica", async () => {
+    const m = armar();
+    await desconocidaReintentable(m);
+    const clave = m.c.claveEnCurso();
+    const r = m.c.reintentar();
+    await tick();
+    m.c.detener();
+    const n = m.publicadas.length;
+    m.envios[1].resolver(nadaEnviado());
+    await r;
+    expect(m.publicadas).toHaveLength(n);
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.busquedas).toHaveLength(1);
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_REINTENTO_NO_ENVIADO });
+    expect(m.releer).not.toHaveBeenCalled();
+  });
+
+  it("M6: una intención nueva tras un éxito no hereda el actor de la anterior", async () => {
+    const m = armar();
+    const { p } = await enviar(m);
+    m.envios[0].opciones?.alFijarActor?.(USUARIO_A_E2E);
+    m.envios[0].resolver(exito());
+    await p;
+    m.c.trasRelectura();
+    m.c.solicitar(jornada(2));
+    const p2 = m.c.confirmar(entrada());
+    await tick();
+    expect(m.envios[1].opciones?.usuarioEsperado).toBeUndefined();
+    expect(m.envios[1].clave).not.toBe(m.envios[0].clave);
+    m.envios[1].resolver(exito());
+    await p2;
+  });
+});
+
+const USUARIO_A_E2E = "aaaaaaaa-1111-4111-8111-111111111111";
 
 describe("reasignación: etiqueta del vendedor", () => {
   it("usa nombre y rol de la lista; si no está, un id corto", () => {

@@ -1,10 +1,14 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  MENSAJE_REINTENTO_NO_ENVIADO,
   MENSAJE_RESULTADO_DESCONOCIDO,
+  crearPuertoJornadas,
   type ComandoJornada,
   type EstadoJornada,
   type Jornada,
+  type OpcionesEjecucion,
   type ResultadoJornada,
 } from "../lib/jornadas";
 import type { ResultadoVendedores } from "../lib/vendedores_jornada";
@@ -13,6 +17,7 @@ import {
   MENSAJE_APERTURA_DESCONOCIDA,
   MENSAJE_APERTURA_OK,
   MENSAJE_CAMION_NO_OFRECIDO,
+  MENSAJE_INFO_NO_CONSULTADA,
   MENSAJE_INFO_SIN_COINCIDENCIA,
   MENSAJE_INFO_SIN_LECTURA,
   MENSAJE_RECUPERACION_DUPLICADA,
@@ -463,6 +468,245 @@ describe("abrir jornada: desmontaje", () => {
     await p;
     expect(publicadas.map((f) => f.fase)).toEqual(["editando", "enviando"]);
     expect(releer).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FE-2E (D-1): apertura con la misma protección por intención que el motor.
+// ---------------------------------------------------------------------------
+const NADA_ENVIADO: ResultadoJornada<string> = {
+  ok: false,
+  intentos: 0,
+  error: { codigo: null, mensaje: "sesión cambiada", resultadoDesconocido: false },
+};
+
+describe("FE-2E: reintento manual sin envío (apertura)", () => {
+  it("A1: primer envío desconocido → reintento que no envía nada → se conservan intención, clave y datos", async () => {
+    const m = armar({ respuestas: [perdida, NADA_ENVIADO, ok()] });
+    m.c.solicitar();
+    await m.c.confirmar(ENTRADA, PERMITIDAS);
+    expect(m.fase().fase).toBe("desconocido");
+    const clave = m.c.claveEnCurso();
+    const comando = m.c.comandoEnCurso();
+    await m.c.reintentar();
+    expect(m.fase()).toMatchObject({ fase: "desconocido", datos: ENTRADA });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.c.comandoEnCurso()).toBe(comando);
+    expect(m.alRechazoVendedor).not.toHaveBeenCalled();
+    // Con sesión disponible, el siguiente reintento sale con la MISMA clave.
+    await m.c.reintentar();
+    expect(m.envios.map((e) => e.clave)).toEqual([clave, clave, clave]);
+    expect(m.fase().fase).toBe("exito");
+  });
+
+  it("A2: la sesión pasó a otro usuario → el reintento manual no sale; intención conservada (wrapper real)", async () => {
+    const USUARIO_A = "aaaaaaaa-1111-4111-8111-111111111111";
+    const USUARIO_B = "bbbbbbbb-2222-4222-8222-222222222222";
+    const estado = { usuario: USUARIO_A };
+    const rpcs: string[] = [];
+    const cliente = {
+      auth: {
+        getSession: async () => ({
+          data: { session: { user: { id: estado.usuario }, access_token: `token-${estado.usuario}` } },
+          error: null,
+        }),
+      },
+      rpc: () => ({
+        setHeader: (_c: string, valor: string) => {
+          rpcs.push(valor);
+          return Promise.reject(new Error("red"));
+        },
+      }),
+    } as unknown as SupabaseClient;
+    const c = crearControladorApertura(
+      crearPuertoJornadas(cliente),
+      { leerTodasLasJornadas: async () => ({ ok: true, datos: [], intentos: 1 }) },
+      vi.fn(),
+      vi.fn(),
+      { hoy: () => HOY }
+    );
+    c.solicitar();
+    await c.confirmar(ENTRADA, PERMITIDAS);
+    expect(c.obtener().fase).toBe("desconocido");
+    expect(rpcs).toHaveLength(3);
+    const clave = c.claveEnCurso();
+    estado.usuario = USUARIO_B;
+    await c.reintentar();
+    expect(rpcs).toHaveLength(3);
+    expect(rpcs.some((r) => r.includes(USUARIO_B))).toBe(false);
+    expect(c.obtener().fase).toBe("desconocido");
+    expect(c.claveEnCurso()).toBe(clave);
+    // Vuelve el usuario original: el reintento sale con la MISMA clave y su token.
+    estado.usuario = USUARIO_A;
+    await c.reintentar();
+    expect(rpcs).toHaveLength(6);
+    expect(rpcs.slice(3).every((r) => r.includes(USUARIO_A))).toBe(true);
+    expect(c.claveEnCurso()).toBe(clave);
+  });
+
+  it("A2b: getSession falla en el reintento manual → 0 envíos nuevos; intención conservada (wrapper real)", async () => {
+    let falla = false;
+    const rpcs: string[] = [];
+    const cliente = {
+      auth: {
+        getSession: async () => {
+          if (falla) throw new Error("auth caído");
+          return { data: { session: { user: { id: YO }, access_token: "token" } }, error: null };
+        },
+      },
+      rpc: () => ({
+        setHeader: (_c: string, valor: string) => {
+          rpcs.push(valor);
+          return Promise.reject(new Error("red"));
+        },
+      }),
+    } as unknown as SupabaseClient;
+    const c = crearControladorApertura(
+      crearPuertoJornadas(cliente),
+      { leerTodasLasJornadas: async () => ({ ok: true, datos: [], intentos: 1 }) },
+      vi.fn(),
+      vi.fn(),
+      { hoy: () => HOY }
+    );
+    c.solicitar();
+    await c.confirmar(ENTRADA, PERMITIDAS);
+    const clave = c.claveEnCurso();
+    falla = true;
+    await c.reintentar();
+    expect(rpcs).toHaveLength(3);
+    expect(c.obtener()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_REINTENTO_NO_ENVIADO });
+    expect(c.claveEnCurso()).toBe(clave);
+  });
+
+  it("A3: identidad por intención — el reintento manual exige el usuario del primer envío; sin `continuar` (G-2)", async () => {
+    const opciones: Array<OpcionesEjecucion | undefined> = [];
+    const respuestas = [perdida, ok()];
+    const c = crearControladorApertura(
+      {
+        ejecutar: async (_comando, _clave, o) => {
+          opciones.push(o);
+          o?.alFijarActor?.(YO);
+          return respuestas.shift()!;
+        },
+      },
+      { leerTodasLasJornadas: async () => ({ ok: true, datos: [], intentos: 1 }) },
+      vi.fn(),
+      vi.fn(),
+      { hoy: () => HOY }
+    );
+    c.solicitar();
+    await c.confirmar(ENTRADA, PERMITIDAS);
+    await c.reintentar();
+    expect(opciones[0]?.usuarioEsperado).toBeUndefined();
+    expect(opciones[1]?.usuarioEsperado).toBe(YO);
+    // A4 (G-2): apertura nunca pasa `continuar`.
+    expect(opciones.every((o) => o !== undefined && !("continuar" in o))).toBe(true);
+    expect(c.obtener().fase).toBe("exito");
+  });
+
+  it("A4: guarda estructural — el controlador de apertura no usa `continuar`", () => {
+    expect(fuenteControlador.replace(/\/\/.*$/gm, "")).not.toMatch(/continuar\s*:/);
+  });
+
+  it("A4b: una intención NUEVA cuyo primer envío no sale → error y se descarta (sin cambios)", async () => {
+    const m = armar({ respuestas: [NADA_ENVIADO] });
+    m.c.solicitar();
+    await m.c.confirmar(ENTRADA, PERMITIDAS);
+    expect(m.fase()).toMatchObject({ fase: "error", mensaje: "sesión cambiada" });
+    expect(m.c.claveEnCurso()).toBeNull();
+    expect(m.alRechazoVendedor).not.toHaveBeenCalled();
+  });
+});
+
+describe("FE-2E: respuesta tardía con la apertura detenida (H-2)", () => {
+  function armarDiferido() {
+    const d = diferido<ResultadoJornada<string>>();
+    const publicadas: FaseApertura[] = [];
+    const lecturas: number[] = [];
+    const releer = vi.fn();
+    const alRechazoVendedor = vi.fn();
+    const c = crearControladorApertura(
+      { ejecutar: () => d.promesa },
+      {
+        leerTodasLasJornadas: async () => {
+          lecturas.push(1);
+          return { ok: true, datos: [], intentos: 1 };
+        },
+      },
+      releer,
+      (f) => publicadas.push(f),
+      { hoy: () => HOY, alRechazoVendedor }
+    );
+    c.solicitar();
+    const p = c.confirmar(ENTRADA, PERMITIDAS);
+    return { c, d, p, publicadas, lecturas, releer, alRechazoVendedor };
+  }
+
+  it("A5: éxito con la pantalla detenida → no queda «enviando»; al reanudar publica y relee UNA vez", async () => {
+    const m = armarDiferido();
+    m.c.detener();
+    m.d.resolver(ok());
+    await m.p;
+    expect(m.c.obtener().fase).toBe("exito");
+    expect(m.publicadas.map((f) => f.fase)).toEqual(["editando", "enviando"]);
+    expect(m.releer).not.toHaveBeenCalled();
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)?.fase).toBe("exito");
+    expect(m.releer).toHaveBeenCalledTimes(1);
+    m.c.detener();
+    m.c.iniciar();
+    expect(m.releer).toHaveBeenCalledTimes(1);
+  });
+
+  it("A5b: rechazo definitivo detenido → error sin releer ni avisar al selector de vendedores", async () => {
+    const m = armarDiferido();
+    m.c.detener();
+    m.d.resolver(rechazo("jornada_vendedor_ocupado"));
+    await m.p;
+    expect(m.c.obtener().fase).toBe("error");
+    expect(m.c.claveEnCurso()).toBeNull();
+    expect(m.releer).not.toHaveBeenCalled();
+    expect(m.alRechazoVendedor).not.toHaveBeenCalled();
+  });
+
+  it("A5c: respuesta perdida detenida → desconocido SIN la lectura informativa; intención conservada", async () => {
+    const m = armarDiferido();
+    const clave = m.c.claveEnCurso();
+    m.c.detener();
+    m.d.resolver(perdida);
+    await m.p;
+    expect(m.lecturas).toHaveLength(0);
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", informacion: MENSAJE_INFO_NO_CONSULTADA });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)?.fase).toBe("desconocido");
+  });
+
+  it("A5d: detenida durante la lectura informativa → no usa esa lectura", async () => {
+    const lectura = diferido<ResultadoJornada<Jornada[]>>();
+    const c = crearControladorApertura(
+      { ejecutar: async () => perdida },
+      { leerTodasLasJornadas: () => lectura.promesa },
+      vi.fn(),
+      vi.fn(),
+      { hoy: () => HOY }
+    );
+    c.solicitar();
+    const p = c.confirmar(ENTRADA, PERMITIDAS);
+    await Promise.resolve();
+    await Promise.resolve();
+    c.detener();
+    lectura.resolver({ ok: true, datos: [jornada()], intentos: 1 });
+    await p;
+    expect(c.obtener()).toMatchObject({ fase: "desconocido", informacion: MENSAJE_INFO_NO_CONSULTADA });
+  });
+
+  it("A6: iniciar sin cambios no publica nada", () => {
+    const m = armar();
+    m.c.iniciar();
+    m.c.detener();
+    m.c.iniciar();
+    expect(m.publicadas).toHaveLength(0);
   });
 });
 

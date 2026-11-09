@@ -32,13 +32,20 @@
 // - Una intención con resultado desconocido no se descarta: hasta resolverla
 //   (reintento con la misma clave) no se inicia otra.
 // - Tras el desmontaje, las respuestas tardías no publican ni releen.
+// - FE-2E (D-1, D-2): la identidad se fija por intención (el usuario de su
+//   primer envío real); un reintento que no llega a salir no borra una
+//   intención ya enviada. Sin `continuar` (excepción G-2): el wrapper sigue
+//   reintentando aunque la pantalla se desmonte. Una respuesta tardía se
+//   resuelve en el estado interno y `iniciar` la publica.
 
 import {
+  MENSAJE_REINTENTO_NO_ENVIADO,
   esFechaValida,
   esUuid,
   nuevaClaveIdempotencia,
   type ComandoJornada,
   type Jornada,
+  type OpcionesEjecucion,
   type PuertoJornadas,
 } from "../lib/jornadas";
 import {
@@ -150,6 +157,10 @@ export const MENSAJE_APERTURA_DESCONOCIDA =
   "No se pudo confirmar si la jornada se abrió. Reintentá desde esta pantalla, sin recargarla: se reenvía la misma apertura con la misma clave; si ya se registró no se repite.";
 export const MENSAJE_INFO_SIN_LECTURA =
   "Tampoco se pudo leer la lista de jornadas de esa fecha.";
+// FE-2E (H-2): respuesta dudosa con la pantalla detenida; la lectura
+// informativa no se hizo (o no se usa: pudo hacerse con otra sesión).
+export const MENSAJE_INFO_NO_CONSULTADA =
+  "No se consultó la lista de jornadas porque la pantalla no estaba activa.";
 export const MENSAJE_INFO_SIN_COINCIDENCIA =
   "En la lista actual no aparece ninguna jornada de ese camión en esa fecha. Esto no confirma que la apertura no se haya registrado.";
 
@@ -205,6 +216,10 @@ interface Intencion {
   datos: EntradaApertura;
   comando: ComandoJornada;
   clave: string;
+  // FE-2E (D-2): usuario del primer envío real de la intención (null: nunca
+  // salió) y si alguna vez salió un envío (pudo registrarse).
+  actor: string | null;
+  enviada: boolean;
 }
 
 export function crearControladorApertura(
@@ -221,12 +236,28 @@ export function crearControladorApertura(
   const hoy = opciones.hoy ?? (() => fechaOperativaHoy());
   const generarClave = opciones.generarClave ?? nuevaClaveIdempotencia;
   let fase: FaseApertura = APERTURA_INACTIVA;
+  // Última fase entregada a `publicar` (para republicar al reanudar).
+  let publicada: FaseApertura = fase;
   let intencion: Intencion | null = null;
   let activo = true;
 
   function emitir(nueva: FaseApertura) {
     fase = nueva;
-    if (activo) publicar(fase);
+    if (activo) {
+      publicada = fase;
+      publicar(fase);
+    }
+  }
+
+  /** Sin `continuar` (G-2): sólo la identidad de la intención. */
+  function opcionesEnvio(i: Intencion): OpcionesEjecucion {
+    return {
+      ...(i.actor !== null ? { usuarioEsperado: i.actor } : {}),
+      alFijarActor: (u) => {
+        if (i.actor === null) i.actor = u;
+        i.enviada = true;
+      },
+    };
   }
 
   const ocupado = () => fase.fase === "enviando" || fase.fase === "verificando";
@@ -261,6 +292,8 @@ export function crearControladorApertura(
       datos,
       comando: Object.freeze({ tipo: "abrir", ...datos }),
       clave: generarClave(),
+      actor: null,
+      enviada: false,
     };
     return enviar(intencion);
   }
@@ -279,24 +312,42 @@ export function crearControladorApertura(
   }
 
   async function enviar(i: Intencion): Promise<void> {
+    const previa = fase;
     emitir({ fase: "enviando", datos: i.datos });
-    const r = await puerto.ejecutar(i.comando, i.clave);
-    if (!activo) return;
+    const r = await puerto.ejecutar(i.comando, i.clave, opcionesEnvio(i));
+    // Además del aviso del wrapper: si el resultado cuenta intentos, salió algo.
+    if (r.intentos > 0) i.enviada = true;
+    // FE-2E (H-1): esta llamada no envió nada, pero la intención YA tuvo un
+    // envío que pudo registrarse: se conservan clave, datos e identidad, y
+    // sigue desconocida (también detenido; sin lectura ni relectura).
+    if (!r.ok && r.intentos === 0 && i.enviada) {
+      emitir({
+        fase: "desconocido",
+        datos: i.datos,
+        mensaje: MENSAJE_REINTENTO_NO_ENVIADO,
+        informacion: previa.fase === "desconocido" ? previa.informacion : null,
+      });
+      return;
+    }
+    // FE-2E (H-2): detenido, la respuesta se resuelve en el estado interno
+    // (sin publicar, leer, releer ni avisar al selector de vendedores).
     if (r.ok) {
       // Única confirmación válida: el uuid devuelto por abrir_jornada.
       intencion = null;
       emitir({ fase: "exito", jornadaId: r.datos, datos: i.datos, mensaje: MENSAJE_APERTURA_OK });
-      alCambiarJornadas();
+      if (activo) alCambiarJornadas();
       return;
     }
     const dudoso =
       r.error.resultadoDesconocido ||
       (r.error.codigo !== null && CODIGOS_TRANSITORIOS.has(r.error.codigo));
     if (dudoso) {
+      if (!activo) return noConsultada(i);
       await informar(i);
       return;
     }
-    // Rechazo definitivo: la transacción se revirtió y la clave no se consumió.
+    // Rechazo definitivo, o una intención que NUNCA llegó a enviarse: la
+    // transacción se revirtió (o no existió) y la clave no se consumió.
     intencion = null;
     const recuperacion = recuperacionPara(r.error.codigo, i.datos.fecha);
     emitir(
@@ -304,6 +355,7 @@ export function crearControladorApertura(
         ? { fase: "error", mensaje: r.error.mensaje, recuperacion }
         : { fase: "error", mensaje: r.error.mensaje }
     );
+    if (!activo) return;
     if (r.error.codigo !== null && CODIGOS_RELEER_JORNADAS.has(r.error.codigo)) {
       alCambiarJornadas();
     }
@@ -329,13 +381,32 @@ export function crearControladorApertura(
     } catch {
       informacion = MENSAJE_INFO_SIN_LECTURA;
     }
-    if (!activo) return;
+    // Detenido durante la lectura: pudo hacerse con otra sesión; no se usa.
+    if (!activo) return noConsultada(i);
     // La intención (clave y datos) se conserva: sólo su reintento la resuelve.
     emitir({ fase: "desconocido", datos: i.datos, mensaje: MENSAJE_APERTURA_DESCONOCIDA, informacion });
   }
 
+  /** Detenido con una respuesta dudosa: desconocido, sin lectura informativa. */
+  function noConsultada(i: Intencion): void {
+    emitir({
+      fase: "desconocido",
+      datos: i.datos,
+      mensaje: MENSAJE_APERTURA_DESCONOCIDA,
+      informacion: MENSAJE_INFO_NO_CONSULTADA,
+    });
+  }
+
+  /**
+   * (Re)montaje: si mientras estaba detenido la fase cambió (respuesta
+   * tardía), la publica; tras un éxito sin releer, relee UNA vez.
+   */
   function iniciar(): void {
     activo = true;
+    if (fase === publicada) return;
+    publicada = fase;
+    publicar(fase);
+    if (fase.fase === "exito" && fase.releida !== true) alCambiarJornadas();
   }
 
   function detener(): void {

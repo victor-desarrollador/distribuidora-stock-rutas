@@ -1,8 +1,10 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 
 import { ROLES_GESTION } from "../auth/roles";
 import {
   MENSAJE_RESULTADO_DESCONOCIDO,
+  crearPuertoJornadas,
   type ComandoJornada,
   type EstadoJornada,
   type Jornada,
@@ -325,6 +327,103 @@ describe("confirmar salida: respuesta tardía y desmontaje", () => {
     m.c.iniciar();
     expect(m.publicadas.at(-1)).toMatchObject({ fase: "exito", mensaje: MENSAJE_SALIDA_OK });
     expect(m.releer).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FE-2E (H-1 por intención): un reintento manual que no llega a enviarse no
+// borra una intención cuyo primer envío pudo registrarse, y nunca sale con
+// otro usuario. Con el wrapper REAL sobre un cliente simulado (sin React).
+// ---------------------------------------------------------------------------
+const USUARIO_A = "aaaaaaaa-1111-4111-8111-111111111111";
+const USUARIO_B = "bbbbbbbb-2222-4222-8222-222222222222";
+
+function clienteConSesion() {
+  const estado: { usuario: string | null | "lanzar" } = { usuario: USUARIO_A };
+  const rpcs: Array<{ nombre: string; clave: unknown; autorizacion: string }> = [];
+  let n = 0;
+  const cliente = {
+    auth: {
+      async getSession() {
+        if (estado.usuario === "lanzar") throw new Error("auth caído");
+        const u = estado.usuario;
+        n += 1;
+        return { data: { session: u === null ? null : { user: { id: u }, access_token: `token-${u}-${n}` } }, error: null };
+      },
+    },
+    rpc(nombre: string, argumentos: { p_idempotency_key?: unknown }) {
+      return {
+        setHeader(_cabecera: string, valor: string) {
+          rpcs.push({ nombre, clave: argumentos.p_idempotency_key, autorizacion: valor });
+          // Sin respuesta: el resultado de cada envío queda desconocido.
+          return Promise.reject(new Error("red"));
+        },
+      };
+    },
+  };
+  return { cliente: cliente as unknown as SupabaseClient, estado, rpcs };
+}
+
+/** Salida con el wrapper real: confirma, pierde la respuesta y queda desconocida reintentable. */
+async function salidaDesconocida() {
+  const s = clienteConSesion();
+  const publicadas: FaseSalida[] = [];
+  const releer = vi.fn();
+  const c = crearControladorSalida(
+    crearPuertoJornadas(s.cliente),
+    async () => "cargada",
+    releer,
+    (f) => publicadas.push(f),
+    () => "aaaaaaaa-0000-4000-8000-000000000001"
+  );
+  c.solicitar(jornada(1));
+  await c.confirmar();
+  expect(c.obtener()).toMatchObject({ fase: "desconocido", reintentable: true });
+  expect(s.rpcs).toHaveLength(3);
+  return { ...s, c, publicadas, releer };
+}
+
+describe("FE-2E: reintento manual sin envío y cambio de usuario (salida, wrapper real)", () => {
+  it("M1: getSession falla en el reintento manual → 0 envíos nuevos; se conserva la intención y su clave", async () => {
+    const m = await salidaDesconocida();
+    const clave = m.c.claveEnCurso();
+    m.estado.usuario = "lanzar";
+    await m.c.reintentar();
+    expect(m.rpcs).toHaveLength(3);
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", reintentable: true });
+    expect(m.c.claveEnCurso()).toBe(clave);
+  });
+
+  it("M1b: sin sesión en el reintento manual → 0 envíos nuevos; se conserva la intención", async () => {
+    const m = await salidaDesconocida();
+    const clave = m.c.claveEnCurso();
+    m.estado.usuario = null;
+    await m.c.reintentar();
+    expect(m.rpcs).toHaveLength(3);
+    expect(m.c.obtener().fase).toBe("desconocido");
+    expect(m.c.claveEnCurso()).toBe(clave);
+  });
+
+  it("M2: la sesión pasó a otro usuario → el reintento manual no sale (ni con su token); intención conservada", async () => {
+    const m = await salidaDesconocida();
+    const clave = m.c.claveEnCurso();
+    m.estado.usuario = USUARIO_B;
+    await m.c.reintentar();
+    expect(m.rpcs).toHaveLength(3);
+    expect(m.rpcs.some((r) => r.autorizacion.includes(USUARIO_B))).toBe(false);
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", reintentable: true });
+    expect(m.c.claveEnCurso()).toBe(clave);
+  });
+
+  it("M2b: al volver la sesión del usuario original, el reintento sale con la MISMA clave y su token", async () => {
+    const m = await salidaDesconocida();
+    const clave = m.rpcs[0].clave;
+    m.estado.usuario = USUARIO_B;
+    await m.c.reintentar();
+    m.estado.usuario = USUARIO_A;
+    await m.c.reintentar();
+    expect(m.rpcs).toHaveLength(6);
+    expect(m.rpcs.slice(3).every((r) => r.clave === clave && r.autorizacion.includes(USUARIO_A))).toBe(true);
   });
 });
 

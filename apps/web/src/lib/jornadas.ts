@@ -160,6 +160,10 @@ export interface OpcionesEjecucion {
   // false: quien envió se detuvo (desmontaje o cambio de contexto); no se
   // emiten intentos nuevos.
   continuar?: () => boolean;
+  // FE-2E (D-2): se invoca UNA vez por llamada, con el usuario fijado, justo
+  // antes del primer despacho real (sin espera de por medio). No se invoca si
+  // no sale ningún intento. Permite fijar la identidad de la intención lógica.
+  alFijarActor?: (usuarioId: string) => void;
 }
 
 // Máximo de `int4` (PostgreSQL): tope de cada cantidad.
@@ -188,6 +192,10 @@ export const MENSAJE_DATOS_INVALIDOS = "Los datos de la operación no son válid
 // pantalla detenida). Nada pudo registrarse.
 export const MENSAJE_SESION_CAMBIADA =
   "Tu sesión cambió antes de enviar la operación. No se registró nada.";
+// FE-2E: un reintento que no salió, de una intención ya enviada antes. La
+// operación original sigue sin confirmar (su clave y sus datos se conservan).
+export const MENSAJE_REINTENTO_NO_ENVIADO =
+  "No se envió el reintento: tu sesión cambió o no se pudo comprobar. La operación original sigue sin confirmar; volvé a intentarlo con tu sesión.";
 
 const MENSAJES_ERROR: Record<string, string> = {
   jornada_no_autenticado: "Tu sesión no es válida. Volvé a iniciar sesión.",
@@ -681,6 +689,7 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
       for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
         if (opciones.continuar && !opciones.continuar()) return sinEnviar(intento - 1);
         let token: string;
+        let actorEnvio: string;
         try {
           const { data: sesion } = await cliente.auth.getSession();
           const actor = sesion.session?.user.id ?? null;
@@ -688,11 +697,15 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
           if (actorFijado === null) actorFijado = actor;
           if (actor !== actorFijado) return sinEnviar(intento - 1);
           token = sesion.session.access_token;
+          actorEnvio = actor;
         } catch {
           return sinEnviar(intento - 1);
         }
         // getSession espera: se vuelve a comprobar justo antes de enviar.
         if (opciones.continuar && !opciones.continuar()) return sinEnviar(intento - 1);
+        // FE-2E: el primer despacho de esta llamada fija la identidad de la
+        // intención (síncrono, inmediatamente antes del envío).
+        if (intento === 1) opciones.alFijarActor?.(actorEnvio);
 
         try {
           // El token enviado es exactamente el verificado (supabase-js no

@@ -1,4 +1,55 @@
 ---
+## 09/11/2026 — FE-2E: identidad por intención y reintento sin envío (C4–C6) (rama `feat/fe2d-correcciones-seguridad` sobre `cc58b19`; SIN COMMIT; CICLO 3 DE 3; SECURITY REVIEW PENDIENTE; P13 SIGUE PENDIENTE)
+
+**Base.** HEAD `cc58b19261f217bdf873a7d88025b22a8184f3d2`, árbol `1194e394a40c22421af24064910e11ffd72ac695`, worktree limpio (verificados). Plan enmendado `auditoria-integral-vm/FE2D_PLAN/PLAN_FE2D_CORRECCIONES.md` §10, SHA-256 `a1cec9c0f8c4cf8c4e1f3c68b70c5ed38cb19bf4eb0c396a77485c3a080b7b65` (verificado). Matriz `auditoria-integral-vm/FE2E_PLAN/MATRIZ_REGRESION_FE2E.md` verificada contra `SHA256SUMS.txt` (`a3daa75a…a3bb`) y leída. Se aplicaron sólo C4–C6.
+
+**Decisiones humanas aplicadas.** D-1: apertura entra en H-1/H-2, sin `continuar` (G-2). D-2: la identidad se fija por **intención lógica** (reemplaza G-4), también en reintentos manuales. D-3: sin jsdom ni Testing Library; el ciclo React real queda para Playwright E9.
+
+**Causa raíz corregida (defecto de `cc58b19`, confirmado por Codex).** El wrapper describe con `intentos`/`resultadoDesconocido` sólo **esa llamada**; el motor y apertura lo leían como la historia de la intención. Un reintento manual que no llegaba a salir (`getSession` falla, sin sesión, otro usuario o detenido → `intentos: 0`) se trataba como rechazo definitivo: `intencion = null` y `error`. Se perdía la clave de una intención cuyo primer envío pudo registrarse, y una intención nueva llevaba otra clave. Además, la identidad se fijaba por llamada: en salida, corrección y apertura un reintento manual podía salir con la sesión de otro usuario y la clave original.
+
+**Qué se hizo.**
+- **C4 — `lib/jornadas.ts`.** Opción `alFijarActor(usuarioId)`: se invoca una vez por llamada, de forma síncrona, inmediatamente antes del primer despacho real; no se invoca si no sale nada. Nuevo `MENSAJE_REINTENTO_NO_ENVIADO`. El token sigue saliendo sólo en el `Authorization` de cada petición (`setHeader`); no se toca ningún encabezado global ni se guarda ni registra el JWT.
+- **C5 — `pages/jornadas_operacion.ts`.** La intención es `{datos, clave, actor, enviada}`. Cada envío pasa `usuarioEsperado = actor de la intención ?? usuario del controlador`, `continuar` y `alFijarActor`. `enviada` también se marca si el resultado informa `intentos > 0` (defensa en profundidad). Regla nueva: `!ok && intentos === 0 && enviada` → se conservan clave, datos y actor y la fase vuelve a `desconocido` (`reintentable: true`, `MENSAJE_REINTENTO_NO_ENVIADO`), sin verificar ni releer, también detenido. Una intención nueva que nunca salió sigue siendo `error` y se descarta.
+- **C6 — `pages/jornadas_apertura.ts`.** La misma intención con `actor`/`enviada`, `usuarioEsperado` y `alFijarActor`, **sin `continuar`**, y la misma regla (conserva la `informacion` previa). H-2: una respuesta tardía con el controlador detenido se resuelve internamente (éxito sin releer; definitivo sin releer ni `alRechazoVendedor`; dudoso → `desconocido` sin lectura informativa, `MENSAJE_INFO_NO_CONSULTADA`); una lectura que termina detenida no se usa; `iniciar()` publica si la fase cambió y relee una vez tras un éxito sin releer.
+
+**P13 sin cambios.** Ni `MAX_INTENTOS` (3), ni `CODIGOS_TRANSITORIOS` (40001/40P01), ni `clasificarErrorJornada`, ni esperas: grep sobre el diff de los tres archivos sin coincidencias. Un intento que no sale no suma intentos ni dispara reintentos automáticos. Sin cambios en `supabase/`, `package.json`, RPC, RLS, grants ni migraciones.
+
+**Pruebas nuevas (28).**
+- `lib/jornadas.test.ts`: U9 (`alFijarActor` una vez, antes del primer despacho, con reintentos), U10 ×4 (no se invoca sin sesión, con otro usuario esperado, con `getSession` que falla ni detenido), U11 (guarda: el token sólo en `setHeader`, sin almacenamiento ni encabezados globales).
+- `jornadas_salida.test.ts` (wrapper real con cliente simulado): M1 (`getSession` falla en el reintento manual), M1b (sin sesión), M2 (otro usuario: no sale ni con su token), M2b (vuelve el usuario original: misma clave y su token).
+- `jornadas_reasignacion.test.ts` (motor): M1 (intención, clave y datos conservados; árbitro retenido; no se inicia otra), M2 (`usuarioEsperado` = actor del primer envío), M3 (el actor no se reemplaza), M4 (intención nueva sin envío → `error`, sin cambios), M5 (detenido: se conserva sin publicar y se publica al reanudar), M6 (una intención nueva no hereda el actor).
+- `jornadas_correccion.test.ts`: M1 en corrección (misma clave y comando en el reintento posterior).
+- `jornadas_apertura.test.ts`: A1, A2 (otro usuario, wrapper real; al volver el original sale con la misma clave), A2b (`getSession` falla, wrapper real), A3 (identidad por intención y sin `continuar`), A4 (guarda estructural G-2), A4b (intención nueva sin envío → `error`), A5/A5b/A5c/A5d (respuesta tardía detenida: éxito, definitivo, dudoso, lectura detenida), A6 (`iniciar` sin cambios no publica).
+
+**Rojo previo sobre `cc58b19`.** Con el código sin cambios, M1/M1b/M2/M2b (salida), M1/M2 (reasignación), A1 y A2 fallaban por la causa real: fase `error` (intención descartada) y 6 RPC en lugar de 3 (el reintento salió con el usuario B). Con todas las pruebas nuevas sobre una copia de `cc58b19` (fuera del repo, ya borrada): **18 en rojo**; las 10 restantes (U10 ×4, U11, A4, A4b, A6, M4, M6) son guardas de regresión, verdes antes y después.
+
+**Verificación (`apps/web`).**
+
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 64 archivos, 2204 pruebas (antes 2176) |
+| `npm run build` | exit 0 (aviso de tamaño de chunk, previo) |
+| `git diff --check` | exit 0 |
+| `npx playwright test` / pgTAP | **no ejecutados** (por indicación); E9 y E10 pendientes |
+
+**Diferencias respecto del plan (§10).**
+1. `MENSAJE_REINTENTO_NO_ENVIADO` vive en `lib/jornadas.ts` (no en el motor) para que motor y apertura lo compartan sin que apertura dependa del motor.
+2. `enviada` se marca también por `intentos > 0` en el resultado, además de `alFijarActor`.
+3. Se descartó la prueba de la compuerta de reasignación para este escenario: su cliente simulado no resuelve la lectura de verificación, la intención queda «sin verificar» (no reintentable) y la prueba pasaría sin ejercitar el defecto (H-3). El escenario se cubre con el wrapper real en salida y apertura y en el motor vía reasignación. La compuerta quedó sin cambios.
+4. Con la pantalla detenida, una respuesta dudosa en apertura conserva el mensaje de apertura desconocida y usa `MENSAJE_INFO_NO_CONSULTADA` como información.
+5. La matriz FE-2E usa la numeración de `PLAN_FE2E_CORRECCIONES.md` (ancla `L1–L6`, `M1–M6`, `R1–R6`); el plan autorizado usa `alFijarActor`, con la misma semántica. R1–R6 (React montado) no se ejecutan por D-3.
+
+**Riesgos pendientes.**
+1. **Security review del árbol exacto** (sesión/auth, idempotencia, concurrencia) y auditoría independiente del hash nuevo. Éste es el **ciclo 3 de 3**: si aparece otro defecto, intervención humana.
+2. Sin E2E (E1, E6, E7, E9, E10) ni pgTAP ejecutados: FE2B-07/08 siguen abiertos; el ciclo React real sólo tiene evidencia del motor.
+3. Apertura sigue reintentando tras el desmontaje (G-2), con la identidad fijada.
+4. Si un desconocido queda con la sesión de otro usuario, sólo vuelve a salir cuando regresa el usuario original; mientras tanto la jornada queda retenida (falla cerrada, con mensaje).
+5. `lib/stock.ts` mantiene el patrón previo (fuera de alcance).
+6. ADR-001 en validación controlada: uso operativo NO APTO.
+
+---
 ## 09/11/2026 — FE-2D: corrección de H-1 y H-2 de FE-2B (rama `feat/fe2d-correcciones-seguridad`; SIN COMMIT; SECURITY REVIEW PENDIENTE; P13 SIGUE PENDIENTE)
 
 **Base.** Worktree nuevo `distribuidora-fe2d-correcciones-seguridad`, rama `feat/fe2d-correcciones-seguridad`, creada desde `c80d06945fcedddd238249d0173edf3b0a3398db` (árbol `7751313c…6ebb`, verificado). El worktree FE-2B, su commit y su `AUDITORIA_FE2B_INDEPENDIENTE.md` sin seguimiento no se tocaron ni se copiaron. Plan autorizado: `auditoria-integral-vm/FE2D_PLAN/PLAN_FE2D_CORRECCIONES.md`, SHA-256 `28095ce4a9868561aa5ecf78c3a224c37069f1a3192fc787a0915ac14d8e7927` (verificado). Se aplicaron sólo C1–C3.

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ROLES_GESTION } from "../auth/roles";
 import {
+  MENSAJE_REINTENTO_NO_ENVIADO,
   MENSAJE_RESULTADO_DESCONOCIDO,
   type ComandoJornada,
   type EstadoJornada,
@@ -788,5 +789,39 @@ describe("superficie de las operaciones", () => {
     expect(sinComentarios(fuentePantalla)).toMatch(/useCorreccionJornada\(jornadas\.recargar, arbitro\)/);
     expect(sinComentarios(fuentePantalla)).toMatch(/useSalidaJornada\(jornadas\.recargar, arbitro\)/);
     expect(sinComentarios(fuenteHook)).toMatch(/const \[controlador\] = useState\(\(\) =>/);
+  });
+});
+
+// FE-2E (H-1 por intención) en corrección: un reintento manual que no llega a
+// salir conserva la intención desconocida (misma clave y mismo comando).
+describe("FE-2E: reintento manual sin envío (corrección)", () => {
+  it("M1: el reintento no envía nada → sigue desconocida con la MISMA clave; luego sale con ella", async () => {
+    const m = armar();
+    m.c.solicitar(jornada(1));
+    const p = m.c.confirmar(entrada());
+    const clave = m.c.claveEnCurso();
+    m.envios[0].resolver(sinRespuesta());
+    await tick();
+    m.busquedas[0].resolver(jornada(1));
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true });
+
+    const r1 = m.c.reintentar();
+    await tick();
+    m.envios[1].resolver({
+      ok: false, intentos: 0, error: { codigo: null, mensaje: "sesión cambiada", resultadoDesconocido: false },
+    });
+    await r1;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true, mensaje: MENSAJE_REINTENTO_NO_ENVIADO });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.releer).not.toHaveBeenCalled();
+
+    const r2 = m.c.reintentar();
+    await tick();
+    expect(m.envios[2].clave).toBe(clave);
+    expect(m.envios[2].comando).toEqual(m.envios[0].comando);
+    m.envios[2].resolver(exito());
+    await r2;
+    expect(m.ultima().fase).toBe("exito");
   });
 });
