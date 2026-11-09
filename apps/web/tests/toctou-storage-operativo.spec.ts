@@ -140,7 +140,7 @@ test("Jornadas aborta si Retornos se corrompe después del montaje", async ({
   page,
 }) => {
   await prepararStorage(page, []);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
   await page.getByRole("button", { name: "Nueva jornada" }).click();
   await page.getByLabel("Camión *").selectOption("1");
   await page.getByLabel("Chofer *").fill("Chofer de prueba");

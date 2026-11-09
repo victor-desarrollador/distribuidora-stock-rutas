@@ -201,6 +201,7 @@ select is(
         'privado.crear_producto(text,text,text,text,numeric,integer)',
         'privado.ejecutar_intencion_operacion(uuid)',
         'privado.empresa_gestion_actual()',
+        'privado.listar_vendedores_jornada()',
         'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.reasignar_vendedor(uuid,uuid,uuid)',
         'privado.registrar_carga(uuid,uuid,uuid[],integer[])',
@@ -208,7 +209,7 @@ select is(
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)'],
-  'las funciones SECURITY DEFINER de privado son exactamente las veintitrés: trece implementaciones de negocio (productos, camiones, clientes y stock), abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida y corregir_jornada (T1, T2, T5, T6, T7, T4), las tres de intenciones crear, ejecutar y cancelar (ADR-010, C1.2a) y el auxiliar empresa_gestion_actual (D-2)');
+  'las funciones SECURITY DEFINER de privado son exactamente las veinticuatro: trece implementaciones de negocio (productos, camiones, clientes y stock), abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida y corregir_jornada (T1, T2, T5, T6, T7, T4), las tres de intenciones crear, ejecutar y cancelar (ADR-010, C1.2a), listar_vendedores_jornada (E-PL1) y el auxiliar empresa_gestion_actual (D-2)');
 
 select is(
   pg_temp.sd_publicas_no_autorizadas(),

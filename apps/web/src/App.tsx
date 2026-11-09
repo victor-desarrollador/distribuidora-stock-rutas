@@ -1,5 +1,6 @@
 
 
+import { Suspense, lazy } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -35,6 +36,15 @@ import Retornos from "./pages/Retornos";
 import CuentasCorrientes from "./pages/CuentasCorrientes";
 import Login from "./pages/Login";
 import ConfiguracionDemo from "./pages/ConfiguracionDemo";
+import { RUTA_JORNADAS_DEMO } from "./demo/entorno";
+
+// Pantalla demo (D1/D2): sólo se define —y por lo tanto sólo entra al bundle—
+// si `import.meta.env.DEV` es verdadero en tiempo de build (desarrollo). Debe
+// escribirse en línea: a través de otra constante el bundler no elimina la
+// importación diferida (verificado: el chunk quedaba en dist).
+const JornadasDemo = import.meta.env.DEV
+  ? lazy(() => import("./pages/JornadasDemo"))
+  : null;
 
 // Dueño y encargado: lo que tenía el administrador del prototipo.
 // Vendedor/piloto: lo que tenía el vendedor. El rol "depósito" no existe
@@ -115,14 +125,29 @@ function RutasPrivadas() {
           }
         />
 
+        {/* Real: lectura. El vendedor sólo ve su jornada (RLS decide las filas). */}
         <Route
           path="/jornadas"
           element={
-            <ProtectedRoute roles={gestion}>
+            <ProtectedRoute roles={todos}>
               <Jornadas />
             </ProtectedRoute>
           }
         />
+
+        {/* Demo (legado): sólo gestión y sólo fuera de producción. */}
+        {JornadasDemo !== null && (
+          <Route
+            path={RUTA_JORNADAS_DEMO}
+            element={
+              <ProtectedRoute roles={gestion}>
+                <Suspense fallback={<PantallaCargandoSesion />}>
+                  <JornadasDemo />
+                </Suspense>
+              </ProtectedRoute>
+            }
+          />
+        )}
 
         <Route
           path="/autoventa"

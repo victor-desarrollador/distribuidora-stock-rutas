@@ -1,6 +1,6 @@
 // Bloque E / M-3: TOCTOU del stock en la preparación de cargas. Jornadas y
 // Retornos son dependencias mutables: el snapshot que ve el render de
-// /jornadas en el montaje puede quedar desactualizado. Al guardar la
+// /demo/jornadas en el montaje puede quedar desactualizado. Al guardar la
 // preparación, la frontera relee AMBOS ledgers discriminadamente, calcula el
 // stock reservado con esas lecturas frescas y aborta sin escribir si el
 // storage está corrupto o no alcanza el stock; el raw queda intacto.
@@ -121,7 +121,7 @@ test("Preparación: la carga respeta lo reservado leído en el momento del guard
   page,
 }) => {
   await prepararStorage(page, 10);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
   await completarFormulario(page, 100);
 
   await page
@@ -148,7 +148,7 @@ test("Preparación: una jornada previa con más carga (reída al guardar) agota 
   page,
 }) => {
   await prepararStorage(page, 10);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
   await completarFormulario(page, 100);
 
   // La jornada previa ahora reserva 110 (el render sigue viendo 10). Con la
@@ -177,7 +177,7 @@ test("Preparación: jornadas corruptas al guardar, la frontera aborta sin escrib
   page,
 }) => {
   await prepararStorage(page, 10);
-  await page.goto("/jornadas");
+  await page.goto("/demo/jornadas");
   await completarFormulario(page, 100);
 
   // El ledger de jornadas se corrompe mientras la carga está en el

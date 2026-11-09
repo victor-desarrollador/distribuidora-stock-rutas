@@ -10,7 +10,7 @@
 --      privilegios efectivos de los roles técnicos y de la Data API.
 --   2. T3P-05: RLS de todas las tablas expuestas (inventario obligatorio de 13
 --      tablas + toda tabla adicional de public con RLS y sin FORCE).
---   3. Bloque A: funciones por firma exacta y OID (46 firmas, B.1.2a) e
+--   3. Bloque A: funciones por firma exacta y OID (48 firmas, B.1.2a; incluye las 2 de E-PL1) e
 --      inventario exhaustivo de funciones SECURITY DEFINER (3.7, ADR-001 §17.3),
 --      con la excepción O-4 (ADR-001 §18.2 vigente) sujeta al contrato RB + RA
 --      APROBADO SÓLO COMO NORMA (ADR-001 §18.2.1; O4-PGTEMP; ver la cabecera de DECLARE).
@@ -343,15 +343,16 @@ BEGIN
     RAISE EXCEPTION 'validar_topologia: [ACCESO_DATA_API] stock_actual: anon con SELECT o authenticated con escritura.';
   END IF;
 
-  --     lector_perfiles_rpc: sólo SELECT (usuario_id, empresa_id, rol, activo)
-  --     sobre public.perfiles; nada más en las tablas de negocio.
+  --     lector_perfiles_rpc: sólo SELECT (usuario_id, empresa_id, rol, activo y,
+  --     desde E-PL1, nombre; ADR-001 §18.4.2.2) sobre public.perfiles; nada más en
+  --     las tablas de negocio.
   v_oid_rel := pg_catalog.to_regclass('public.perfiles');
   SELECT pg_catalog.string_agg(a.attname::pg_catalog.text, ',' ORDER BY a.attname) INTO v_txt
     FROM pg_catalog.pg_attribute a
    WHERE a.attrelid = v_oid_rel AND a.attnum > 0 AND NOT a.attisdropped
      AND pg_catalog.has_column_privilege('lector_perfiles_rpc', v_oid_rel, a.attnum, 'SELECT');
-  IF v_txt IS DISTINCT FROM 'activo,empresa_id,rol,usuario_id' THEN
-    RAISE EXCEPTION 'validar_topologia: [PRIV_LECTOR] columnas de perfiles legibles por lector_perfiles_rpc: %, se esperaba activo,empresa_id,rol,usuario_id.',
+  IF v_txt IS DISTINCT FROM 'activo,empresa_id,nombre,rol,usuario_id' THEN
+    RAISE EXCEPTION 'validar_topologia: [PRIV_LECTOR] columnas de perfiles legibles por lector_perfiles_rpc: %, se esperaba activo,empresa_id,nombre,rol,usuario_id (cinco columnas, E-PL1).',
       COALESCE(v_txt, 'ninguna');
   END IF;
 
@@ -732,6 +733,15 @@ BEGIN
          'cancelar_intencion_operacion', 'public', 'postgres', 'sql', false, 'v',
          'authenticated=X/postgres,postgres=X/postgres', true),
 
+        -- Lectura protegida de vendedores (E-PL1, ADR-001 §18.4.2.2): 1 implementación privada + 1 fachada.
+        -- Lectura pura: STABLE ('s'), a diferencia de las RPC de escritura ('v').
+        ('privado.listar_vendedores_jornada()',
+         'listar_vendedores_jornada', 'privado', 'propietario_rpc', 'plpgsql', true, 's',
+         'authenticated=X/propietario_rpc,propietario_rpc=X/propietario_rpc', true),
+        ('public.listar_vendedores_jornada()',
+         'listar_vendedores_jornada', 'public', 'postgres', 'sql', false, 's',
+         'authenticated=X/postgres,postgres=X/postgres', true),
+
         -- Catálogos (BA-01 / T3P-01): 10 implementaciones privadas + 10 fachadas
         ('privado.crear_producto(pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.numeric, pg_catalog.int4)',
          'crear_producto', 'privado', 'propietario_rpc', 'plpgsql', true, 'v',
@@ -917,8 +927,8 @@ BEGIN
     END IF;
   END LOOP;
 
-  IF v_count IS DISTINCT FROM 46 THEN
-    RAISE EXCEPTION 'validar_topologia: [MANIFIESTO] el manifiesto de funciones debe tener 46 firmas, tiene %.', v_count;
+  IF v_count IS DISTINCT FROM 48 THEN
+    RAISE EXCEPTION 'validar_topologia: [MANIFIESTO] el manifiesto de funciones debe tener 48 firmas, tiene %.', v_count;
   END IF;
 
   -- 3.4 Sin sobrecargas ni homónimos: para cada nombre del manifiesto, el
@@ -946,6 +956,7 @@ BEGIN
         ('crear_intencion_operacion', 'privado,public'),
         ('ejecutar_intencion_operacion', 'privado,public'),
         ('cancelar_intencion_operacion', 'privado,public'),
+        ('listar_vendedores_jornada', 'privado,public'),
         ('crear_producto', 'privado,public'),
         ('actualizar_producto', 'privado,public'),
         ('cambiar_estado_producto', 'privado,public'),
@@ -1082,19 +1093,20 @@ BEGIN
       ('privado.corregir_jornada(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.date, pg_catalog.uuid, pg_catalog.text)'),
       ('privado.crear_intencion_operacion(pg_catalog.uuid, pg_catalog.text, pg_catalog.jsonb)'),
       ('privado.ejecutar_intencion_operacion(pg_catalog.uuid)'),
-      ('privado.cancelar_intencion_operacion(pg_catalog.uuid)')
+      ('privado.cancelar_intencion_operacion(pg_catalog.uuid)'),
+      ('privado.listar_vendedores_jornada()')
     ) AS f(firma);
 
-  IF v_txt IS NOT NULL OR pg_catalog.cardinality(v_sd_aprobadas) IS DISTINCT FROM 23 THEN
+  IF v_txt IS NOT NULL OR pg_catalog.cardinality(v_sd_aprobadas) IS DISTINCT FROM 24 THEN
     RAISE EXCEPTION 'validar_topologia: [SD_INVENTARIO] faltan funciones SECURITY DEFINER aprobadas: %.',
-      COALESCE(v_txt, 'cardinalidad distinta de 23');
+      COALESCE(v_txt, 'cardinalidad distinta de 24');
   END IF;
 
   --     Coherencia con el manifiesto: los miembros del inventario son
   --     exactamente las filas SECURITY DEFINER del manifiesto, cuyo contrato
   --     completo (owner, lenguaje, volatilidad, proconfig, ACL y EXECUTE) ya se
   --     verificó en 3.1-3.3.
-  IF pg_catalog.cardinality(v_sd_manifiesto) IS DISTINCT FROM 23
+  IF pg_catalog.cardinality(v_sd_manifiesto) IS DISTINCT FROM 24
      OR NOT (v_sd_manifiesto @> v_sd_aprobadas AND v_sd_aprobadas @> v_sd_manifiesto) THEN
     RAISE EXCEPTION 'validar_topologia: [SD_INVENTARIO] el inventario SECURITY DEFINER (%) no coincide con las filas SECURITY DEFINER del manifiesto (%).',
       pg_catalog.cardinality(v_sd_aprobadas), pg_catalog.cardinality(v_sd_manifiesto);
@@ -1304,7 +1316,7 @@ BEGIN
     RAISE EXCEPTION 'validar_topologia: [SD_NO_AUTORIZADA] funciones SECURITY DEFINER fuera del inventario aprobado (ADR-001 §17.3, P4): %.', v_txt;
   END IF;
 
-  RAISE NOTICE 'validar_topologia: verificación de funciones por firma exacta y OID exitosa (46 firmas con contrato completo, sin sobrecargas, manifiesto de auxiliares conforme; inventario SECURITY DEFINER exhaustivo de 23 firmas%).',
+  RAISE NOTICE 'validar_topologia: verificación de funciones por firma exacta y OID exitosa (48 firmas con contrato completo, sin sobrecargas, manifiesto de auxiliares conforme; inventario SECURITY DEFINER exhaustivo de 24 firmas%).',
     CASE WHEN pg_catalog.to_regprocedure('public.rls_auto_enable()') IS NULL THEN '' ELSE ' + excepción O-4' END;
 
   -- ======================================================
@@ -1592,7 +1604,7 @@ BEGIN
 
   RAISE NOTICE 'Roles técnicos, membresías (O-3/D-2), ownership y privilegios efectivos de las relaciones inventariadas: conformes (T3P-07).';
   RAISE NOTICE 'RLS obligatoria sin FORCE en las 13 tablas expuestas (owner postgres) y en las tablas adicionales de public (owner no validado); ninguna vista adicional accesible elude la RLS según sus dependencias (T3P-05, P4, B11-03).';
-  RAISE NOTICE 'Funciones: 46 firmas exactas con contrato completo, auxiliares conformes e inventario SECURITY DEFINER exhaustivo en public, privado y graphql_public (Bloque A, ADR-001 §17.3).';
+  RAISE NOTICE 'Funciones: 48 firmas exactas con contrato completo, auxiliares conformes e inventario SECURITY DEFINER exhaustivo en public, privado y graphql_public (Bloque A, ADR-001 §17.3).';
   RAISE NOTICE 'service_role: denegado por defecto, excepción SELECT sobre public.productos (T3P-08, P11).';
   RAISE NOTICE 'Políticas RLS: manifiesto exacto de 38 políticas sobre 13 relaciones; políticas de otras relaciones no verificadas (T3P-06).';
   RAISE NOTICE '---';
