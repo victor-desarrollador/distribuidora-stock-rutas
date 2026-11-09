@@ -1,4 +1,69 @@
 ---
+## 09/11/2026 — FE-2B: reasignación real de vendedor desde /jornadas (rama `feat/fe2-reasignacion-vendedor`; SIN COMMIT; SECURITY REVIEW PENDIENTE; CARGA Y DESCARGA SIGUEN DESHABILITADAS)
+
+**Base.** Worktree nueva `distribuidora-fe2-reasignacion-vendedor`, rama `feat/fe2-reasignacion-vendedor`, creada desde `29a579b1c9b7024d9bd8cfeaed04d88a4d99c599` (FE-1, verificado). El worktree FE-1 y su commit no se tocaron. Informe de preparación `FE2A_INVENTARIO_Y_PLAN.md`, SHA-256 `6bbbecebccc5230b16192362caabbe60e7223ffdaf9f6656e3b83af6729a579d` (verificado).
+
+**Uso de `listar_vendedores_jornada` (D-F2-3).** ADR-001 §18.4.2.2 (E-PL1) fija como alcance «jornadas (ADR-007 §2.3)» y como finalidad «una lectura protegida de los candidatos a vendedor que ADR-007 §2.3 ya define». ADR-007 §2.3 es «Vendedor y reasignación» (§2.3.3 exige que el vendedor nuevo cumpla §2.3.1). El contrato no se limita a la apertura: se reutiliza sin ampliar permisos, columnas ni contrato. Se registra para confirmación humana expresa.
+
+**Qué se hizo.**
+- `pages/jornadas_reasignacion.ts` (nuevo): definición sobre el motor `jornadas_operacion.ts` (sin cambios). `admite` = `abierta`/`cargada`. `preparar` exige un vendedor de la lista ofrecida (no hay uuid manual) y distinto del vigente; los datos de la intención quedan congelados. El comando es `reasignar` y pasa por el wrapper `ejecutar` → RPC `reasignar_vendedor`. `verificar` relee la jornada en su fecha y **nunca declara éxito**: vendedor pedido → incierta reintentable; vendedor original en un estado admitido → sin efecto reintentable; original en otro estado → incierta reintentable; tercer vendedor o no visible → incierta sin reintento; lectura fallida → sin verificar. Releen tras `jornada_estado_invalido`, `_no_encontrada`, `_sin_cambios`, `_vendedor_ocupado`, `_vendedor_no_encontrado` y `_vendedor_invalido`. `arbitroRevocable`: la participación en el árbitro se libera al descartar la sesión.
+- `hooks/useReasignacionJornada.ts` (nuevo): una «sesión» por contexto de autorización (`contextoAutorizacionCarga`: usuario + empresa + rol). Sin contexto (vendedor/piloto) no se crea nada. Si cambia el contexto, se descartan la intención, la lista de vendedores y la retención, y lo publicado por el contexto anterior no se muestra. Los puertos se piden recién al usarlos: montar la pantalla no toca la red. La lista se lee al abrir el formulario, reutilizando `crearControladorVendedores` y el puerto E-PL1. `buscarEnFecha` es una búsqueda de una sola fecha: no se importa `buscarConLectura` para no tocar la compuerta FE-1, que mockea ese módulo.
+- `pages/JornadaReasignacionPanel.tsx` (nuevo): «Cambiar vendedor» sólo en `abierta`/`cargada` (en otro estado no se muestra). Formulario con el vendedor actual y un select con los otros vendedores. Hay dos pasos: «Revisar cambio» y luego «Confirmar cambio» (o «Volver»). Estados: cargando lista, error de lista (con reintento de lectura), sin candidatos, enviando, verificando, desconocido («Reintentar cambio de vendedor» sólo si es seguro, y «Verificar estado»), éxito sin acción hasta la relectura, y bloqueado por otra operación. Tokens `min-h-12`/`text-base`, columna en celular y fila en `sm:`.
+- `pages/Jornadas.tsx`: monta el panel sólo para gestión, con el **mismo árbitro** que salida y corrección; aviso de resultado con `AvisoSalidaJornada`; `trasRelectura`. El panel de carga FE-1 **no se modificó** (mismas props, sin `onConfirmar`).
+- `JornadaSalidaPanel.tsx` y `JornadaCorreccionPanel.tsx`: prop opcional `motivoBloqueo`, para explicar qué operación retiene la jornada. Sin ella, el texto es el anterior. `jornadas_presentacion.ts`: textos de bloqueo, `motivoBloqueo()` y `MENSAJE_NO_DISPONIBLE` actualizado (carga y descarga siguen pendientes).
+
+**Tests (Vitest, nuevos).** `jornadas_reasignacion.test.ts`: estados (abierta, cargada, en_reparto y posteriores), mismo vendedor, vendedor fuera de la lista u otra empresa, comando y argumentos exactos de `reasignar_vendedor`, éxito sólo por respuesta, doble clic, permisos (`jornada_no_autorizado`, `42501`), cada rechazo que relee, red perdida, `40001`, cada rama de la verificación, reintento con la misma clave, sin reintentos automáticos, árbitro con salida y corrección, revocación, desmontaje y guardas estáticas. `JornadaReasignacionPanel.test.tsx`: estados del panel, confirmación en dos pasos y accesibilidad. `useReasignacionJornada.test.ts`: puertos perezosos, cambio de sesión (intención descartada, árbitro liberado, nada tardío publicado). `Jornadas.reasignacion_gate.test.tsx`: pantalla real con cliente simulado. Dueño y encargado sólo invocan `listar_vendedores_jornada` y `reasignar_vendedor`; el vendedor/piloto no ve el panel ni llama RPC. En `en_reparto` no se envía nada. Tras un fallo de red, los reenvíos usan la misma clave y la verificación es sólo lectura. Nunca hay `insert/update/upsert/delete` ni `registrar_carga`/`registrar_descarga`, y el panel de carga sigue sin `onConfirmar`. La compuerta FE-1 (`Jornadas.carga_gate.test.tsx`) pasa **sin cambios**.
+
+**pgTAP existentes (NO ejecutados en esta tarea; sin Docker ni SQL):** `jornadas_reasignar.test.sql` (`plan(168)`), `jornadas_reasignar_aislamiento.test.sql` (`plan(33)`, aislamiento entre empresas) y `jornadas_listar_vendedores.test.sql` (`plan(70)`). Cubren en el servidor permisos, otra empresa, estados, vendedor ocupado, sin cambios e idempotencia.
+
+**Verificación (`apps/web`).**
+
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 64 archivos, 2149 pruebas (antes 60 / 2075) |
+| `npm run build` | exit 0 (aviso de tamaño de chunk, previo) |
+| `git diff --check` | exit 0 |
+| `npx playwright test` | **no ejecutado** (por indicación: no se usa infraestructura compartida) |
+
+**Riesgos / pendientes.**
+1. **Security review del frontend pendiente** (RPC, roles: `AGENTS.md` §2.4). La tarea no se considera cerrada sin ella.
+2. Confirmación humana del uso de E-PL1 para reasignar (D-F2-3), con la evidencia textual de arriba.
+3. Sin E2E: no hay prueba con base local de la reasignación (feliz, vendedor ocupado, una sola fila en `reasignaciones_vendedor` tras reintento). Tampoco hay DOM de pruebas: el paso «Revisar → Confirmar» se prueba con renders estáticos de cada paso, no con clics.
+4. El wrapper `ejecutar` existente reintenta hasta 3 veces, con la **misma** clave, ante una falta de respuesta. Es comportamiento previo de `lib/jornadas.ts` y no se cambió. Si la sesión cambiara a otro usuario justo en esa ventana, un reenvío saldría con el JWT nuevo. ProtectedRoute desmonta la pantalla al pasar por «cargando», y la RPC rechaza `jornada_sin_cambios` si el cambio ya se aplicó, pero la ventana teórica existe (igual que en salida y corrección).
+5. La clave sólo vive en memoria: tras recargar, un nuevo intento lleva otra clave. No duplica efectos (el estado es «vendedor vigente» y el servidor responde `jornada_sin_cambios`), pero el usuario debe revisar la jornada.
+6. El borrador de carga FE-1 no participa del árbitro (sin cambios): puede estar abierto mientras se reasigna; no escribe nada.
+
+### FE-2B — preparación final para commit (09/11/2026; SIN COMMIT)
+
+**Autorización humana D-F2-3 (otorgada el 09/11/2026).** El responsable autorizó reutilizar `listar_vendedores_jornada` (E-PL1, ADR-001 §18.4.2.2) para la reasignación, **sin ampliar permisos, columnas, contrato, RLS ni grants**. Queda cerrado el pendiente 2 de la lista anterior.
+
+**Security review FE-2C.** `/home/tuculandia/Documentos/tiopancho/auditoria-integral-vm/FE2C_SECURITY_REVIEW/FE2C_SECURITY_REVIEW.md`, SHA-256 `95cdb82dc4d1eaca32050ecf5a15328d439862be259f8d60a9f6db9e9216b415` (verificado). Objeto: árbol sin commit sobre `29a579b`.
+- **Commit local: APTO CON OBSERVACIONES**, sin defectos bloqueantes.
+- **Merge: NO APTO TODAVÍA**, por falta de evidencias, no por defectos.
+- **Uso operativo: NO APTO.** ADR-001 sigue en validación controlada y E-PL1 no autoriza staging ni producción.
+- **FE-2C no es auditoría independiente.** El revisor es el mismo agente que implementó FE-2B (`AGENTS.md` §2.3.1). Codex y OpenCode deben auditar el hash que se cree.
+
+**Hallazgos (ninguno bloquea el commit local).**
+- **H-1 (baja): atribución por reintentos del wrapper.** `lib/jornadas.ts:645-665` ya existía y no se modificó. Ante falta de respuesta reintenta hasta 3 veces con el cliente singleton, y `detener()` no corta ese bucle. Si en esa ventana inicia sesión otro dueño o encargado de la **misma** empresa (por ejemplo, en otra pestaña), la reasignación puede quedar registrada a su nombre. No hay elevación de privilegios, cruce de empresa ni duplicación. Otra empresa → `jornada_no_encontrada`; sin sesión → `42501`; vendedor o inactivo → `PT403`. Es el mismo comportamiento de salida, corrección y apertura (CV-1). Corregirlo exige tocar `lib/jornadas.ts` en una tarea separada con decisión humana; **no se corrige aquí**. Se recomienda resolverlo antes del uso multiusuario.
+- **H-2 (baja): reasignación trabada en «enviando».** Ocurre si el contexto pasa a `null` y vuelve sin desmontar la pantalla mientras hay un envío en vuelo (revalidación de perfil sin `cargando`). La pantalla queda en «Cambiando vendedor…» con la jornada retenida hasta navegar o recargar. Falla cerrada: sin escritura indebida ni éxito ficticio. Corrección propuesta: al detener la sesión, pasar `enviando`/`verificando` a `desconocido`, o no reutilizar la sesión tras un `null`, más un test del ciclo `ctx → null → ctx`. Queda para un ciclo posterior.
+- **H-3 (informativa): `permitidos` lo provee el llamador.** `confirmar` valida contra la lista que recibe en la entrada y no contra el último `listo` de la sesión. No es explotable (el servidor valida empresa, actividad y rol); es sólo defensa en profundidad del cliente. Opcional: derivar `permitidos` desde la sesión.
+- **H-4 (informativa): el borrador de carga FE-1 no considera la reasignación en `bloqueadaPorOtra`.** Es sólo presentación, porque el panel no escribe. Cuando se habilite la confirmación de carga (DP-1), la carga deberá entrar al árbitro.
+- **H-5 (informativa): panel inerte con autorización incompleta.** Si `usuario.rol` es de gestión pero el contexto de autorización es `null`, el panel se muestra y sus manejadores no hacen nada. Falla cerrada; sólo afecta la UX.
+
+**Pendientes antes del merge.**
+1. Auditoría independiente (Codex/OpenCode) del hash, con evidencia reproducible adjunta.
+2. pgTAP de `jornadas_reasignar` (168), `jornadas_reasignar_aislamiento` (33) y `jornadas_listar_vendedores` (70) ejecutados en local.
+3. Playwright con base local para los casos de FE-2C §6. Feliz para dueño y encargado en `abierta`/`cargada` (una sola fila en `reasignaciones_vendedor`). Vendedor/piloto sin panel ni RPC (red interceptada). `en_reparto` sin botón. «Volver» sin envío. Vendedor ocupado. Red cortada → desconocido → reintento con la misma clave. Bloqueo cruzado con salida y corrección. Cierre de sesión con el formulario abierto. Clics reales en el paso doble.
+4. Decisión humana sobre H-1 (corregir en `lib/jornadas.ts` en una tarea separada o aceptar el riesgo) y, preferentemente, corrección de H-2 con su test.
+5. Aprobación humana.
+
+**Antes del uso operativo:** además de lo anterior, aprobación de staging/producción de ADR-001 y E-PL1 (hoy sólo validación controlada) y resolución de H-1 para la operación con varios usuarios de gestión.
+
+**En esta tarea** sólo se modificó este archivo; el código funcional quedó igual al revisado por FE-2C.
+
+---
 ## 09/11/2026 — FE-1H: cierre de evidencia precommit de FE-1C/D/E/F (rama `feat/fe1-formulario-carga`; SIN COMMIT; DP-1 y D-IDEM-0 ABIERTOS; CONFIRMACIÓN DE CARGA DESHABILITADA)
 
 **Base.** `HEAD` `740bc96a32a7d7e3fac2654b1d21e60f757f9a54`, rama `feat/fe1-formulario-carga` (verificados). En esta tarea sólo se modificó este archivo. No se tocaron código, tests, dependencias, Supabase, CV-1 ni F1/F2.

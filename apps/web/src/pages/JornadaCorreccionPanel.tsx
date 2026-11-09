@@ -18,6 +18,8 @@ export interface JornadaCorreccionPanelProps {
   // Otra operación (la salida) retiene esta jornada (M-02). Sólo presentación:
   // la exclusión efectiva la aplica el motor.
   bloqueadaPorOtra?: boolean;
+  // FE-2B: qué operación la retiene. Sin valor, el texto de la salida.
+  motivoBloqueo?: string;
   // Camiones activos del catálogo, o null si el catálogo no se pudo leer.
   camionesActivos: CamionCatalogo[] | null;
   nombreCamion: (camionId: string) => string;
@@ -92,8 +94,8 @@ export function JornadaCorreccionPanel(props: JornadaCorreccionPanelProps) {
           Corregir jornada
         </button>
         <p id={idAyuda} className="text-xs text-slate-500">
-          Hay una confirmación de salida de esta jornada en curso o sin resolver.
-          Terminala o verificá su estado antes de corregir la jornada.
+          {props.motivoBloqueo ??
+            "Hay una confirmación de salida de esta jornada en curso o sin resolver. Terminala o verificá su estado antes de corregir la jornada."}
         </p>
       </div>
     );

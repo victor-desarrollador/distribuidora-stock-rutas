@@ -14,6 +14,8 @@ export interface JornadaSalidaPanelProps {
   // Otra operación (la corrección) retiene esta jornada (S2 M-02). Sólo
   // presentación: la exclusión efectiva la aplica el motor.
   bloqueadaPorOtra?: boolean;
+  // FE-2B: qué operación la retiene. Sin valor, el texto de la corrección.
+  motivoBloqueo?: string;
   nombreCamion: string;
   onSolicitar: (jornada: Jornada) => void;
   onCancelar: () => void;
@@ -29,6 +31,7 @@ export function JornadaSalidaPanel({
   jornada,
   fase,
   bloqueadaPorOtra = false,
+  motivoBloqueo,
   nombreCamion,
   onSolicitar,
   onCancelar,
@@ -123,8 +126,8 @@ export function JornadaSalidaPanel({
           Confirmar salida
         </button>
         <p id={idAyuda} className="text-xs text-slate-500">
-          Hay una corrección de esta jornada en curso o sin resolver. Terminala o
-          verificá su estado antes de confirmar la salida.
+          {motivoBloqueo ??
+            "Hay una corrección de esta jornada en curso o sin resolver. Terminala o verificá su estado antes de confirmar la salida."}
         </p>
       </div>
     );

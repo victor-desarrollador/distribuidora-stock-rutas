@@ -15,6 +15,7 @@ import { useCatalogoCamiones } from "../hooks/useCatalogoCamiones";
 import { useJornadasLectura } from "../hooks/useJornadasLectura";
 import { useCorreccionJornada } from "../hooks/useCorreccionJornada";
 import { useHistorialJornada } from "../hooks/useHistorialJornada";
+import { useReasignacionJornada } from "../hooks/useReasignacionJornada";
 import { useSalidaJornada } from "../hooks/useSalidaJornada";
 import { useVendedoresJornada } from "../hooks/useVendedoresJornada";
 import { AvisoSalidaJornada } from "./AvisoSalidaJornada";
@@ -23,13 +24,20 @@ import { JornadaCargaPanel } from "./JornadaCargaPanel";
 import { JornadaContinuidadPanel } from "./JornadaContinuidadPanel";
 import { JornadaCorreccionPanel } from "./JornadaCorreccionPanel";
 import { JornadaHistorialPanel } from "./JornadaHistorialPanel";
+import { JornadaReasignacionPanel } from "./JornadaReasignacionPanel";
 import { JornadaSalidaPanel } from "./JornadaSalidaPanel";
 import { JornadasVista } from "./JornadasVista";
 import { faseConRiesgoApertura } from "./jornadas_apertura";
 import { contextoAutorizacionCarga, faseBorradorPara } from "./carga_borrador";
 import { fechaOperativaHoy } from "./jornadas_correccion";
 import { crearArbitroJornadas, jornadaRetenida } from "./jornadas_operacion";
-import { idCorto } from "./jornadas_presentacion";
+import {
+  MOTIVO_BLOQUEO_CORRECCION,
+  MOTIVO_BLOQUEO_REASIGNACION,
+  MOTIVO_BLOQUEO_SALIDA,
+  idCorto,
+  motivoBloqueo,
+} from "./jornadas_presentacion";
 
 // Pantalla de jornadas reales. Lectura (B-02b.1) sobre la capa B-02a: dueño y
 // encargado leen las jornadas de su empresa; el vendedor/piloto lee sólo la
@@ -42,8 +50,8 @@ import { idCorto } from "./jornadas_presentacion";
 // Ambas operaciones usan el motor común pages/jornadas_operacion.ts, cada una
 // con su propio controlador e intención, y un árbitro compartido: mientras una
 // confirma, envía, verifica o tiene resultado desconocido sobre una jornada, la
-// otra no puede iniciarse sobre esa jornada (S2 M-02). Reasignar, cargar y
-// descargar siguen sin habilitarse.
+// otra no puede iniciarse sobre esa jornada (S2 M-02). Cargar y descargar
+// siguen sin habilitarse (reasignar: FE-2B, abajo).
 // B-02b.2 / S3-0: dueño y encargado ven, en el detalle, el historial de cargas
 // y descargas registradas (SÓLO LECTURA; hooks/useHistorialJornada.ts,
 // pages/jornadas_historial.ts). No participa del árbitro: no opera.
@@ -68,6 +76,12 @@ import { idCorto } from "./jornadas_presentacion";
 // FE-1F (H-02): «Cancelar» del formulario con algo escrito pide la misma
 // confirmación; sin nada escrito cierra directo. (H-01): el catálogo y el
 // borrador pertenecen al contexto de autorización vigente.
+// FE-2B: dueño y encargado cambian el vendedor de una jornada abierta o
+// cargada (hooks/useReasignacionJornada.ts, pages/jornadas_reasignacion.ts,
+// RPC `reasignar_vendedor`) con candidatos de `listar_vendedores_jornada`.
+// Participa del MISMO árbitro que salida y corrección. Su intención y su lista
+// pertenecen al contexto de autorización vigente: si cambia, se descartan.
+// No toca el borrador de carga ni su bloqueo de «Confirmar carga».
 export default function Jornadas() {
   const jornadas = useJornadasLectura();
   // Un árbitro por montaje de la pantalla, compartido por ambas operaciones.
@@ -95,6 +109,20 @@ export default function Jornadas() {
   // quién puede confirmar la salida, el servidor.
   const puedeAdministrar =
     usuario !== null && ROLES_GESTION.includes(usuario.rol);
+  // FE-2B: sin contexto de gestión verificado (vendedor/piloto) no se crea
+  // ni se lee nada para reasignar.
+  const reasignacion = useReasignacionJornada(
+    contextoAutorizacionCarga(sesion),
+    jornadas.recargar,
+    arbitro
+  );
+  const { trasRelectura: trasRelecturaReasignacion } = reasignacion;
+  useEffect(() => {
+    if (lectura.estado === "listo") trasRelecturaReasignacion();
+  }, [lectura, trasRelecturaReasignacion]);
+  const motivoSalida = { fase: salida.fase, motivo: MOTIVO_BLOQUEO_SALIDA };
+  const motivoCorreccion = { fase: correccion.fase, motivo: MOTIVO_BLOQUEO_CORRECCION };
+  const motivoReasignacion = { fase: reasignacion.fase, motivo: MOTIVO_BLOQUEO_REASIGNACION };
   // Historial sólo para gestión: para el vendedor/piloto no se lee nada
   // (RLS tampoco le devolvería movimientos, ADR-007 §2.8).
   const historial = useHistorialJornada(
@@ -138,7 +166,10 @@ export default function Jornadas() {
                 <JornadaSalidaPanel
                   jornada={jornada}
                   fase={salida.fase}
-                  bloqueadaPorOtra={jornadaRetenida(correccion.fase) === jornada.id}
+                  bloqueadaPorOtra={
+                    motivoBloqueo(jornada.id, [motivoCorreccion, motivoReasignacion]) !== undefined
+                  }
+                  motivoBloqueo={motivoBloqueo(jornada.id, [motivoCorreccion, motivoReasignacion])}
                   nombreCamion={nombreCamion(jornada.camionId)}
                   onSolicitar={salida.solicitar}
                   onCancelar={salida.cancelar}
@@ -149,7 +180,10 @@ export default function Jornadas() {
                 <JornadaCorreccionPanel
                   jornada={jornada}
                   fase={correccion.fase}
-                  bloqueadaPorOtra={jornadaRetenida(salida.fase) === jornada.id}
+                  bloqueadaPorOtra={
+                    motivoBloqueo(jornada.id, [motivoSalida, motivoReasignacion]) !== undefined
+                  }
+                  motivoBloqueo={motivoBloqueo(jornada.id, [motivoSalida, motivoReasignacion])}
                   camionesActivos={camionesActivos}
                   nombreCamion={nombreCamion}
                   hoy={fechaOperativaHoy()}
@@ -158,6 +192,21 @@ export default function Jornadas() {
                   onConfirmar={correccion.confirmar}
                   onReintentar={correccion.reintentar}
                   onVerificar={correccion.verificarEstado}
+                />
+                <JornadaReasignacionPanel
+                  jornada={jornada}
+                  fase={reasignacion.fase}
+                  bloqueadaPorOtra={
+                    motivoBloqueo(jornada.id, [motivoSalida, motivoCorreccion]) !== undefined
+                  }
+                  motivoBloqueo={motivoBloqueo(jornada.id, [motivoSalida, motivoCorreccion])}
+                  vendedores={reasignacion.vendedores}
+                  onSolicitar={reasignacion.solicitar}
+                  onCancelar={reasignacion.cancelar}
+                  onConfirmar={reasignacion.confirmar}
+                  onReintentar={reasignacion.reintentar}
+                  onVerificar={reasignacion.verificarEstado}
+                  onRecargarVendedores={reasignacion.recargarVendedores}
                 />
                 {/* FE-1E: abrir la carga de esta jornada descartaría el
                     borrador escrito de otra: se pregunta antes. */}
@@ -256,6 +305,7 @@ export default function Jornadas() {
           <>
             <AvisoSalidaJornada fase={salida.fase} />
             <AvisoSalidaJornada fase={correccion.fase} />
+            <AvisoSalidaJornada fase={reasignacion.fase} />
           </>
         ) : undefined
       }

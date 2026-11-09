@@ -1,6 +1,7 @@
 // Textos y formatos de la pantalla de jornadas (B-02b.1). Sin React.
 
 import type { EstadoJornada } from "../lib/jornadas";
+import { jornadaRetenida, type FaseOperacion } from "./jornadas_operacion";
 
 export const ETIQUETA_ESTADO_JORNADA: Record<EstadoJornada, string> = {
   abierta: "Abierta",
@@ -12,7 +13,24 @@ export const ETIQUETA_ESTADO_JORNADA: Record<EstadoJornada, string> = {
 };
 
 export const MENSAJE_NO_DISPONIBLE =
-  "Todavía no disponible: cargar y descargar mercadería de una jornada se habilitarán en una próxima etapa. Ya se puede abrir una jornada nueva, confirmar la salida de una jornada cargada y corregir la fecha o el camión de una jornada abierta desde su detalle.";
+  "Todavía no disponible: cargar y descargar mercadería de una jornada se habilitarán en una próxima etapa. Ya se puede abrir una jornada nueva, confirmar la salida de una jornada cargada, corregir la fecha o el camión de una jornada abierta y cambiar el vendedor de una jornada abierta o cargada desde su detalle.";
+
+// FE-2B: qué operación retiene una jornada, para explicar por qué las demás
+// están deshabilitadas (la exclusión efectiva la aplica el árbitro del motor).
+export const MOTIVO_BLOQUEO_SALIDA =
+  "Hay una confirmación de salida de esta jornada en curso o sin resolver. Terminala o verificá su estado antes de iniciar otra operación.";
+export const MOTIVO_BLOQUEO_CORRECCION =
+  "Hay una corrección de esta jornada en curso o sin resolver. Terminala o verificá su estado antes de iniciar otra operación.";
+export const MOTIVO_BLOQUEO_REASIGNACION =
+  "Hay un cambio de vendedor de esta jornada en curso o sin resolver. Terminalo o verificá su estado antes de iniciar otra operación.";
+
+/** El motivo de la primera operación que retiene la jornada, o undefined. */
+export function motivoBloqueo(
+  jornadaId: string,
+  otras: readonly { fase: FaseOperacion; motivo: string }[]
+): string | undefined {
+  return otras.find((o) => jornadaRetenida(o.fase) === jornadaId)?.motivo;
+}
 
 /** 'AAAA-MM-DD' → 'DD/MM/AAAA' sin pasar por Date (sin corrimientos de zona). */
 export function formatearFechaOperativa(fecha: string): string {
