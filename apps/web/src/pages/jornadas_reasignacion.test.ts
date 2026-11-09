@@ -15,6 +15,7 @@ import type { BuscarJornada } from "./jornadas_correccion";
 import { crearControladorCorreccion } from "./jornadas_correccion";
 import {
   MENSAJE_PENDIENTE_VERIFICAR,
+  MENSAJE_VERIFICACION_OTRA_SESION,
   crearArbitroJornadas,
   jornadaRetenida,
   type ArbitroJornadas,
@@ -95,9 +96,19 @@ function armar(arbitro?: ArbitroJornadas, usuarioEsperado?: string) {
   const releer = vi.fn();
   let n = 0;
   const claves = () => `aaaaaaaa-0000-4000-8000-${(++n).toString(16).padStart(12, "0")}`;
+  // FE-2F: usuario de la sesión vigente ("lanzar": la lectura falla).
+  const identidad: { usuario: string | null | "lanzar"; lecturas: number } = {
+    usuario: usuarioEsperado ?? "aaaaaaaa-1111-4111-8111-111111111111",
+    lecturas: 0,
+  };
   const puerto = {
     ejecutar(comando: ComandoJornada, clave: string, opciones?: OpcionesEjecucion) {
       return new Promise<ResultadoJornada<string>>((resolver) => envios.push({ comando, clave, opciones, resolver }));
+    },
+    async usuarioActual() {
+      identidad.lecturas += 1;
+      if (identidad.usuario === "lanzar") throw new Error("auth caído");
+      return identidad.usuario;
     },
   };
   const buscar: BuscarJornada = (id, fechas) =>
@@ -107,7 +118,7 @@ function armar(arbitro?: ArbitroJornadas, usuarioEsperado?: string) {
     arbitro,
     usuarioEsperado,
   });
-  return { c, envios, busquedas, publicadas, releer, ultima: () => c.obtener() };
+  return { c, envios, busquedas, publicadas, releer, identidad, ultima: () => c.obtener() };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -752,6 +763,116 @@ describe("FE-2E: reintento manual sin envío (motor)", () => {
 });
 
 const USUARIO_A_E2E = "aaaaaaaa-1111-4111-8111-111111111111";
+
+// FE-2F (O-1): guarda central del motor en la verificación.
+describe("FE-2F O-1: la verificación exige la identidad de la intención (motor)", () => {
+  const USUARIO_B = "bbbbbbbb-2222-4222-8222-222222222222";
+
+  /** Intención de A con respuesta perdida, verificada por A: desconocida reintentable. */
+  async function desconocidaDeA(arbitro?: ArbitroJornadas) {
+    const m = armar(arbitro, USUARIO_A_E2E);
+    const { p } = await perderRespuesta(m);
+    m.busquedas[0].resolver(jornada(1));
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true });
+    return m;
+  }
+
+  it("VM1: B intenta verificar la intención de A → no lee; desconocido con clave, datos y retención intactos", async () => {
+    const arbitro = crearArbitroJornadas();
+    const m = await desconocidaDeA(arbitro);
+    const clave = m.c.claveEnCurso();
+    const datos = m.c.datosEnCurso();
+    m.identidad.usuario = USUARIO_B;
+    await m.c.verificarEstado();
+    expect(m.busquedas).toHaveLength(1);
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_VERIFICACION_OTRA_SESION, reintentable: false });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.c.datosEnCurso()).toBe(datos);
+    expect(arbitro.retenidaPorOtra(Symbol("salida"), jornada(1).id)).toBe(true);
+    expect(m.releer).not.toHaveBeenCalled();
+    expect(m.envios).toHaveLength(1);
+  });
+
+  it("VM2: la identidad cambia durante la lectura → el resultado (aunque sea concluyente) no se usa", async () => {
+    const m = await desconocidaDeA();
+    const clave = m.c.claveEnCurso();
+    const v = m.c.verificarEstado();
+    await tick();
+    expect(m.busquedas).toHaveLength(2);
+    m.identidad.usuario = USUARIO_B;
+    m.busquedas[1].resolver(null); // con otra sesión: «no visible»
+    await v;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_VERIFICACION_OTRA_SESION });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.releer).not.toHaveBeenCalled();
+  });
+
+  it("VM3: la lectura de la sesión falla (o no hay sesión) → no lee; intención conservada", async () => {
+    for (const usuario of ["lanzar", null] as const) {
+      const m = await desconocidaDeA();
+      const clave = m.c.claveEnCurso();
+      m.identidad.usuario = usuario;
+      await m.c.verificarEstado();
+      expect(m.busquedas).toHaveLength(1);
+      expect(m.ultima()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_VERIFICACION_OTRA_SESION });
+      expect(m.c.claveEnCurso()).toBe(clave);
+    }
+  });
+
+  it("VM4: un puerto sin `usuarioActual` con una intención que tiene identidad → falla cerrada (no lee)", async () => {
+    const busquedas: Array<(j: Jornada | null | undefined) => void> = [];
+    let resolverEnvio: (r: ResultadoJornada<string>) => void = () => undefined;
+    const c = crearControladorReasignacion(
+      { ejecutar: () => new Promise((r) => (resolverEnvio = r)) },
+      () => new Promise((r) => busquedas.push(r)),
+      vi.fn(),
+      vi.fn(),
+      { usuarioEsperado: USUARIO_A_E2E }
+    );
+    c.solicitar(jornada(1));
+    const p = c.confirmar(entrada());
+    await tick();
+    resolverEnvio(sinRespuesta());
+    await p;
+    expect(busquedas).toHaveLength(0);
+    expect(c.obtener()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_VERIFICACION_OTRA_SESION });
+    expect(c.claveEnCurso()).not.toBeNull();
+  });
+
+  it("VM5: identidad correcta → mismo comportamiento que antes (registrada por evidencia no aplica en reasignación; sin efecto → reintentable)", async () => {
+    const m = await desconocidaDeA();
+    const v = m.c.verificarEstado();
+    await tick();
+    m.busquedas[1].resolver(jornada(1));
+    await v;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_REASIGNACION_SIN_EFECTO, reintentable: true });
+    // Comprobó la identidad antes y después de cada lectura.
+    expect(m.identidad.lecturas).toBe(4);
+  });
+
+  it("VM6: detenido mientras se comprueba la identidad → pendiente de verificar, sin leer", async () => {
+    const m = await desconocidaDeA();
+    m.identidad.usuario = USUARIO_B;
+    const v = m.c.verificarEstado();
+    m.c.detener();
+    await v;
+    expect(m.busquedas).toHaveLength(1);
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_PENDIENTE_VERIFICAR });
+    expect(m.c.claveEnCurso()).not.toBeNull();
+  });
+
+  it("VM7: una intención sin identidad (puerto que no la informa, sin usuario de controlador) conserva el comportamiento anterior", async () => {
+    const m = armar();
+    m.identidad.usuario = USUARIO_B;
+    const { p } = await perderRespuesta(m);
+    expect(m.busquedas).toHaveLength(1);
+    m.busquedas[0].resolver(jornada(1));
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true });
+    expect(m.identidad.lecturas).toBe(0);
+  });
+});
 
 describe("reasignación: etiqueta del vendedor", () => {
   it("usa nombre y rol de la lista; si no está, un id corto", () => {

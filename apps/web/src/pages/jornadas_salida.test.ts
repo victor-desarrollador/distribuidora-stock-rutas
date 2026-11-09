@@ -11,6 +11,7 @@ import {
   type ResultadoJornada,
 } from "../lib/jornadas";
 import { verificarConLectura } from "../hooks/useSalidaJornada";
+import { MENSAJE_VERIFICACION_OTRA_SESION } from "./jornadas_operacion";
 import {
   MENSAJE_SALIDA_NO_VISIBLE,
   MENSAJE_SALIDA_OK,
@@ -421,6 +422,106 @@ describe("FE-2E: reintento manual sin envío y cambio de usuario (salida, wrappe
     m.estado.usuario = USUARIO_B;
     await m.c.reintentar();
     m.estado.usuario = USUARIO_A;
+    await m.c.reintentar();
+    expect(m.rpcs).toHaveLength(6);
+    expect(m.rpcs.slice(3).every((r) => r.clave === clave && r.autorizacion.includes(USUARIO_A))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FE-2F (O-1): la verificación de una intención desconocida sólo se hace con la
+// identidad que la inició. Con otra sesión (o sin poder leerla) no se lee nada
+// que pueda resolverla: se conservan intención, actor, clave y payload.
+// Wrapper real con cliente simulado; la «lectura» de la jornada depende de la
+// sesión vigente, como la lectura real bajo RLS.
+// ---------------------------------------------------------------------------
+async function salidaDesconocidaVerificable() {
+  const s = clienteConSesion();
+  const lecturas: Array<string | null | "lanzar"> = [];
+  // A ve la jornada todavía cargada; B (otra empresa) no la ve: «descartada».
+  let alLeer: () => void = () => undefined;
+  const verificar: VerificarJornada = async () => {
+    lecturas.push(s.estado.usuario);
+    alLeer();
+    return s.estado.usuario === USUARIO_A ? "cargada" : null;
+  };
+  const publicadas: FaseSalida[] = [];
+  const releer = vi.fn();
+  const c = crearControladorSalida(
+    crearPuertoJornadas(s.cliente),
+    verificar,
+    releer,
+    (f) => publicadas.push(f),
+    () => "aaaaaaaa-0000-4000-8000-000000000001"
+  );
+  c.solicitar(jornada(1));
+  await c.confirmar();
+  expect(c.obtener()).toMatchObject({ fase: "desconocido", reintentable: true });
+  expect(lecturas).toEqual([USUARIO_A]);
+  return { ...s, c, publicadas, releer, lecturas, alLeer: (f: () => void) => (alLeer = f) };
+}
+
+describe("FE-2F O-1: verificación atada a la identidad de la intención (salida, wrapper real)", () => {
+  it("V1: el usuario B pulsa «Verificar» sobre la intención de A → no lee; se conserva la intención en desconocido", async () => {
+    const m = await salidaDesconocidaVerificable();
+    const clave = m.c.claveEnCurso();
+    m.estado.usuario = USUARIO_B;
+    await m.c.verificarEstado();
+    expect(m.lecturas).toEqual([USUARIO_A]);
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_VERIFICACION_OTRA_SESION });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.releer).not.toHaveBeenCalled();
+    // No se puede iniciar una intención nueva mientras siga desconocida.
+    m.c.solicitar(jornada(2));
+    expect(m.c.obtener().fase).toBe("desconocido");
+    expect(m.rpcs).toHaveLength(3);
+  });
+
+  it("V2: la identidad cambia DURANTE la lectura → el resultado no se usa; intención conservada", async () => {
+    const m = await salidaDesconocidaVerificable();
+    const clave = m.c.claveEnCurso();
+    m.alLeer(() => (m.estado.usuario = USUARIO_B));
+    await m.c.verificarEstado();
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_VERIFICACION_OTRA_SESION });
+    expect(m.c.claveEnCurso()).toBe(clave);
+    expect(m.releer).not.toHaveBeenCalled();
+  });
+
+  it("V3: getSession falla → no lee; intención conservada en desconocido", async () => {
+    const m = await salidaDesconocidaVerificable();
+    const clave = m.c.claveEnCurso();
+    m.estado.usuario = "lanzar";
+    await m.c.verificarEstado();
+    expect(m.lecturas).toEqual([USUARIO_A]);
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_VERIFICACION_OTRA_SESION });
+    expect(m.c.claveEnCurso()).toBe(clave);
+  });
+
+  it("V3b: sin sesión → no lee; intención conservada", async () => {
+    const m = await salidaDesconocidaVerificable();
+    const clave = m.c.claveEnCurso();
+    m.estado.usuario = null;
+    await m.c.verificarEstado();
+    expect(m.lecturas).toEqual([USUARIO_A]);
+    expect(m.c.obtener().fase).toBe("desconocido");
+    expect(m.c.claveEnCurso()).toBe(clave);
+  });
+
+  it("V4: con la identidad correcta se conserva el comportamiento actual (lee y decide)", async () => {
+    const m = await salidaDesconocidaVerificable();
+    await m.c.verificarEstado();
+    expect(m.lecturas).toEqual([USUARIO_A, USUARIO_A]);
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_SALIDA_SIGUE_CARGADA, reintentable: true });
+  });
+
+  it("V5: al volver el usuario original, la verificación vuelve a funcionar y el reintento usa la MISMA clave", async () => {
+    const m = await salidaDesconocidaVerificable();
+    const clave = m.rpcs[0].clave;
+    m.estado.usuario = USUARIO_B;
+    await m.c.verificarEstado();
+    m.estado.usuario = USUARIO_A;
+    await m.c.verificarEstado();
+    expect(m.c.obtener()).toMatchObject({ fase: "desconocido", reintentable: true });
     await m.c.reintentar();
     expect(m.rpcs).toHaveLength(6);
     expect(m.rpcs.slice(3).every((r) => r.clave === clave && r.autorizacion.includes(USUARIO_A))).toBe(true);

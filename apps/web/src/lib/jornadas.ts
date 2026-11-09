@@ -147,6 +147,11 @@ export interface PuertoJornadas {
     claveIdempotencia: string,
     opciones?: OpcionesEjecucion
   ): Promise<ResultadoJornada<string>>;
+  /**
+   * FE-2F (O-1): usuario de la sesión vigente del cliente (`auth.getSession`),
+   * o null si no hay sesión o no se pudo leer. Sólo el id: el token no sale.
+   */
+  usuarioActual(): Promise<string | null>;
 }
 
 /**
@@ -647,6 +652,16 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
   return {
     leerPaginaJornadas,
     leerTodasLasJornadas,
+
+    async usuarioActual() {
+      try {
+        const { data } = await cliente.auth.getSession();
+        const id = data.session?.user.id;
+        return typeof id === "string" && id !== "" ? id : null;
+      } catch {
+        return null;
+      }
+    },
 
     async ejecutar(comando, claveIdempotencia, opciones = {}) {
       if (!esUuid(claveIdempotencia)) {

@@ -26,6 +26,9 @@
 // - FE-2E: la identidad se fija por intención (el usuario de su primer envío
 //   real). Un reintento que no llega a salir no borra una intención ya enviada:
 //   sigue desconocida, con la misma clave y los mismos datos.
+// - FE-2F (O-1): la verificación sólo se hace con la sesión del usuario de la
+//   intención (comprobado antes y después de leer). Con otra sesión, sin
+//   sesión o si no se puede comprobar, no se resuelve nada: sigue desconocida.
 // El servidor decide siempre permisos, estados y reglas de negocio.
 
 import {
@@ -37,7 +40,11 @@ import {
   type PuertoJornadas,
 } from "../lib/jornadas";
 
-export type PuertoOperacion = Pick<PuertoJornadas, "ejecutar">;
+// `usuarioActual` (FE-2F, O-1) es opcional en el tipo para no obligar a los
+// consumidores sin verificación; si falta y la intención tiene identidad, la
+// verificación falla cerrada (no se lee nada que pueda resolverla).
+export type PuertoOperacion = Pick<PuertoJornadas, "ejecutar"> &
+  Partial<Pick<PuertoJornadas, "usuarioActual">>;
 
 export type FaseOperacion =
   | { fase: "inactiva" }
@@ -131,6 +138,12 @@ const CODIGOS_TRANSITORIOS: ReadonlySet<string> = new Set(["40001", "40P01"]);
 // verificó (la sesión podía ser otra): hay que verificar antes de reintentar.
 export const MENSAJE_PENDIENTE_VERIFICAR =
   "No se pudo confirmar la operación mientras la pantalla estaba inactiva. Verificá el estado antes de volver a intentarlo.";
+
+// FE-2F (O-1): la sesión vigente no es la del usuario que inició la intención
+// (o no se pudo comprobar). No se verificó con ella: la operación original
+// sigue sin confirmar y sólo ese usuario puede verificarla o reintentarla.
+export const MENSAJE_VERIFICACION_OTRA_SESION =
+  "No se verificó la operación: tu sesión no es la del usuario que la inició o no se pudo comprobar. Sigue sin confirmar; verificala con esa sesión.";
 
 export function crearControladorOperacion<E, D extends { jornadaId: string }>(
   definicion: DefinicionOperacion<E, D>,
@@ -281,12 +294,44 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
     if (activo && definicion.releerTrasRechazo(r.error.codigo)) alCambiarJornada();
   }
 
+  /**
+   * FE-2F (O-1): ¿la sesión vigente es la del usuario que inició la intención?
+   * Falla cerrada: sin forma de leerla, sin sesión o si la lectura falla → no.
+   */
+  async function mismaIdentidad(esperado: string): Promise<boolean> {
+    if (puerto.usuarioActual === undefined) return false;
+    try {
+      return (await puerto.usuarioActual()) === esperado;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Otra identidad (o ninguna): no se resuelve nada; intención intacta, desconocida. */
+  function verificacionConOtraSesion(jornadaId: string) {
+    emitir({ fase: "desconocido", jornadaId, mensaje: MENSAJE_VERIFICACION_OTRA_SESION, reintentable: false });
+  }
+
   async function verificarYDecidir(i: Intencion): Promise<void> {
     const jornadaId = i.datos.jornadaId;
+    // Identidad de la intención: el usuario de su primer envío real o, si no
+    // se informó, el del controlador (reasignación). Sin ninguna, se mantiene
+    // el comportamiento anterior.
+    const esperado = i.actor ?? usuarioEsperado ?? null;
     emitir({ fase: "verificando", jornadaId });
+    // Antes de leer: con otra sesión la lectura (RLS) mostraría otra cosa.
+    if (esperado !== null && !(await mismaIdentidad(esperado))) {
+      if (!activo) return pendienteDeVerificar(jornadaId);
+      return verificacionConOtraSesion(jornadaId);
+    }
     const v = await definicion.verificar(i.datos);
     // Detenido durante la lectura: pudo leerse con otra sesión; no se usa.
     if (!activo) return pendienteDeVerificar(jornadaId);
+    // Después de leer: si la identidad cambió durante la lectura, no se usa.
+    if (esperado !== null && !(await mismaIdentidad(esperado))) {
+      if (!activo) return pendienteDeVerificar(jornadaId);
+      return verificacionConOtraSesion(jornadaId);
+    }
     switch (v.resultado) {
       case "registrada":
         intencion = null;

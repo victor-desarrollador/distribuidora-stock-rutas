@@ -47,11 +47,14 @@ function armar(usuarioId?: string, arbitro = crearArbitroJornadas()) {
   }> = [];
   const lecturas: Array<{ fecha?: string; resolver: (r: ResultadoJornada<Jornada[]>) => void }> = [];
   const listados: Array<(r: ResultadoVendedores) => void> = [];
+  // FE-2F: usuario de la sesión vigente (por defecto, el del contexto).
+  const identidad: { usuario: string | null } = { usuario: usuarioId ?? null };
   const puertoJornadas = vi.fn(() => ({
     ejecutar: (comando: ComandoJornada, clave: string, opciones?: OpcionesEjecucion) =>
       new Promise<ResultadoJornada<string>>((resolver) => envios.push({ comando, clave, opciones, resolver })),
     leerTodasLasJornadas: (filtro?: { fecha?: string }) =>
       new Promise<ResultadoJornada<Jornada[]>>((resolver) => lecturas.push({ fecha: filtro?.fecha, resolver })),
+    usuarioActual: async () => identidad.usuario,
   }));
   const puertoVendedores = vi.fn(() => ({
     listarVendedores: () => new Promise<ResultadoVendedores>((r) => listados.push(r)),
@@ -68,7 +71,7 @@ function armar(usuarioId?: string, arbitro = crearArbitroJornadas()) {
     deps,
     usuarioId
   );
-  return { sesion, envios, lecturas, listados, puertoJornadas, puertoVendedores, fases, vendedores, releer, arbitro };
+  return { sesion, envios, lecturas, listados, puertoJornadas, puertoVendedores, fases, vendedores, releer, arbitro, identidad };
 }
 
 describe("sesión de reasignación", () => {
@@ -234,6 +237,21 @@ describe("FE-2D H-2: ctx → null → ctx con un envío en vuelo", () => {
     expect(b.envios[0].clave).not.toBe(a.envios[0].clave);
     b.envios[0].resolver({ ok: true, datos: OP, intentos: 1 });
     await pb;
+  });
+
+  it("S5 (FE-2F O-1): con la sesión de otro usuario, «Verificar» no lee ni descarta la intención de la sesión", async () => {
+    const m = armar(USUARIO);
+    const { p } = await enviarEnVuelo(m);
+    m.envios[0].resolver({ ok: false, intentos: 3, error: { codigo: null, mensaje: "x", resultadoDesconocido: true } });
+    await tick();
+    m.lecturas[0].resolver({ ok: true, datos: [jornada("abierta")], intentos: 1 });
+    await p;
+    const clave = m.sesion.controlador.claveEnCurso();
+    m.identidad.usuario = OTRO;
+    await m.sesion.controlador.verificarEstado();
+    expect(m.lecturas).toHaveLength(1);
+    expect(m.sesion.controlador.obtener().fase).toBe("desconocido");
+    expect(m.sesion.controlador.claveEnCurso()).toBe(clave);
   });
 
   it("S4: el usuario se toma del contexto; un contexto sin usuario válido no crea sesión", () => {

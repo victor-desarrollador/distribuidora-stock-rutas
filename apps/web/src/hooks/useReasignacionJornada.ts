@@ -42,7 +42,7 @@ export function buscarEnFecha(
 
 export interface DependenciasReasignacion {
   // Se piden recién al usar el puerto: montar la pantalla no construye nada.
-  puertoJornadas: () => Pick<PuertoJornadas, "ejecutar" | "leerTodasLasJornadas">;
+  puertoJornadas: () => Pick<PuertoJornadas, "ejecutar" | "leerTodasLasJornadas" | "usuarioActual">;
   puertoVendedores: () => PuertoVendedoresJornada;
   generarClave?: () => string;
 }
@@ -68,9 +68,11 @@ export function crearSesionReasignacion(
   usuarioId?: string
 ) {
   const participacion = arbitroRevocable(arbitro);
-  const jornadas: Pick<PuertoJornadas, "ejecutar" | "leerTodasLasJornadas"> = {
+  const jornadas: Pick<PuertoJornadas, "ejecutar" | "leerTodasLasJornadas" | "usuarioActual"> = {
     ejecutar: (comando, clave, opciones) => deps.puertoJornadas().ejecutar(comando, clave, opciones),
     leerTodasLasJornadas: (filtro) => deps.puertoJornadas().leerTodasLasJornadas(filtro),
+    // FE-2F (O-1): identidad vigente para atar la verificación a la intención.
+    usuarioActual: () => deps.puertoJornadas().usuarioActual(),
   };
   const controlador = crearControladorReasignacion(
     jornadas,

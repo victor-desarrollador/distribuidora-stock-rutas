@@ -1,4 +1,47 @@
 ---
+## 09/11/2026 — FE-2F: cuarto ciclo EXCEPCIONAL — O-1, verificación atada a la identidad de la intención (rama `feat/fe2f-verificacion-identidad` sobre `b28aa0d`; SIN COMMIT; SECURITY REVIEW PENDIENTE; P13 SIGUE PENDIENTE)
+
+**Excepción registrada (decisión humana, 09/11/2026).** Se autorizó **excepcionalmente un cuarto ciclo** de corrección (`AGENTS.md` §2.3.5, máximo 3 ciclos), **exclusivamente para O-1** mediante la opción A. Razones: O-1 lo identificó la security review FE-2E del ciclo 3 (`auditoria-integral-vm/FE2E_SECURITY_REVIEW/INFORME_SECURITY_REVIEW_FE2E_CICLO3.md`, SHA-256 `4ba9730eb9462f54ad744959d3b3489b566a69cfb2e3a37a69fb6227bf9333c5`, verificado), que lo elevó a decisión humana en lugar de iniciar un ciclo automático. Es un riesgo de integridad (pérdida de la clave de una intención con resultado desconocido y posible duplicación por una intención nueva) y su corrección es acotada. **La excepción no autoriza otras correcciones ni modifica el límite de ciclos para tareas futuras.** Si aparece otro defecto, no se inicia un quinto ciclo: se pide intervención humana.
+
+**Base.** Commit `b28aa0db57ff35fcd5642a47615738f356db841f`, árbol `0405e247fda3dcdee0112ec6bfa8a054a2c6511b` (verificados; worktree auditado limpio y sin tocar). Rama y worktree nuevos: `feat/fe2f-verificacion-identidad`, `distribuidora-fe2f-verificacion-identidad`. No hay un documento aparte con «opción A»: se tomó el alcance definido en la autorización (guarda central en el motor y lectura de identidad desde el puerto de jornadas), que coincide con la recomendación de O-1 en la security review FE-2E.
+
+**Causa raíz (O-1).** `verificarYDecidir` (motor común) leía el estado con la sesión vigente, sin atarla a la identidad de la intención. Si la sesión pasaba a un usuario B que no ve la jornada (otra empresa o rol sin visibilidad) y B pulsaba «Verificar», la lectura devolvía `descartada` → `intencion = null` y `error`. Se perdía la clave de la intención de A, aunque su envío pudo registrarse, y se habilitaba una intención nueva con otra clave.
+
+**Qué se hizo (opción A).**
+- `lib/jornadas.ts`: `PuertoJornadas.usuarioActual()` lee `auth.getSession()` del cliente y devuelve sólo el id del usuario (null sin sesión o si la lectura falla). No expone el token ni toca RPC ni tablas.
+- `pages/jornadas_operacion.ts`: `PuertoOperacion` admite `usuarioActual` opcional. Guarda central en `verificarYDecidir`: la identidad esperada es la de la intención (`actor` del primer envío real o, si no se informó, el `usuarioEsperado` del controlador). Se comprueba **antes y después** de la lectura. Si difiere, si no hay sesión, si la lectura de la sesión falla o si el puerto no puede leerla, **no se lee** (o no se usa lo leído): se conservan intención, actor, clave y payload y la fase queda `desconocido` con `MENSAJE_VERIFICACION_OTRA_SESION` (`reintentable: false`; el usuario original puede verificar de nuevo). Detenido durante la comprobación: `MENSAJE_PENDIENTE_VERIFICAR`, como en FE-2D. Con la identidad correcta, o con una intención sin identidad, el comportamiento es el mismo de antes.
+- `hooks/useReasignacionJornada.ts`: el puerto parcial de la sesión de reasignación reenvía `usuarioActual` (necesario para que la guarda no falle cerrada siempre, porque la reasignación tiene `usuarioEsperado`). No se contextualizaron otros hooks: salida y corrección ya reciben el puerto completo.
+- **Sin cambios:** apertura (su lectura es sólo informativa y nunca descarta la intención), P13 (`MAX_INTENTOS`, códigos y esperas), política de reintentos, `alFijarActor`, idempotencia, permisos, `supabase/`, RPC, RLS, grants, migraciones, `package.json`.
+
+**Pruebas nuevas (16).**
+- `jornadas_salida.test.ts` (wrapper real y una lectura que depende de la sesión, como bajo RLS): V1 (B verifica la intención de A), V2 (la identidad cambia durante la lectura), V3 (`getSession` falla), V3b (sin sesión), V4 (identidad correcta: comportamiento actual), V5 (vuelve A: verifica y reintenta con la misma clave y su token).
+- `jornadas_reasignacion.test.ts` (motor): VM1 (B verifica: sin lectura; clave, datos y retención del árbitro intactos), VM2 (cambio durante la lectura con resultado concluyente que no se usa), VM3 (sesión que falla o nula), VM4 (puerto sin `usuarioActual` → falla cerrada), VM5 (identidad correcta: mismo resultado, con comprobación antes y después), VM6 (detenido durante la comprobación), VM7 (intención sin identidad: comportamiento anterior).
+- `useReasignacionJornada.test.ts`: S5 (sesión de reasignación con otra identidad: «Verificar» no lee ni descarta).
+- `lib/jornadas.test.ts`: `usuarioActual` devuelve sólo el id; null sin sesión o con error, sin RPC ni tablas.
+- Fakes ampliados con `usuarioActual` en `jornadas_reasignacion.test.ts` y `useReasignacionJornada.test.ts` (por defecto, el usuario del contexto). **Ninguna aserción existente cambió.**
+
+**Rojo previo sobre `b28aa0d`.** Con el código sin cambios, V1/V2/V3/V3b/V5 fallaban por la causa real (fase `error`, intención descartada por la lectura con la sesión de B; lectura hecha sin sesión válida). Con todas las pruebas nuevas sobre una copia de `b28aa0d` (fuera del repo, ya borrada): **14 en rojo**; V4 y VM7 (comportamiento preservado) en verde antes y después. VM5 falla en la base sólo por la aserción nueva del conteo de comprobaciones de identidad.
+
+**Verificación (`apps/web`).**
+
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` (Vitest) | exit 0; 64 archivos, 2220 pruebas (antes 2204) |
+| `npm run build` | exit 0 |
+| `git diff --check` | exit 0 |
+| Playwright / pgTAP / Docker / SQL | **no ejecutados** (por indicación) |
+
+**Riesgos restantes.**
+1. **Security review del árbol exacto** y auditoría independiente del hash que resulte de un commit autorizado.
+2. Cambio de identidad A → B → A **durante** una misma lectura: las comprobaciones antes y después ven a A, aunque la lectura pudo hacerse con B. Requiere dos inicios de sesión en la ventana de una lectura. La lectura de verificación usa el cliente compartido (sin token fijado por petición).
+3. Con la sesión de otro usuario, la jornada queda retenida en `desconocido` hasta que vuelve el usuario original (falla cerrada, con mensaje).
+4. O-2 (anclaje al primer envío, no al clic) sigue abierto: fuera de esta excepción.
+5. Sin E2E (E1, E6, E7, E9, E10) ni pgTAP: FE2B-07/08 siguen abiertos; el ciclo React real no tiene evidencia.
+6. ADR-001 en validación controlada: uso operativo NO APTO.
+
+---
 ## 09/11/2026 — FE-2E: identidad por intención y reintento sin envío (C4–C6) (rama `feat/fe2d-correcciones-seguridad` sobre `cc58b19`; SIN COMMIT; CICLO 3 DE 3; SECURITY REVIEW PENDIENTE; P13 SIGUE PENDIENTE)
 
 **Base.** HEAD `cc58b19261f217bdf873a7d88025b22a8184f3d2`, árbol `1194e394a40c22421af24064910e11ffd72ac695`, worktree limpio (verificados). Plan enmendado `auditoria-integral-vm/FE2D_PLAN/PLAN_FE2D_CORRECCIONES.md` §10, SHA-256 `a1cec9c0f8c4cf8c4e1f3c68b70c5ed38cb19bf4eb0c396a77485c3a080b7b65` (verificado). Matriz `auditoria-integral-vm/FE2E_PLAN/MATRIZ_REGRESION_FE2E.md` verificada contra `SHA256SUMS.txt` (`a3daa75a…a3bb`) y leída. Se aplicaron sólo C4–C6.

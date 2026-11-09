@@ -575,6 +575,22 @@ describe("FE-2E: alFijarActor (identidad por intención)", () => {
   });
 });
 
+// FE-2F (O-1): identidad vigente para atar la verificación a la intención.
+describe("FE-2F: usuarioActual", () => {
+  it("devuelve sólo el id del usuario de la sesión vigente", async () => {
+    const { cliente } = clienteFalso({});
+    expect(await crearPuertoJornadas(cliente).usuarioActual()).toBe(DUENO);
+  });
+
+  it("sin sesión o si getSession falla → null (falla cerrada), sin llamar a ninguna RPC ni tabla", async () => {
+    const a = clienteFalso({ sesiones: [null] });
+    expect(await crearPuertoJornadas(a.cliente).usuarioActual()).toBeNull();
+    const b = clienteFalso({ sesiones: ["lanzar"] });
+    expect(await crearPuertoJornadas(b.cliente).usuarioActual()).toBeNull();
+    expect([...a.llamadas, ...b.llamadas, ...a.tablas, ...b.tablas]).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Lectura paginada. Base falsa en memoria que interpreta la cadena de consultas
 // (select/eq/or/order/order/limit), aplica un tope `max_rows` como PostgREST y
