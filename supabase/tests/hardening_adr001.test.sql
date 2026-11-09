@@ -51,7 +51,11 @@ insert into tablas_negocio values
   ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
   ('public.operaciones'), ('public.movimientos_stock'),
   ('public.jornadas'), ('public.reasignaciones_vendedor'),
-  ('public.correcciones_jornada');
+  ('public.correcciones_jornada'),
+  -- ADR-010 v1.1 (C1.1): sólo se usa en las pruebas P11 (service_role denegado);
+  -- el contrato completo de ACL y RLS de estas dos tablas está en
+  -- intenciones_esquema.test.sql.
+  ('public.intenciones_operacion'), ('public.intenciones_reconocimientos');
 grant select on tablas_negocio to public;
 
 -- Las 32 firmas de negocio (fachadas + implementaciones): 20 de productos, camiones y

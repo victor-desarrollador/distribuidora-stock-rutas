@@ -8,7 +8,7 @@
 --   0. Resolución de esquemas y roles por OID (fail-closed).
 --   1. T3P-07: roles técnicos, membresías, herencia, ownership, esquemas y
 --      privilegios efectivos de los roles técnicos y de la Data API.
---   2. T3P-05: RLS de todas las tablas expuestas (inventario obligatorio de 11
+--   2. T3P-05: RLS de todas las tablas expuestas (inventario obligatorio de 13
 --      tablas + toda tabla adicional de public con RLS y sin FORCE).
 --   3. Bloque A: funciones por firma exacta y OID (40 firmas, B.1.2a) e
 --      inventario exhaustivo de funciones SECURITY DEFINER (3.7, ADR-001 §17.3),
@@ -307,13 +307,14 @@ BEGIN
                  ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
                  ('public.operaciones'), ('public.movimientos_stock'),
                  ('public.jornadas'), ('public.reasignaciones_vendedor'),
-                 ('public.correcciones_jornada')) AS t(tabla),
+                 ('public.correcciones_jornada'), ('public.intenciones_operacion'), ('public.intenciones_reconocimientos')) AS t(tabla),
          (VALUES ('anon'), ('authenticated')) AS q(rol),
          (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
                  ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) AS p(priv)
    WHERE pg_catalog.to_regclass(t.tabla) IS NOT NULL
      AND pg_catalog.has_table_privilege(q.rol, pg_catalog.to_regclass(t.tabla), p.priv)
-         IS DISTINCT FROM (q.rol = 'authenticated' AND p.priv = 'SELECT');
+         IS DISTINCT FROM (q.rol = 'authenticated' AND p.priv = 'SELECT'
+                AND t.tabla NOT IN ('public.intenciones_operacion', 'public.intenciones_reconocimientos'));
   IF v_txt IS NOT NULL THEN
     RAISE EXCEPTION 'validar_topologia: [ACCESO_DATA_API] privilegio de tabla efectivo fuera de contrato (rol privilegio tabla, distinto de lo esperado): %.', v_txt;
   END IF;
@@ -323,11 +324,13 @@ BEGIN
                  ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
                  ('public.operaciones'), ('public.movimientos_stock'),
                  ('public.jornadas'), ('public.reasignaciones_vendedor'),
-                 ('public.correcciones_jornada')) AS t(tabla),
+                 ('public.correcciones_jornada'), ('public.intenciones_operacion'), ('public.intenciones_reconocimientos')) AS t(tabla),
          (VALUES ('anon'), ('authenticated')) AS q(rol)
    WHERE pg_catalog.to_regclass(t.tabla) IS NOT NULL
      AND (pg_catalog.has_any_column_privilege(q.rol, pg_catalog.to_regclass(t.tabla), 'INSERT, UPDATE, REFERENCES')
           OR (q.rol = 'anon'
+              AND pg_catalog.has_any_column_privilege(q.rol, pg_catalog.to_regclass(t.tabla), 'SELECT'))
+          OR (t.tabla IN ('public.intenciones_operacion', 'public.intenciones_reconocimientos')
               AND pg_catalog.has_any_column_privilege(q.rol, pg_catalog.to_regclass(t.tabla), 'SELECT')));
   IF v_txt IS NOT NULL THEN
     RAISE EXCEPTION 'validar_topologia: [ACCESO_DATA_API_COLUMNA] privilegio por columna no autorizado: %.', v_txt;
@@ -357,7 +360,7 @@ BEGIN
                  ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
                  ('public.operaciones'), ('public.movimientos_stock'),
                  ('public.jornadas'), ('public.reasignaciones_vendedor'),
-                 ('public.correcciones_jornada'), ('public.stock_actual')) AS t(tabla)
+                 ('public.correcciones_jornada'), ('public.intenciones_operacion'), ('public.intenciones_reconocimientos'), ('public.stock_actual')) AS t(tabla)
    WHERE pg_catalog.to_regclass(t.tabla) IS NOT NULL
      AND (pg_catalog.has_table_privilege('lector_perfiles_rpc', pg_catalog.to_regclass(t.tabla),
             'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
@@ -401,7 +404,7 @@ BEGIN
                    ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
                    ('public.operaciones'), ('public.movimientos_stock'),
                    ('public.jornadas'), ('public.reasignaciones_vendedor'),
-                   ('public.correcciones_jornada')) AS t(tabla)
+                   ('public.correcciones_jornada'), ('public.intenciones_operacion'), ('public.intenciones_reconocimientos')) AS t(tabla)
   LOOP
     v_oid_rel := pg_catalog.to_regclass(v_b.tabla);
     IF v_oid_rel IS NULL THEN
@@ -443,10 +446,10 @@ BEGIN
   --     expuesta y prohíbe FORCE sin decisión específica para esa tabla (no hay
   --     ninguna aprobada). Una tabla ordinaria ('r', incluidas particiones) o
   --     particionada ('p') de public fuera del inventario no se rechaza por no
-  --     estar inventariada: sólo por RLS deshabilitada o por FORCE. Las 11
+  --     estar inventariada: sólo por RLS deshabilitada o por FORCE. Las 13
   --     tablas y stock_actual se excluyen por OID (ya validadas arriba).
   --     B11-01 (decisión humana): no se impone owner postgres a tablas futuras.
-  --     El owner exacto se exige sólo a las 11 tablas (arriba); las prohibiciones
+  --     El owner exacto se exige sólo a las 13 tablas (arriba); las prohibiciones
   --     aprobadas de owner (roles técnicos y Data API, sección 1.6) siguen. El
   --     owner de cada tabla adicional se informa como PENDIENTE DE DECISIÓN y no
   --     se declara validado.
@@ -462,7 +465,7 @@ BEGIN
                             ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
                             ('public.operaciones'), ('public.movimientos_stock'),
                             ('public.jornadas'), ('public.reasignaciones_vendedor'),
-                            ('public.correcciones_jornada'), ('public.stock_actual')) AS t(rel)))
+                            ('public.correcciones_jornada'), ('public.intenciones_operacion'), ('public.intenciones_reconocimientos'), ('public.stock_actual')) AS t(rel)))
      ORDER BY c.relname, c.oid
   LOOP
     IF v_b.relrowsecurity IS DISTINCT FROM true THEN
@@ -622,7 +625,7 @@ BEGIN
     v_pendientes := v_pendientes + 1;
   END IF;
 
-  RAISE NOTICE 'validar_topologia: [T3P-05] owner postgres, RLS y sin FORCE en las 11 tablas expuestas; RLS y sin FORCE en toda tabla adicional de public (owner no validado); vista stock_actual conforme; ninguna vista adicional accesible elude la RLS según sus dependencias. Vistas, vistas materializadas y tablas foráneas adicionales: sin contrato auditado.';
+  RAISE NOTICE 'validar_topologia: [T3P-05] owner postgres, RLS y sin FORCE en las 13 tablas expuestas; RLS y sin FORCE en toda tabla adicional de public (owner no validado); vista stock_actual conforme; ninguna vista adicional accesible elude la RLS según sus dependencias. Vistas, vistas materializadas y tablas foráneas adicionales: sin contrato auditado.';
 
   -- ======================================================
   -- 3. Funciones por firma exacta y OID (Bloque A: T3P-01..T3P-04, BA-01)
@@ -1290,7 +1293,7 @@ BEGIN
   -- para tablas, columnas, funciones y esquemas. No se extiende a objetos
   -- internos del stack Supabase.
 
-  -- 4.1 Tablas: privilegio efectivo exacto (11 tablas x 8 privilegios).
+  -- 4.1 Tablas: privilegio efectivo exacto (13 tablas x 8 privilegios).
   SELECT pg_catalog.string_agg(p.priv || ' ' || t.tabla || '=' ||
            pg_catalog.has_table_privilege('service_role', pg_catalog.to_regclass(t.tabla), p.priv)::pg_catalog.text,
            ', ' ORDER BY t.tabla, p.priv)
@@ -1299,7 +1302,7 @@ BEGIN
                  ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
                  ('public.operaciones'), ('public.movimientos_stock'),
                  ('public.jornadas'), ('public.reasignaciones_vendedor'),
-                 ('public.correcciones_jornada')) AS t(tabla),
+                 ('public.correcciones_jornada'), ('public.intenciones_operacion'), ('public.intenciones_reconocimientos')) AS t(tabla),
          (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
                  ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) AS p(priv)
    WHERE pg_catalog.has_table_privilege('service_role', pg_catalog.to_regclass(t.tabla), p.priv)
@@ -1348,7 +1351,7 @@ BEGIN
                  ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
                  ('public.operaciones'), ('public.movimientos_stock'),
                  ('public.jornadas'), ('public.reasignaciones_vendedor'),
-                 ('public.correcciones_jornada')) AS t(tabla)
+                 ('public.correcciones_jornada'), ('public.intenciones_operacion'), ('public.intenciones_reconocimientos')) AS t(tabla)
    WHERE pg_catalog.has_any_column_privilege('service_role', pg_catalog.to_regclass(t.tabla), 'INSERT, UPDATE, REFERENCES')
       OR (t.tabla <> 'public.productos'
           AND pg_catalog.has_any_column_privilege('service_role', pg_catalog.to_regclass(t.tabla), 'SELECT'));
@@ -1395,7 +1398,8 @@ BEGIN
   -- ======================================================
   -- 5. T3P-06: manifiesto exacto de políticas RLS
   -- ======================================================
-  -- Contrato: las 33 políticas creadas o modificadas por las migraciones
+  -- Contrato: las 38 políticas (33 previas + 5 de ADR-010 C1.1: 3 de intenciones_operacion
+  -- y 2 de intenciones_reconocimientos, migración 20261111120000) creadas o modificadas por las migraciones
   -- 20261022120000, 20261023140000, 20261024144459, 20261024180000,
   -- 20261025010315, 20261025021032, 20261025033454 (ALTER POLICY),
   -- 20261029233000 y 20261030120000 (CREATE/ALTER POLICY); nombres, comandos
@@ -1426,6 +1430,11 @@ BEGIN
         ('public.correcciones_jornada', 'correcciones_jornada_insert_propietario_rpc', 'a', true, 'propietario_rpc', '-', 'c5d795ed65bf2f068c9805803fd90a1de86a8086fa58c7aa331e96d21009bef9'),
         ('public.correcciones_jornada', 'correcciones_jornada_select_gestion', 'r', true, 'authenticated', 'e2cab0d2f56875654114598fae11fe8d4de6859df9515a02bf781154824b7ace', '-'),
         ('public.empresas', 'empresas_select_propia', 'r', true, 'authenticated', '8083139157ef6916662d922328806be0baa81de21be1c04decb7763c47c7d128', '-'),
+        ('public.intenciones_operacion', 'intenciones_operacion_insert_propietario_rpc', 'a', true, 'propietario_rpc', '-', '1a8a0e8bffa9f1ac18c15a92580f8345d16275f4613bfc7545cece87d24da13e'),
+        ('public.intenciones_operacion', 'intenciones_operacion_select_propietario_rpc', 'r', true, 'propietario_rpc', '1a8a0e8bffa9f1ac18c15a92580f8345d16275f4613bfc7545cece87d24da13e', '-'),
+        ('public.intenciones_operacion', 'intenciones_operacion_update_propietario_rpc', 'w', true, 'propietario_rpc', '69fec85de1026b60d96e011dc5fe329cfb8a42d4ac139543c1fa86431b9c1849', 'ac98a486361edc7027558c5eb6fc3abd301aba44a292bdb8dd8badac224e04c1'),
+        ('public.intenciones_reconocimientos', 'intenciones_reconocimientos_insert_propietario_rpc', 'a', true, 'propietario_rpc', '-', '1b7e089f196e770f0c6e5eda43e936a05f19167ee56bd526e4aadd79510f22fd'),
+        ('public.intenciones_reconocimientos', 'intenciones_reconocimientos_select_propietario_rpc', 'r', true, 'propietario_rpc', '1b7e089f196e770f0c6e5eda43e936a05f19167ee56bd526e4aadd79510f22fd', '-'),
         ('public.jornadas', 'jornadas_insert_propietario_rpc', 'a', true, 'propietario_rpc', '-', 'fcd4b9e5c506865d27802d0bb2b29e4641256b3ef3e7736cf70018a8b487753a'),
         ('public.jornadas', 'jornadas_select_authenticated', 'r', true, 'authenticated', '4ad6401e31b3fc5c6236d32cedbf838f32d2dc194a5e38751263589d6ee9a166', '-'),
         ('public.jornadas', 'jornadas_select_propietario_rpc', 'r', true, 'propietario_rpc', 'd6595bebd96310fae5338d181019cc5d5875af789ddb1451f6a6e25b8c6194f6', '-'),
@@ -1494,13 +1503,13 @@ BEGIN
     END IF;
   END LOOP;
 
-  IF pg_catalog.cardinality(v_politicas) IS DISTINCT FROM 33 THEN
-    RAISE EXCEPTION 'validar_topologia: [POLITICA_MANIFIESTO] el manifiesto debe tener 33 políticas, tiene %.', pg_catalog.cardinality(v_politicas);
+  IF pg_catalog.cardinality(v_politicas) IS DISTINCT FROM 38 THEN
+    RAISE EXCEPTION 'validar_topologia: [POLITICA_MANIFIESTO] el manifiesto debe tener 38 políticas, tiene %.', pg_catalog.cardinality(v_politicas);
   END IF;
 
-  --     Las 11 relaciones del manifiesto (las 11 tablas del inventario de T3P-05).
-  IF pg_catalog.cardinality(v_rels_manifiesto) IS DISTINCT FROM 11 THEN
-    RAISE EXCEPTION 'validar_topologia: [POLITICA_MANIFIESTO] el manifiesto debe cubrir 11 relaciones, cubre %.', pg_catalog.cardinality(v_rels_manifiesto);
+  --     Las 13 relaciones del manifiesto (las 13 tablas del inventario de T3P-05).
+  IF pg_catalog.cardinality(v_rels_manifiesto) IS DISTINCT FROM 13 THEN
+    RAISE EXCEPTION 'validar_topologia: [POLITICA_MANIFIESTO] el manifiesto debe cubrir 13 relaciones, cubre %.', pg_catalog.cardinality(v_rels_manifiesto);
   END IF;
 
   --     Políticas adicionales (B11-02): sobre una relación manifestada, toda
@@ -1537,7 +1546,7 @@ BEGIN
 
   PERFORM pg_catalog.set_config('search_path', v_search_path_previo, true);
 
-  RAISE NOTICE 'validar_topologia: [T3P-06] manifiesto exacto de 33 políticas RLS conforme y sin políticas adicionales sobre las 11 relaciones manifestadas; las políticas de otras relaciones no se verifican (sin contrato aprobado).';
+  RAISE NOTICE 'validar_topologia: [T3P-06] manifiesto exacto de 38 políticas RLS conforme y sin políticas adicionales sobre las 13 relaciones manifestadas; las políticas de otras relaciones no se verifican (sin contrato aprobado).';
 
   -- ======================================================
   -- 6. Resumen: topología válida
@@ -1556,10 +1565,10 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'Roles técnicos, membresías (O-3/D-2), ownership y privilegios efectivos de las relaciones inventariadas: conformes (T3P-07).';
-  RAISE NOTICE 'RLS obligatoria sin FORCE en las 11 tablas expuestas (owner postgres) y en las tablas adicionales de public (owner no validado); ninguna vista adicional accesible elude la RLS según sus dependencias (T3P-05, P4, B11-03).';
+  RAISE NOTICE 'RLS obligatoria sin FORCE en las 13 tablas expuestas (owner postgres) y en las tablas adicionales de public (owner no validado); ninguna vista adicional accesible elude la RLS según sus dependencias (T3P-05, P4, B11-03).';
   RAISE NOTICE 'Funciones: 40 firmas exactas con contrato completo, auxiliares conformes e inventario SECURITY DEFINER exhaustivo en public, privado y graphql_public (Bloque A, ADR-001 §17.3).';
   RAISE NOTICE 'service_role: denegado por defecto, excepción SELECT sobre public.productos (T3P-08, P11).';
-  RAISE NOTICE 'Políticas RLS: manifiesto exacto de 33 políticas sobre 11 relaciones; políticas de otras relaciones no verificadas (T3P-06).';
+  RAISE NOTICE 'Políticas RLS: manifiesto exacto de 38 políticas sobre 13 relaciones; políticas de otras relaciones no verificadas (T3P-06).';
   RAISE NOTICE '---';
   IF v_modo_local THEN
     RAISE WARNING '=== validar_topologia: [ESTADO_LOCAL_SIN_O4] invariantes restantes verificados con O-4 ausente por marcador de laboratorio local (% grupo(s) pendiente(s)). NO es ESTADO_A ni conformidad de topología. ===', v_pendientes;
