@@ -1,4 +1,19 @@
 ---
+## 08/11/2026 — ADR-010 / C1.2a-D1: identificador de intención nulo — APROBADA (normativa); incorporación documental PREPARADA (rama `feat/adr010-convergencia` sobre `a76f799`; **SIN COMMIT**; D-IDEM-0 ABIERTO; C1.2a NO implementado)
+
+**Aprobación normativa.** El responsable aprobó la alternativa B de la propuesta `DECISION_C1_2A_D1_INTENCION_NULA.md` (SHA-256 `327c003f76efed7e206765246dcf6fe38618297265a34216cd1ccf7db02714b3`; alcance `ALCANCE_C1_2A_ADR010_v1.1.md`, SHA-256 `40dfdff28196971a927240f0755d0a3f3e28f25a867be516c238933c39526a30`) y autorizó **exclusivamente** preparar su incorporación documental. No autorizó commit ni implementación.
+
+**Qué se hizo (solo documentación, sin commit).**
+- Nuevo `docs/decisions/010-aclaracion-c1-2a-clave-nula.md`: `crear_intencion_operacion` con `p_intencion_id IS NULL` y actor autorizado → `PT400 intencion_clave_invalida`, después de `PT401`/`PT403` y **antes de validar `p_tipo` y `p_payload`**, de locks, replay e `INSERT` (precisión de orden aprobada el 08/11/2026; prevalece si tipo y/o payload también son inválidos); `ejecutar`/`cancelar` con identificador nulo → `PT404` (autorización válida) o `PT403`; con identificador válido `p_tipo` y `p_payload` conservan los contratos aprobados; pruebas futuras CR-ID-01 a CR-ID-08 (CR-ID-05 cerrada: actor autorizado, id NULL y tipo y/o payload inválidos → `intencion_clave_invalida`, cero efectos).
+- `docs/decisions/010-intenciones-persistidas-de-operacion.md`: viñeta de aclaración en el bloque de precedencia y fila de historial (precedencia limitada a identificadores nulos).
+- `docs/decisions/README.md`: fila de ADR-010 actualizada.
+- `BLUEPRINT.md` §12: obligación de verificar los resultados y la precedencia `PT401`/`PT403`/`PT400`/`PT404` (sin cambiar la versión ni otras secciones).
+- Los anexos v1.1 y la adenda **no se editaron** (hashes de `010-anexo-v1.1.sha256` intactos).
+
+**Cómo se verificó.** Solo controles documentales (`git diff --check`, `git status`, inventario de archivos, integridad de anexos por SHA-256, referencias cruzadas). **No se ejecutaron pruebas técnicas, SQL, pgTAP ni laboratorios.**
+
+**Pendientes.** Las pruebas CR-ID-01…08 **no están ejecutadas**; C1.2a **no está implementado** y requiere autorización propia (hasta C1.2b solo en entorno local descartable). Queda abierto: identificador nulo en `reconocer` (C1.2b) (el orden de validación de `crear` quedó cerrado); aserción de inventario de funciones de `intenciones_esquema.test.sql` a actualizar con C1.2a. `p_desde` futuro, D-IDEM-13 y DT-1 sin cambios. **D-IDEM-0 permanece abierto.**
+
 ## 08/11/2026 — ADR-010 v1.1 / C1.1: esquema y seguridad de las intenciones persistidas (rama `feat/adr010-convergencia` sobre `995ad7c`; **SIN COMMIT**; D-IDEM-0 ABIERTO; sin RPC; sin staging ni producción)
 
 **Autorización.** DH-C1-01 y DH-C1-04, exclusivamente para el corte C1.1 (plan C1 SHA-256 `e5f97bdc…ac6`; decisiones C1.0 SHA-256 `052eb212…fc3`). No se crearon commits ni ramas; no se tocó F1/F2; sin `db push`, sin Supabase remoto.
