@@ -58,10 +58,10 @@ insert into tablas_negocio values
   ('public.intenciones_operacion'), ('public.intenciones_reconocimientos');
 grant select on tablas_negocio to public;
 
--- Las 32 firmas de negocio (fachadas + implementaciones): 20 de productos, camiones y
+-- Las 38 firmas de negocio (fachadas + implementaciones): 20 de productos, camiones y
 -- clientes, 2 de abrir_jornada (T1), 2 de reasignar_vendedor (T2), 2 de registrar_carga (T5),
--- 2 de registrar_descarga (T6), 2 de confirmar_salida (T7) y 2 de corregir_jornada (T4).
--- Stock se verifica por separado.
+-- 2 de registrar_descarga (T6), 2 de confirmar_salida (T7), 2 de corregir_jornada (T4) y
+-- 6 de intenciones (ADR-010 C1.2a: crear, ejecutar y cancelar). Stock se verifica por separado.
 create temp table rpc_negocio (firma regprocedure);
 insert into rpc_negocio values
   ('public.crear_producto(text,text,text,text,numeric,integer)'),
@@ -80,6 +80,9 @@ insert into rpc_negocio values
   ('public.registrar_descarga(uuid,uuid,uuid[],integer[],text)'),
   ('public.confirmar_salida(uuid,uuid)'),
   ('public.corregir_jornada(uuid,uuid,date,uuid,text)'),
+  ('public.crear_intencion_operacion(uuid,text,jsonb)'),
+  ('public.ejecutar_intencion_operacion(uuid)'),
+  ('public.cancelar_intencion_operacion(uuid)'),
   ('privado.crear_producto(text,text,text,text,numeric,integer)'),
   ('privado.actualizar_producto(uuid,text,text,numeric,integer)'),
   ('privado.cambiar_estado_producto(uuid,boolean)'),
@@ -95,7 +98,10 @@ insert into rpc_negocio values
   ('privado.registrar_carga(uuid,uuid,uuid[],integer[])'),
   ('privado.registrar_descarga(uuid,uuid,uuid[],integer[],text)'),
   ('privado.confirmar_salida(uuid,uuid)'),
-  ('privado.corregir_jornada(uuid,uuid,date,uuid,text)');
+  ('privado.corregir_jornada(uuid,uuid,date,uuid,text)'),
+  ('privado.crear_intencion_operacion(uuid,text,jsonb)'),
+  ('privado.ejecutar_intencion_operacion(uuid)'),
+  ('privado.cancelar_intencion_operacion(uuid)');
 grant select on rpc_negocio to public;
 
 -- ===========================================================================
@@ -141,7 +147,7 @@ select is(
   (select count(*)::int from rpc_negocio r
     where has_function_privilege('service_role', r.firma, 'EXECUTE')),
   0,
-  'P11: service_role sin EXECUTE sobre las 32 firmas de negocio (fachadas e implementaciones)');
+  'P11: service_role sin EXECUTE sobre las 38 firmas de negocio (fachadas e implementaciones)');
 
 select is(
   (select count(*)::int from pg_proc p
@@ -234,8 +240,8 @@ select is(
   (select count(*)::int from rpc_negocio r join pg_proc p on p.oid = r.firma
     where p.pronamespace = 'privado'::regnamespace
       and p.prosecdef and p.proowner = 'propietario_rpc'::regrole),
-  16,
-  'O-3: las 16 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
+  19,
+  'O-3: las 19 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
 
 select ok(
   not exists (select 1 from pg_auth_members

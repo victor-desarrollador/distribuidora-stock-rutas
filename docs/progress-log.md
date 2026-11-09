@@ -1,4 +1,17 @@
 ---
+## 09/11/2026 — ADR-010 v1.1 / C1.2a: RPC `crear`, `ejecutar` y `cancelar` (rama `feat/adr010-convergencia` sobre `7d4b478`; **SIN COMMIT**; D-IDEM-0 ABIERTO; C1.2b NO iniciado; solo local descartable)
+
+**Autorización.** Implementar y probar localmente C1.2a (crear, ejecutar y cancelar intenciones), incluida la aclaración C1.2a-D1 (identificador nulo, `PT400 intencion_clave_invalida`). No se crearon commits ni ramas; no se tocó F1/F2; sin `db push`, sin Supabase remoto.
+
+**Qué se hizo.**
+- Migración nueva `supabase/migrations/20261111120100_rpc_intenciones_nucleo.sql`: seis funciones (3 privadas `SECURITY DEFINER` de `propietario_rpc` en `privado`, `search_path=''`, y 3 fachadas `SECURITY INVOKER` en `public`), `EXECUTE` solo para `authenticated`, verificación fail-closed. `ejecutar` invoca por nombre calificado `registrar_ingreso`, `mover_a_cuarentena` y `registrar_merma` sin modificarlas. Sin tablas, políticas, índices ni roles nuevos.
+- Tests nuevos: `intenciones_crear.test.sql` (93), `intenciones_ejecutar_cancelar.test.sql` (92), `intenciones_pg_temp.test.sql` (25) e `intenciones_pg_temp_posterior.test.sql` (36).
+- Inventarios actualizados por C1.2a: preflight (`46` firmas / `23` SECURITY DEFINER; relaciones y políticas siguen 13/38), `hardening_adr001.test.sql` (38 firmas, 19 implementaciones), `grants_default_privileges.test.sql` (44 firmas), `camiones_catalogo.test.sql` y `productos_catalogo.test.sql` (inventario de SECURITY DEFINER: 23; auxiliares) y la aserción de C1.1 en `intenciones_esquema.test.sql` (de «0 funciones» a las seis exactas).
+
+**Cómo se verificó** (contenedor PostgreSQL 17.11 descartable de la imagen fijada por digest, `--network none`, sin puertos ni montajes, datos sintéticos; pgTAP por `psql`, no `supabase test db`): regresión completa **38 archivos PASS, 2566 aserciones** (2320 de la línea base + 246 de C1.2a); preflight medido **46 / 23 / 13 / 38** (`ESTADO_LOCAL_SIN_O4`), 8 de 10 negativos detectados; arnés externo de concurrencia con sesiones reales: 13/13 PASS (CC-01, CC-02, CC-02b, CL-01, CC-07, CC-04, CC-04b, CC-03r, CC-13, CC-03 con el lock de stock, R13-E en `repeatable read` y `serializable`, INV-01).
+
+**Riesgos y pendientes.** (1) Sin `reconocer` (C1.2b) una confirmada bloquea su tipo: C1.2a no se despliega ni se considera completo por sí solo. (2) El arnés de concurrencia y los negativos del preflight no están versionados (evidencia externa). (3) No ejecutado: clase I (TT-01/02, AU-03), concurrencia estadística (LM-05'/06', CC-14), mutantes, PostgREST, `stock_cantidad_invalida` (inalcanzable por `crear`). (4) El preflight no rechaza una función `SECURITY INVOKER` adicional (brecha conocida; la cubre el inventario exacto de pgTAP). (5) Pendiente security review y auditoría independiente del hash. `p_desde` futuro, D-IDEM-13 y DT-1 sin cambios. **D-IDEM-0 permanece abierto.**
+
 ## 08/11/2026 — ADR-010 / C1.2a-D1: identificador de intención nulo — APROBADA (normativa); incorporación documental PREPARADA (rama `feat/adr010-convergencia` sobre `a76f799`; **SIN COMMIT**; D-IDEM-0 ABIERTO; C1.2a NO implementado)
 
 **Aprobación normativa.** El responsable aprobó la alternativa B de la propuesta `DECISION_C1_2A_D1_INTENCION_NULA.md` (SHA-256 `327c003f76efed7e206765246dcf6fe38618297265a34216cd1ccf7db02714b3`; alcance `ALCANCE_C1_2A_ADR010_v1.1.md`, SHA-256 `40dfdff28196971a927240f0755d0a3f3e28f25a867be516c238933c39526a30`) y autorizó **exclusivamente** preparar su incorporación documental. No autorizó commit ni implementación.

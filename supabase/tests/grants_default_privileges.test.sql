@@ -177,11 +177,14 @@ select is(
         'cambiar_estado_camion(uuid,boolean)',
         'cambiar_estado_cliente(uuid,boolean)',
         'cambiar_estado_producto(uuid,boolean)',
+        'cancelar_intencion_operacion(uuid)',
         'confirmar_salida(uuid,uuid)',
         'corregir_jornada(uuid,uuid,date,uuid,text)',
         'crear_camion(text,text)',
         'crear_cliente(text,text,text,text)',
+        'crear_intencion_operacion(uuid,text,jsonb)',
         'crear_producto(text,text,text,text,numeric,integer)',
+        'ejecutar_intencion_operacion(uuid)',
         'mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.abrir_jornada(uuid,uuid,date,uuid)',
         'privado.actualizar_camion(uuid,text,text)',
@@ -190,11 +193,14 @@ select is(
         'privado.cambiar_estado_camion(uuid,boolean)',
         'privado.cambiar_estado_cliente(uuid,boolean)',
         'privado.cambiar_estado_producto(uuid,boolean)',
+        'privado.cancelar_intencion_operacion(uuid)',
         'privado.confirmar_salida(uuid,uuid)',
         'privado.corregir_jornada(uuid,uuid,date,uuid,text)',
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
+        'privado.crear_intencion_operacion(uuid,text,jsonb)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.ejecutar_intencion_operacion(uuid)',
         'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
         'privado.reasignar_vendedor(uuid,uuid,uuid)',
         'privado.registrar_carga(uuid,uuid,uuid[],integer[])',
@@ -208,7 +214,7 @@ select is(
         'registrar_ingreso(uuid,uuid,integer,text)',
         'registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las treinta y ocho firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida y corregir_jornada (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las cuarenta y cuatro firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida, corregir_jornada y las tres de intenciones (ADR-010, C1.2a) (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)

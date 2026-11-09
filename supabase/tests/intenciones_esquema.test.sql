@@ -5,9 +5,9 @@
 --
 -- Cubre las pruebas mínimas del corte: ES-01, ES-02, ES-03, ES-03b, ES-07,
 -- RF-01/02/03/05/06b/07, FK-N, RX-01(b), OC-1, NG-05 (nivel base, 42501 y
--- nunca filas vacías), aislamiento por empresa/actor, protección pg_temp y la
--- ausencia de funciones en este corte. NO cubre las RPC (C1.2) ni la
--- concurrencia (C1.3). El preflight T3-01 y sus negativos se verifican aparte.
+-- nunca filas vacías), aislamiento por empresa/actor, protección pg_temp y el
+-- inventario exacto de funciones de intenciones (C1.2a: seis). NO cubre el
+-- comportamiento de las RPC (tests intenciones_*.test.sql) ni la concurrencia (C1.3). El preflight T3-01 y sus negativos se verifican aparte.
 --
 -- El actor «propietario_rpc» y los roles de la Data API se emulan con
 -- SET LOCAL ROLE dentro de pg_temp.llamar(); el rol efectivo del actor lo da
@@ -197,7 +197,7 @@ select is(
   'ES-01: reconocimientos solo tiene el índice de su PK');
 
 -- ===========================================================================
--- B. Libros mayores y objetos existentes sin cambios (ES-07); sin funciones
+-- B. Libros mayores y objetos existentes sin cambios (ES-07); inventario de funciones
 -- ===========================================================================
 select set_config('search_path', 'pg_catalog, pg_temp', true);
 
@@ -233,11 +233,23 @@ select is(
   0,
   'ES-07: operaciones y movimientos_stock no referencian a las tablas nuevas (la FK va de la intención a la operación)');
 
+-- Inventario EXACTO de funciones de intenciones (C1.2a): solo las seis autorizadas, con firma y
+-- atributos aprobados. Cualquier función adicional o faltante (p. ej. reconocer/listar antes de
+-- C1.2b) hace fallar la aserción. En C1.2b la lista pasa a diez.
 select is(
-  (select count(*)::int from pg_proc p
-    where p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace) and p.proname like '%intencion%'),
-  0,
-  'C1.1: este corte no crea funciones ni RPC (llegan en C1.2)');
+  (select coalesce(string_agg(n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')|'
+                              || case when p.prosecdef then 'definer' else 'invoker' end || '|' || p.provolatile::text || '|'
+                              || pg_get_userbyid(p.proowner) || '|' || coalesce(p.proconfig[1], 'sin_config'), ';'
+                              order by n.nspname, p.proname), '')
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('public', 'privado') and p.proname like '%intencion%'),
+  'privado.cancelar_intencion_operacion(p_intencion_id uuid)|definer|v|propietario_rpc|search_path="";'
+  || 'privado.crear_intencion_operacion(p_intencion_id uuid, p_tipo text, p_payload jsonb)|definer|v|propietario_rpc|search_path="";'
+  || 'privado.ejecutar_intencion_operacion(p_intencion_id uuid)|definer|v|propietario_rpc|search_path="";'
+  || 'public.cancelar_intencion_operacion(p_intencion_id uuid)|invoker|v|postgres|search_path="";'
+  || 'public.crear_intencion_operacion(p_intencion_id uuid, p_tipo text, p_payload jsonb)|invoker|v|postgres|search_path="";'
+  || 'public.ejecutar_intencion_operacion(p_intencion_id uuid)|invoker|v|postgres|search_path=""',
+  'C1.2a: el inventario de funciones de intenciones son exactamente las seis autorizadas (crear, ejecutar y cancelar; privada y fachada), sin funciones adicionales');
 
 select is(
   (select count(*)::int from pg_trigger t
