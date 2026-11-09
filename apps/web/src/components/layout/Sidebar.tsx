@@ -12,11 +12,18 @@ import {
 
 import { useAuth } from "../../auth/useAuth";
 import { nombreRol } from "../../auth/roles";
+import { useBorradorCarga } from "../../hooks/borradorCargaContexto";
+import {
+  ConfirmarDescarteBorrador,
+  MENSAJE_DESCARTE_CIERRE_SESION,
+} from "../ConfirmarDescarteBorrador";
+import { aceptarSalida, pedirSalida } from "./cierre_sesion";
 import { RUTA_JORNADAS_DEMO } from "../../demo/entorno";
 import { itemsMenuPorRol } from "./menu";
 
 export default function Sidebar() {
   const { usuario, cerrarSesion } = useAuth();
+  const borradorCarga = useBorradorCarga();
 
   const [menuAbierto, setMenuAbierto] = useState(false);
 
@@ -54,10 +61,18 @@ export default function Sidebar() {
 
   const rolVisible = usuario ? nombreRol(usuario.rol) : "Sin sesión";
 
-  function salir() {
+  // FE-1E: con un borrador de carga escrito, cerrar sesión pide confirmar el
+  // descarte; el menú queda abierto para mostrar la pregunta.
+  function cerrarYOcultar() {
     setMenuAbierto(false);
     void cerrarSesion();
   }
+
+  function salir() {
+    pedirSalida(borradorCarga, cerrarYOcultar);
+  }
+
+  const confirmandoSalida = borradorCarga.pendiente?.tipo === "cerrar_sesion";
 
   return (
     <>
@@ -177,6 +192,17 @@ export default function Sidebar() {
 
         {/* CERRAR SESIÓN */}
         <div className="shrink-0 border-t border-slate-700 pt-4">
+          {confirmandoSalida && (
+            <ConfirmarDescarteBorrador
+              id="descarte-carga-cierre-sesion"
+              mensaje={MENSAJE_DESCARTE_CIERRE_SESION}
+              textoCancelar="Seguir con el borrador"
+              textoAceptar="Descartar y cerrar sesión"
+              onCancelar={borradorCarga.cancelarDescarte}
+              onAceptar={() => aceptarSalida(borradorCarga, cerrarYOcultar)}
+            />
+          )}
+
           <button
             type="button"
             onClick={salir}

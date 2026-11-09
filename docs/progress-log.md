@@ -1,4 +1,189 @@
 ---
+## 09/11/2026 — FE-1H: cierre de evidencia precommit de FE-1C/D/E/F (rama `feat/fe1-formulario-carga`; SIN COMMIT; DP-1 y D-IDEM-0 ABIERTOS; CONFIRMACIÓN DE CARGA DESHABILITADA)
+
+**Base.** `HEAD` `740bc96a32a7d7e3fac2654b1d21e60f757f9a54`, rama `feat/fe1-formulario-carga` (verificados). En esta tarea sólo se modificó este archivo. No se tocaron código, tests, dependencias, Supabase, CV-1 ni F1/F2.
+
+**Security review FE-1G.** `/home/tuculandia/Documentos/tiopancho/auditoria-integral-vm/FE1G_SECURITY_REVIEW/FE1G_SECURITY_REVIEW.md`, SHA-256 `fc2795b4c4d6913b3259e87e44705bdf68d35be8063234a4904b94d8a0002943` (verificado). Veredicto: **APTO CON OBSERVACIONES**, sin defectos bloqueantes de seguridad.
+- **H-01 (alta): corregido.** El borrador, la solicitud pendiente y el catálogo quedan atados al contexto `[usuarioId, empresaId, rol]` que deriva de las tablas protegidas. Si el contexto falta, falla cerrado.
+- **H-02 (media): corregido.** Los cuatro «Cancelar» pasan por `pedirCancelacion` y piden confirmación si hay algo escrito.
+
+**Riesgos documentados (no bloqueantes).**
+- **O-1 (baja/media, aceptado):** mientras CV-1 revalida al mismo usuario se conserva el contexto anterior. Una lectura del catálogo iniciada en esa ventana puede mostrar brevemente datos que la RLS autoriza en ese momento, bajo el contexto viejo, hasta que se resuelve. No hay escrituras.
+- **O-2 (baja, H-03):** la solicitud pendiente sobrevive a la navegación interna. Queda inerte y reaparece al volver. Es un problema de UX, no de seguridad.
+- **O-3 (baja, usabilidad):** si la revalidación falla por red (`estado: error`), el contexto pasa a `null` y el borrador se descarta sin preguntar. Falla cerrado, de forma intencional.
+- **O-4 (info):** falta una prueba con el provider montado.
+
+**Sin E2E reales.** No hay DOM de pruebas ni E2E de navegador para FE-1C/D/E/F. El reseteo en render del provider, el `useLayoutEffect` de vigencia y la carrera del diálogo viejo tras un cambio de sesión se cubren sólo con lógica pura y renders estáticos. `npx playwright test` no se ejecutó, por indicación (no se usa infraestructura compartida). La review recomienda RTL/E2E con el provider montado antes del merge.
+
+**Bloqueos vigentes.** DP-1 y D-IDEM-0 siguen **abiertos**. «Confirmar carga» sigue **deshabilitado y sin manejador**, y `registrar_carga` no se habilita.
+
+**Inventario Git** (`git status --porcelain=v1 -uall`): **4 modificados** (`apps/web/src/App.tsx`, `apps/web/src/components/layout/Sidebar.tsx`, `apps/web/src/pages/Jornadas.tsx`, `docs/progress-log.md`) y **16 sin seguimiento**:
+- 9 de código: `components/ConfirmarDescarteBorrador.tsx`, `components/layout/cierre_sesion.ts`, `hooks/BorradorCargaProvider.tsx`, `hooks/borradorCargaContexto.ts`, `hooks/useCatalogoCargaLectura.ts`, `pages/JornadaCargaPanel.tsx`, `pages/carga_borrador.ts`, `pages/carga_edicion.ts` y `pages/jornadas_carga.ts`.
+- 7 de tests: `components/layout/Sidebar.borrador.test.tsx`, `hooks/useCatalogoCargaLectura.test.ts`, `pages/JornadaCargaPanel.test.tsx`, `pages/Jornadas.carga_gate.test.tsx`, `pages/carga_borrador.test.ts`, `pages/carga_edicion.test.ts` y `pages/jornadas_carga.test.ts`.
+
+Todas las rutas están bajo `apps/web/src/`. Lo único ignorado es `apps/web/dist/` y `apps/web/node_modules/`. Nada está en el índice.
+
+**Diferencia 16 contra 14.** La review FE-1G declara «4 modificados + 14 sin seguimiento», pero no enumera esos 14 archivos. El conteo real reproducible es 16, y coincide con la suma de los archivos nuevos de cada etapa: FE-1C 6, FE-1D 6, FE-1E 3 y FE-1F 1.
+- Todos los archivos sin seguimiento tienen un `mtime` anterior a la review: el último es de las 16:13:17 y la review es de las 16:20:44. No apareció ningún archivo después.
+- Ningún directorio queda colapsado en `git status`.
+- No hay archivos fuente ignorados.
+
+Por eso la diferencia no viene del árbol. Lo más probable es un error de conteo o un criterio de enumeración distinto en la review. No se puede determinar qué dos archivos se omitieron, y por eso no queda probado que la review leyera los 16. Se recomienda que la auditoría Codex reciba la lista explícita de los 16. No se borró ni se descartó ningún archivo.
+
+**Verificación** (`apps/web/`; Node v24.20.0, npm 11.19.0):
+
+| Verificación | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 60 archivos, 2075 pruebas |
+| `npm run build` | exit 0; 2056 módulos (persiste la advertencia de chunk > 500 kB) |
+| `git diff --check` (raíz) | exit 0 |
+| `npx playwright test` | **no ejecutado**, por indicación |
+
+**Revisión de seguridad.** Cumplida con FE-1G para las superficies auth, `empresa_id`, roles y RLS de lectura. No sustituye la auditoría independiente del hash ni la aprobación humana.
+
+Sin `git add`, commit, push, merge ni deploy.
+
+---
+## 09/11/2026 — FE-1F: corrección de los bloqueantes H-01 y H-02 de la auditoría Codex FE-1 (rama `feat/fe1-formulario-carga`; SIN COMMIT; DP-1 y D-IDEM-0 ABIERTOS; CONFIRMACIÓN DE CARGA DESHABILITADA)
+
+**Base.** `HEAD` `740bc96a32a7d7e3fac2654b1d21e60f757f9a54`, identidad Git `victor-desarrollador`, sobre el trabajo FE-1C/D/E sin commit (respaldo previo del diff y de los archivos sin seguimiento fuera del repositorio). Fuente: `/tmp/AUDITORIA_CODEX_FE1_PRECOMMIT_2026-11-09.md`, SHA-256 `9a537bc9858c3d8876f3d099501d84bc105788bf9343e2afc5585840bdc747bf` (verificado). H-03 (no bloqueante) queda fuera de este alcance.
+
+**H-01 — borrador y catálogo atados sólo a `usuarioId`.** El dueño del borrador, de la solicitud pendiente y del catálogo leído pasa a ser el **contexto de autorización** `contextoAutorizacionCarga(sesion)` (`pages/carga_borrador.ts`). Ese contexto se deriva sólo de la sesión que ya publica `AuthContext` (perfil y empresa leídos de las tablas protegidas, nunca de user_metadata) y es la clave `[usuarioId, empresaId, rol]`. Falla cerrado: es `null` si la sesión no está `autenticado` (cargando, bloqueada, error, no autenticada), si el perfil o la empresa no están activos, si la empresa no coincide con el perfil o si el rol no es de gestión. No se modificaron `AuthContext`, el contrato de sesión ni CV-1. Efectos:
+- Si cambia el usuario, la empresa o el rol (incluida la revalidación CV-1 del mismo usuario sin desmontar), o si la autorización se pierde, `BorradorCargaProvider` descarta el borrador **y** la solicitud pendiente en el mismo render. Volver al contexto anterior no los recupera.
+- Las escrituras sólo se aplican si el estado más reciente es del mismo contexto. Las acciones de un render anterior (diálogos o callbacks viejos) quedan inertes por la guardia `esVigente`: no escriben y devuelven `false`/`null`, así que no pueden abrir, descartar ni cerrar sesión sobre el contexto nuevo.
+- Sin contexto, `iniciar` devuelve `false`: no se abre ningún borrador.
+- `useCatalogoCargaLectura(contexto)` reemplaza `useCatalogoCargaLectura(activo)`. El catálogo queda etiquetado con su contexto y, si el contexto cambia, se borra en el mismo render y se relee. Un lector por generaciones (`crearLectorCatalogo`) descarta las respuestas tardías. Si la lectura falla o el puerto rechaza, el catálogo es `null`.
+
+**H-02 — «Cancelar» descartaba en silencio.** Se agregó la solicitud `cancelar_carga` al mismo mecanismo FE-1E (`solicitarDescarte`/`aceptarDescarte`/`cancelarDescarte`, `ConfirmarDescarteBorrador`) y la acción `pedirCancelacion`. Todos los «Cancelar» del panel (catálogo cargando, error de catálogo, edición y resumen) la usan:
+- Sin nada escrito, cierra directo.
+- Con algo escrito, muestra «Conservar el borrador» (no cambia ni las líneas ni la jornada) y «Descartar el borrador» (borra y cierra la edición).
+- Si el contexto cambia con el diálogo abierto, la solicitud se descarta y sus callbacks quedan inertes.
+
+**Archivos.** Modificados (sobre FE-1E):
+- `apps/web/src/pages/carga_borrador.ts`: `contextoAutorizacionCarga`, campo `contexto` (antes `usuarioId`), `borradorDeContexto`/`estadoDeContexto`, `cancelar_carga`, `pedirCancelacion` y la guardia `esVigente`.
+- `hooks/BorradorCargaProvider.tsx`, `hooks/useCatalogoCargaLectura.ts` y `pages/Jornadas.tsx`.
+- `components/ConfirmarDescarteBorrador.tsx` (`MENSAJE_DESCARTE_CANCELAR`).
+- Tests: `pages/carga_borrador.test.ts`, `pages/Jornadas.carga_gate.test.tsx` y `components/layout/Sidebar.borrador.test.tsx` (en los fixtures, la empresa ahora tiene `activo: true`, como exige `parsearEmpresa`).
+
+Nuevo: `hooks/useCatalogoCargaLectura.test.ts`. Sin dependencias nuevas. Sin cambios en Supabase, RPC, RLS, migraciones, esquemas, CV-1, F1/F2, `AuthContext`, `sesion.ts`, `lib/jornadas.ts` ni `jornadas_carga.ts`.
+
+**Pruebas.** +51 ejecuciones Vitest (2024 → 2075):
+- Contexto: mismo usuario con otra empresa; permisos reducidos (dueño → vendedor/piloto) y dueño → encargado; usuario desactivado y reactivado; autorización `cargando`/`error`/bloqueada; empresa inactiva o que no coincide.
+- Confirmaciones: la solicitud pendiente se cancela al cambiar empresa, rol, usuario o autorización. Un callback antiguo no altera el estado del contexto nuevo ni habilita a continuar.
+- Catálogo: no se muestra el de otro contexto ni durante un render; se descarta la respuesta tardía; error o rechazo dan `null`.
+- «Cancelar»: sin borrador, con borrador en edición, en resumen, con catálogo cargando y con error de catálogo; conservar y descartar.
+- Seguridad de la carga: «Confirmar carga» sigue deshabilitado, cero `.rpc(`/DML, y sin almacenamiento del navegador ni `registrar_carga` en los archivos tocados.
+
+Mutaciones (cada una restaurada y verificada con `cmp`):
+- Clave sólo por `usuarioId`: fallan 8 pruebas.
+- «Cancelar» → `descartar`: fallan 7.
+- Sin guardia de vigencia: falla 1.
+- Catálogo sin comparar el contexto: falla 1.
+
+**Límite de las pruebas.** El proyecto no tiene DOM de pruebas, así que el reseteo en render del provider y del hook se cubre con la lógica pura que usan (simulada como el provider) y con renders estáticos por contexto. **No son E2E.**
+
+**Verificación** (`apps/web/`):
+
+| Verificación | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 60 archivos, 2075 pruebas |
+| `npm run build` | exit 0; 2056 módulos (persiste la advertencia de chunk > 500 kB) |
+| `git diff --check` | exit 0 |
+| `npx playwright test` | **no ejecutado**, por indicación (no se usa el stack compartido) |
+
+**Revisión de seguridad.** Corresponde, porque toca el aislamiento por `empresa_id`, roles y auth en el cliente. Está pendiente y es previa a la auditoría independiente.
+
+**Riesgos residuales.**
+1. H-03 sigue abierto: el aviso no es modal, y una solicitud pendiente (incluida `cancelar_carga`) sobrevive a la navegación interna y reaparece al volver.
+2. Mientras CV-1 revalida al mismo usuario se sigue mostrando el contexto anterior hasta que llega el resultado; es el contrato CV-1, y la RLS protege toda lectura nueva.
+3. Pasar de dueño a encargado (o al revés) también descarta el borrador.
+4. No hay E2E de navegador.
+5. DP-1 y D-IDEM-0 siguen abiertos: `registrar_carga` no se habilita.
+
+Sin commit, push, merge ni deploy.
+
+---
+## 09/11/2026 — FE-1E: protección del borrador de carga ante cerrar sesión y cambiar de jornada (rama `feat/fe1-formulario-carga`; SIN COMMIT; DP-1 y D-IDEM-0 ABIERTOS; CONFIRMACIÓN DE CARGA DESHABILITADA)
+
+**Base.** `HEAD` `740bc96a32a7d7e3fac2654b1d21e60f757f9a54`, sobre el trabajo FE-1D sin commit (preservado; respaldo previo del diff y de los archivos sin seguimiento fuera del repositorio).
+
+**Problemas corregidos.** (1) Cerrar sesión desde el menú descartaba sin aviso un borrador escrito. (2) Abrir «Cargar mercadería» en otra jornada descartaba sin aviso el borrador escrito de la anterior (riesgos 1 y 3 de FE-1D).
+
+**Flujo inspeccionado.** El único cierre de sesión voluntario con un borrador posible es el botón del menú (`Sidebar.salir` → `useAuth().cerrarSesion`). El de `PantallaAccesoBloqueado` ocurre sin usuario autorizado, cuando el borrador ya se descartó. El «cambio de jornada» que perdía datos era `iniciarBorrador` desde el panel. Seleccionar otra jornada o navegar no lo pierde, porque el borrador se conserva por `jornadaId` sobre el router. `cerrarSesion` se puede postergar sin tocar su contrato: no se modificaron `AuthContext`, el router ni la seguridad.
+
+**Comportamiento.** Si hay algo escrito (`borradorSinGuardar`), abrir otra jornada o cerrar sesión queda **pendiente** y se muestra una pregunta en línea (`ConfirmarDescarteBorrador`, `role="alertdialog"`). Las opciones son «Conservar el borrador»/«Seguir con el borrador» (cancelar; no cambia nada) y «Descartar y cargar esta jornada»/«Descartar y cerrar sesión» (descarta y continúa). Sin nada escrito, o al reabrir la misma jornada, todo procede como antes. El cambio real de identidad (A→B, A→null por vencimiento, otra pestaña o bloqueo) sigue descartando el borrador en el mismo render, **sin preguntar, sin poder cancelarse** y sin conservar la solicitud pendiente. `beforeunload` se mantiene como protección limitada, sin recuperación.
+
+**Archivos.** Modificados (sobre FE-1D): `apps/web/src/pages/carga_borrador.ts` (lógica pura: `SolicitudDescarte`, `EstadoBorrador`, `requiereConfirmarDescarte`, `solicitarDescarte`, `aceptarDescarte`, `cancelarDescarte`, `estadoDeUsuario`, `crearAccionesBorrador`), `hooks/BorradorCargaProvider.tsx`, `hooks/borradorCargaContexto.ts` (`pendiente`, `pedirCierreSesion`, `aceptarDescarte`, `cancelarDescarte`; `iniciar` devuelve si procedió), `pages/Jornadas.tsx`, `components/layout/Sidebar.tsx`, `pages/carga_borrador.test.ts` y `pages/Jornadas.carga_gate.test.tsx`. Nuevos: `components/ConfirmarDescarteBorrador.tsx`, `components/layout/cierre_sesion.ts` y `components/layout/Sidebar.borrador.test.tsx`. Sin dependencias nuevas; sin cambios en Supabase, RPC, RLS, migraciones, CV-1 ni F1/F2.
+
+**Pruebas.** Se agregaron 28 pruebas: cambiar de jornada con un borrador y cancelar o confirmar; cerrar sesión con un borrador y cancelar o confirmar; ausencia de un borrador; reapertura de la misma jornada; cambio de identidad A→B y A→null con una solicitud pendiente; ninguna acción tardía de A revive el borrador; «Confirmar carga» sigue sin manejador; cero `.rpc(` e insert/update/upsert/delete; y ausencia de localStorage, sessionStorage, IndexedDB y `registrar_carga` en los archivos tocados. Como el proyecto no tiene un DOM de pruebas, el clic de «Cerrar sesión» se cubre con `pedirSalida`/`aceptarSalida` y con una aserción de la fuente de `salir`. Los manejadores del aviso se disparan desde las props capturadas. Prueba de mutación: cuando `requiereConfirmarDescarte` devuelve siempre `false`, fallan 12 pruebas; luego se restauró el archivo y se verificó con `cmp`.
+
+**Verificación** (`apps/web/`):
+
+| Verificación | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 59 archivos, 2024 pruebas |
+| `npm run build` | exit 0; 2056 módulos (persiste la advertencia de chunk > 500 kB) |
+| `git diff --check` | exit 0 |
+| `npx playwright test` | **no ejecutado**, por indicación: no se usa un servidor ni un stack compartido |
+
+**Riesgos residuales.** (1) Recargar o cerrar la pestaña sigue perdiendo el borrador; `beforeunload` depende del navegador. (2) Vencer la sesión, cerrarla en otra pestaña o perder el acceso lo descartan sin aviso, por diseño de seguridad. (3) El botón «Cancelar» del formulario descarta sin preguntar; está fuera de este alcance. (4) El aviso no es modal: mientras está pendiente se puede seguir navegando, y queda visible al volver. (5) Sin E2E de navegador para FE-1D/FE-1E. (6) DP-1 sigue abierto: `registrar_carga` no se habilita. Sin commit, push, merge ni deploy.
+
+---
+## 09/11/2026 — FE-1D: montaje seguro del formulario de carga en modo borrador (rama `feat/fe1-formulario-carga`; SIN COMMIT; DP-1 y D-IDEM-0 ABIERTOS; CONFIRMACIÓN DESHABILITADA)
+
+**Base.** `HEAD` `740bc96a32a7d7e3fac2654b1d21e60f757f9a54`, identidad Git `victor-desarrollador`. Se partió de los seis archivos FE-1C sin seguimiento y de este `progress-log.md` modificado.
+
+**Archivos modificados.** `apps/web/src/App.tsx` (envuelve `BrowserRouter` con `BorradorCargaProvider`, dentro de `AuthProvider`; sin cambiar rutas ni el contrato de sesión), `apps/web/src/pages/Jornadas.tsx` (monta `JornadaCargaPanel` en el detalle, sólo para gestión), `apps/web/src/pages/JornadaCargaPanel.tsx` (`onConfirmar`/`onReintentar`/`onVerificar` opcionales; catálogo `"cargando"`; aviso explícito), `JornadaCargaPanel.test.tsx` y `jornadas_carga.test.ts` (las aserciones de «no montado» pasan a «montado sin controlador»). **Nuevos:** `pages/carga_borrador.ts` (+ test), `hooks/borradorCargaContexto.ts`, `hooks/BorradorCargaProvider.tsx`, `hooks/useCatalogoCargaLectura.ts`, `pages/Jornadas.carga_gate.test.tsx`.
+
+**Funcionalidad visual disponible (dueño y encargado).** En el detalle de una jornada `abierta` o `cargada`: «Cargar mercadería» abre el formulario; el catálogo se lee (y se relee al abrir) con un puerto reducido a `listar` (SELECT sobre `productos`, RLS existente); sólo se ofrecen productos activos y no repetidos; unidades enteras y fiambres en kg con hasta 3 decimales convertidos exactamente a gramos (ADR-005, `cantidadDesdeTexto`); «Revisar carga» muestra el resumen. «Confirmar carga» está **deshabilitado y sin manejador**, con el texto «La confirmación de carga está temporalmente deshabilitada…». El vendedor/piloto no ve el panel ni lee el catálogo.
+
+**Borrador.** Vive en memoria en `BorradorCargaProvider`, por encima del router: navegar entre secciones no lo pierde. Se descarta al cambiar el usuario autenticado o cerrar sesión, en el mismo render (A → null → A tampoco lo recupera). Mientras haya algo escrito se instala `beforeunload` (`useAvisoSalidaPagina`); el navegador puede no mostrar el aviso, por lo que no es una protección completa. Abrir otra jornada empieza un borrador vacío (uno por vez). Si la jornada deja de ser cargable, el formulario no se muestra. No se usa localStorage, sessionStorage ni IndexedDB, y no se generan claves de idempotencia.
+
+**Escrituras deshabilitadas (evidencia).** El controlador `crearControladorCarga` no se construye. Tampoco se construye ni se recibe ningún puerto de ejecución. `Jornadas.carga_gate.test.tsx` renderiza la pantalla `Jornadas` real con un cliente Supabase simulado y espías en `obtenerPuertoJornadas`, `crearPuertoJornadas`, `crearControladorCarga` y `definicionCarga`. Además captura las props del panel y dispara todos sus manejadores. Verifica: cero `.rpc(`, cero insert/update/upsert/delete y ninguna fábrica invocada; props exactamente de preparación (sin `onConfirmar`); botón deshabilitado; navegación (re-render con el borrador retenido) sin habilitar la escritura; y que el catálogo sólo hace `from("productos").select`. Prueba de mutación: al conectar temporalmente `onConfirmar` en `Jornadas.tsx`, fallan 3 pruebas de la compuerta; luego se restauró el archivo.
+
+**Verificación** (`apps/web/`):
+
+| Verificación | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 58 archivos, 1996 pruebas |
+| `npm run build` | exit 0; 2054 módulos (persiste la advertencia de chunk > 500 kB) |
+| `npx playwright test` | **no ejecutado**: necesita el Supabase local, único por máquina y compartido entre worktrees, y fuera de CI la configuración reutiliza el servidor de `127.0.0.1:4173` (`reuseExistingServer`). No se puede garantizar el aislamiento |
+
+**Bloqueo DP-1 (abierto).** No se habilita `registrar_carga`. Para la carga real faltan: decisión aprobada sobre DP-1 y E5/E6, recuperación durable de la intención (ADR-010 / D-IDEM-0, sin implementar), montar el controlador con el árbitro de la pantalla, E2E aislados y revisión de seguridad (superficie `movimientos_stock`/idempotencia).
+
+**Riesgos restantes.** (1) El borrador se pierde al recargar, cerrar la pestaña o cerrar sesión, y cerrar sesión no muestra ningún aviso. (2) `beforeunload` depende del navegador. (3) Abrir otra jornada descarta el borrador anterior sin preguntar. (4) Sin E2E de navegador para FE-1D. (5) Que la vista sea `"cargando"` hasta la primera lectura del catálogo es una decisión de presentación. Sin commit, push, merge ni deploy.
+
+---
+## 09/11/2026 — FE-1C: integración aislada del controlador y formulario de carga (rama `feat/fe1-formulario-carga`; SIN COMMIT; DP-1 y D-IDEM-0 ABIERTOS)
+
+**Base y aislamiento.** Rama y worktree nuevos creados desde `740bc96a32a7d7e3fac2654b1d21e60f757f9a54` (`feat/cv1-convergencia-jornadas`) en `/home/tuculandia/Documentos/tiopancho/distribuidora-fe1-formulario-carga`. Los parches externos se verificaron antes de aplicar: `fe1-controlador-carga.patch` SHA-256 `c3fec9f7a430f952a576af0f1a700c8908c9aea05970716e5032c317f6802636` y `fe1b-formulario-carga.patch` SHA-256 `98059ea8c97e984290dbca4e01f2a6aaabf2c4762f751d6dc4edcb6b7c6391db`. Ambos aplicaron limpiamente y en ese orden. CV-1, Stock y el worktree F1/F2 no se modificaron.
+
+**Archivos incorporados.** Se agregaron únicamente `apps/web/src/pages/jornadas_carga.ts` y su test (controlador FE-1), `carga_edicion.ts` y su test (estado puro del formulario), y `JornadaCargaPanel.tsx` y su test (panel presentacional FE-1B). No se modificaron `Jornadas.tsx`, `App.tsx`, módulos existentes de Stock, RPC, migraciones, RLS, grants ni seguridad.
+
+**Límites funcionales.** El panel no está montado en ninguna pantalla y no llama RPC, no genera claves y no usa almacenamiento del navegador. La entrada de productos `peso` se mantiene en kg con hasta tres decimales y el controlador usa la conversión exacta existente a gramos enteros (ADR-005), sin punto flotante. No se habilitó ninguna llamada real a `registrar_carga` desde la interfaz.
+
+**Verificación local en el worktree nuevo** (`apps/web/`, dependencias exactas instaladas con `npm ci`):
+
+| Verificación | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 56 archivos, 1938 pruebas |
+| `npm run build` | exit 0; Vite 8.3.4, 2047 módulos |
+
+La revisión estática del panel confirmó etiquetas asociadas, estados/alertas accesibles, controles con tipo explícito y ausencia de montaje o efectos laterales. No se ejecutó Playwright porque no cambió ninguna ruta ni comportamiento navegable. `npm ci` informó 13 vulnerabilidades del árbol existente (12 moderadas y 1 alta); no se cambiaron dependencias ni lockfile. El build conserva la advertencia de chunk mayor a 500 kB.
+
+**Bloqueos y pendientes.** DP-1 sigue abierto: la clave de la intención de carga sólo vive en memoria y puede perderse al recargar, navegar, cambiar sesión o usar otra pestaña; por eso no se puede conectar la carga real. Sigue pendiente decidir E5/E6, alojar el estado/controlador en el nivel aprobado, montar el panel en `Jornadas.tsx`, conectar el catálogo y recién después habilitar la ruta real con pruebas E2E y revisión de seguridad. D-IDEM-0 no se cierra ni se modifica. Sin commit, push, merge, deploy, staging ni producción.
+
+---
 ## 09/11/2026 — CV-1G: renumeración local de E-PL1 a `20261111120200` y validación integrada (rama `feat/cv1-convergencia-jornadas`; merge SIN COMMIT; DP-1 y D-IDEM-0 ABIERTOS)
 
 **Estado Git.** HEAD `6a7ceae25da0d0b060aa70bae39569d6afb07ca8`, `MERGE_HEAD` `0aa2f032c555522d63da484a65d2ec11a4bcdc2e`, merge abierto, 0 conflictos, sin commit. Árbol de `apps/web` en el índice: `9d12746acb6dbfc53bc43e8552484ecbc1671123` (sin cambios).

@@ -2,8 +2,15 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "../auth/useAuth";
 import { ROLES_GESTION } from "../auth/roles";
+import {
+  ConfirmarDescarteBorrador,
+  MENSAJE_DESCARTE_CAMBIO_JORNADA,
+  MENSAJE_DESCARTE_CANCELAR,
+} from "../components/ConfirmarDescarteBorrador";
 import { useAperturaJornada } from "../hooks/useAperturaJornada";
 import { useAvisoSalidaPagina } from "../hooks/useAvisoSalidaPagina";
+import { useBorradorCarga } from "../hooks/borradorCargaContexto";
+import { useCatalogoCargaLectura } from "../hooks/useCatalogoCargaLectura";
 import { useCatalogoCamiones } from "../hooks/useCatalogoCamiones";
 import { useJornadasLectura } from "../hooks/useJornadasLectura";
 import { useCorreccionJornada } from "../hooks/useCorreccionJornada";
@@ -12,12 +19,14 @@ import { useSalidaJornada } from "../hooks/useSalidaJornada";
 import { useVendedoresJornada } from "../hooks/useVendedoresJornada";
 import { AvisoSalidaJornada } from "./AvisoSalidaJornada";
 import { JornadaAperturaPanel } from "./JornadaAperturaPanel";
+import { JornadaCargaPanel } from "./JornadaCargaPanel";
 import { JornadaContinuidadPanel } from "./JornadaContinuidadPanel";
 import { JornadaCorreccionPanel } from "./JornadaCorreccionPanel";
 import { JornadaHistorialPanel } from "./JornadaHistorialPanel";
 import { JornadaSalidaPanel } from "./JornadaSalidaPanel";
 import { JornadasVista } from "./JornadasVista";
 import { faseConRiesgoApertura } from "./jornadas_apertura";
+import { contextoAutorizacionCarga, faseBorradorPara } from "./carga_borrador";
 import { fechaOperativaHoy } from "./jornadas_correccion";
 import { crearArbitroJornadas, jornadaRetenida } from "./jornadas_operacion";
 import { idCorto } from "./jornadas_presentacion";
@@ -49,6 +58,16 @@ import { idCorto } from "./jornadas_presentacion";
 // pide al navegador confirmar la salida (puede no mostrarlo). T-2: ante
 // `jornada_duplicada` o `jornada_vendedor_ocupado`, el panel orienta a revisar
 // las jornadas de la fecha; esa lectura nunca confirma la apertura.
+// FE-1D: dueño y encargado preparan y revisan un BORRADOR de carga
+// (JornadaCargaPanel). Sólo lectura del catálogo de productos; el borrador vive
+// en BorradorCargaProvider (sobre el router). La confirmación está
+// deshabilitada: la pantalla no recibe ni construye el controlador de carga ni
+// su puerto de ejecución (DP-1 abierto).
+// FE-1E: si hay un borrador escrito de otra jornada, abrir la carga de esta
+// pide confirmar el descarte (ConfirmarDescarteBorrador) y se puede cancelar.
+// FE-1F (H-02): «Cancelar» del formulario con algo escrito pide la misma
+// confirmación; sin nada escrito cierra directo. (H-01): el catálogo y el
+// borrador pertenecen al contexto de autorización vigente.
 export default function Jornadas() {
   const jornadas = useJornadasLectura();
   // Un árbitro por montaje de la pantalla, compartido por ambas operaciones.
@@ -71,7 +90,7 @@ export default function Jornadas() {
     }
   }, [lectura, trasRelectura, trasRelecturaApertura]);
   const { catalogo } = useCatalogoCamiones();
-  const { usuario } = useAuth();
+  const { usuario, sesion } = useAuth();
   // Sólo presentación: el acceso lo decide ProtectedRoute; las filas, RLS; y
   // quién puede confirmar la salida, el servidor.
   const puedeAdministrar =
@@ -81,6 +100,12 @@ export default function Jornadas() {
   const historial = useHistorialJornada(
     puedeAdministrar ? jornadas.estado.seleccionadaId : null
   );
+  const borradorCarga = useBorradorCarga();
+  // FE-1F (H-01): sólo gestión con autorización verificada lee el catálogo, y
+  // lo leído queda atado a ese contexto (usuario + empresa + rol): si cambia,
+  // el catálogo anterior se borra y se relee.
+  const catalogoCarga = useCatalogoCargaLectura(contextoAutorizacionCarga(sesion));
+  const pendienteCarga = borradorCarga.pendiente;
 
   // Nombre del camión del catálogo real; si el catálogo no se pudo leer o el
   // camión no figura, se muestra un identificador corto (nunca un dato inventado).
@@ -134,6 +159,62 @@ export default function Jornadas() {
                   onReintentar={correccion.reintentar}
                   onVerificar={correccion.verificarEstado}
                 />
+                {/* FE-1E: abrir la carga de esta jornada descartaría el
+                    borrador escrito de otra: se pregunta antes. */}
+                {pendienteCarga?.tipo === "cambiar_jornada" &&
+                pendienteCarga.jornadaId === jornada.id ? (
+                  <ConfirmarDescarteBorrador
+                    id={`descarte-carga-${jornada.id}`}
+                    mensaje={MENSAJE_DESCARTE_CAMBIO_JORNADA}
+                    textoCancelar="Conservar el borrador"
+                    textoAceptar="Descartar y cargar esta jornada"
+                    onCancelar={borradorCarga.cancelarDescarte}
+                    onAceptar={() => {
+                      if (borradorCarga.aceptarDescarte()?.tipo === "cambiar_jornada") {
+                        catalogoCarga.recargar();
+                      }
+                    }}
+                  />
+                ) : pendienteCarga?.tipo === "cancelar_carga" &&
+                  borradorCarga.borrador.jornadaId === jornada.id ? (
+                  /* FE-1F (H-02): «Cancelar» con algo escrito. */
+                  <ConfirmarDescarteBorrador
+                    id={`cancelar-carga-${jornada.id}`}
+                    mensaje={MENSAJE_DESCARTE_CANCELAR}
+                    textoCancelar="Conservar el borrador"
+                    textoAceptar="Descartar el borrador"
+                    onCancelar={borradorCarga.cancelarDescarte}
+                    onAceptar={() => {
+                      borradorCarga.aceptarDescarte();
+                    }}
+                  />
+                ) : (
+                /* Sin onConfirmar: «Confirmar carga» deshabilitado (DP-1). */
+                <JornadaCargaPanel
+                  jornada={jornada}
+                  fase={faseBorradorPara(borradorCarga.borrador, jornada)}
+                  bloqueadaPorOtra={
+                    jornadaRetenida(salida.fase) === jornada.id ||
+                    jornadaRetenida(correccion.fase) === jornada.id
+                  }
+                  catalogo={catalogoCarga.catalogo}
+                  nombreCamion={nombreCamion}
+                  edicion={borradorCarga.borrador.edicion}
+                  onEdicion={borradorCarga.editar}
+                  onSolicitar={(j) => {
+                    // Con un borrador escrito de otra jornada queda pendiente
+                    // de confirmar y todavía no se abre ni se relee nada.
+                    if (borradorCarga.iniciar(j.id)) {
+                      // El catálogo se relee al abrir el formulario: es el vigente ahora.
+                      catalogoCarga.recargar();
+                    }
+                  }}
+                  // Con algo escrito queda pendiente de confirmar (H-02).
+                  onCancelar={() => {
+                    borradorCarga.pedirCancelacion();
+                  }}
+                />
+                )}
                 <JornadaContinuidadPanel
                   jornada={jornada}
                   historial={historial.estado}

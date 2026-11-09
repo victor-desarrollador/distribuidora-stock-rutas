@@ -12,6 +12,7 @@ import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 import { AuthProvider } from "./AuthContext";
+import { BorradorCargaProvider } from "./hooks/BorradorCargaProvider";
 import { useAuth } from "./auth/useAuth";
 import {
   ROLES_GESTION,
@@ -208,20 +209,24 @@ function RutasPrivadas() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/configuracion-demo"
-            element={
-              <ProtectedRoute roles={ROLES_SOLO_DUENO}>
-                <ConfiguracionDemo />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/*" element={<RutasPrivadas />} />
-        </Routes>
-      </BrowserRouter>
+      {/* FE-1D: borrador de carga sobre el router (sobrevive a la navegación
+          interna; se descarta al cambiar de usuario). No registra cargas. */}
+      <BorradorCargaProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route
+              path="/configuracion-demo"
+              element={
+                <ProtectedRoute roles={ROLES_SOLO_DUENO}>
+                  <ConfiguracionDemo />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/*" element={<RutasPrivadas />} />
+          </Routes>
+        </BrowserRouter>
+      </BorradorCargaProvider>
     </AuthProvider>
   );
 }
