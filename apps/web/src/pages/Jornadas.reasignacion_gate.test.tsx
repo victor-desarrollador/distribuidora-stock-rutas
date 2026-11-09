@@ -42,12 +42,29 @@ const s = vi.hoisted(() => {
     };
     return b;
   };
+  // FE-2D: usuario de cada getSession (se consume en orden; vacío → el de siempre).
+  const sesiones: Array<string | null> = [];
+  const cabeceras: Array<{ nombre: string; valor: string }> = [];
   const cliente = {
+    auth: {
+      getSession: vi.fn(async () => {
+        const u = sesiones.length > 0 ? sesiones.shift()! : "11111111-1111-4111-8111-111111111111";
+        return { data: { session: u === null ? null : { user: { id: u }, access_token: `token-${u}` } }, error: null };
+      }),
+    },
     rpc: vi.fn((nombre: string, args: unknown) => {
       llamadas.push(`rpc:${nombre}`);
       argumentos.push({ nombre, args });
       const r = respuestas[nombre];
-      return r ? r() : Promise.resolve({ data: null, error: { code: "PGRST202", message: "no" } });
+      const promesa: Promise<unknown> = r
+        ? r()
+        : Promise.resolve({ data: null, error: { code: "PGRST202", message: "no" } });
+      return Object.assign(promesa, {
+        setHeader: (nombreCabecera: string, valor: string) => {
+          cabeceras.push({ nombre: nombreCabecera, valor });
+          return promesa;
+        },
+      });
     }),
     from: vi.fn((tabla: string) => {
       llamadas.push(`from:${tabla}`);
@@ -58,6 +75,8 @@ const s = vi.hoisted(() => {
     llamadas,
     argumentos,
     respuestas,
+    sesiones,
+    cabeceras,
     cliente,
     capturas: [] as JornadaReasignacionPanelProps[],
     capturasCarga: [] as JornadaCargaPanelProps[],
@@ -193,6 +212,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   s.llamadas.length = 0;
   s.argumentos.length = 0;
+  s.sesiones.length = 0;
+  s.cabeceras.length = 0;
   s.capturas.length = 0;
   s.capturasCarga.length = 0;
   for (const k of Object.keys(s.respuestas)) delete s.respuestas[k];
@@ -291,6 +312,35 @@ describe("FE-2B: reasignación en la pantalla Jornadas", () => {
     // La verificación lee la tabla jornadas (lectura autorizada por RLS), sin escribir.
     expect(s.llamadas).toContain("from:jornadas");
     sinEscriturasDirectas();
+  });
+
+  // FE-2D (H-1) en la pantalla real: el wrapper verdadero con el cliente simulado.
+  it("FE-2D: si la sesión pasa a otro usuario entre intentos, no sale ningún reintento", async () => {
+    const OTRO = "55555555-5555-4555-8555-555555555555";
+    s.respuestas.reasignar_vendedor = () => Promise.reject(new Error("red"));
+    pantalla("dueno");
+    const p = s.capturas[s.capturas.length - 1];
+    p.onSolicitar(p.jornada);
+    await tick();
+    // 1.º intento con el usuario de la pantalla; luego la sesión es de otro.
+    s.sesiones.push(USUARIO, OTRO, OTRO);
+    p.onConfirmar({ vendedorId: NUEVO, permitidos: [NUEVO] });
+    for (let i = 0; i < 10; i++) await tick();
+    expect(s.llamadas.filter((l) => l === "rpc:reasignar_vendedor")).toHaveLength(1);
+    expect(s.cabeceras).toContainEqual({ nombre: "Authorization", valor: `Bearer token-${USUARIO}` });
+    expect(s.cabeceras.some((c) => c.valor.includes(OTRO))).toBe(false);
+    sinEscriturasDirectas();
+  });
+
+  it("FE-2D: si la sesión ya no es la del contexto de la pantalla, no se envía nada", async () => {
+    s.sesiones.push("55555555-5555-4555-8555-555555555555");
+    pantalla("encargado");
+    const p = s.capturas[s.capturas.length - 1];
+    p.onSolicitar(p.jornada);
+    await tick();
+    p.onConfirmar({ vendedorId: NUEVO, permitidos: [NUEVO] });
+    for (let i = 0; i < 5; i++) await tick();
+    expect(s.llamadas).not.toContain("rpc:reasignar_vendedor");
   });
 
   it("FE-1 intacto: el panel de carga sigue sin onConfirmar ni puertos", () => {

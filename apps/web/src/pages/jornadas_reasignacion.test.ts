@@ -7,11 +7,17 @@ import {
   type ComandoJornada,
   type EstadoJornada,
   type Jornada,
+  type OpcionesEjecucion,
   type ResultadoJornada,
 } from "../lib/jornadas";
 import type { BuscarJornada } from "./jornadas_correccion";
 import { crearControladorCorreccion } from "./jornadas_correccion";
-import { crearArbitroJornadas, jornadaRetenida, type ArbitroJornadas } from "./jornadas_operacion";
+import {
+  MENSAJE_PENDIENTE_VERIFICAR,
+  crearArbitroJornadas,
+  jornadaRetenida,
+  type ArbitroJornadas,
+} from "./jornadas_operacion";
 import {
   ESTADOS_REASIGNABLES,
   MENSAJE_MISMO_VENDEDOR,
@@ -76,16 +82,21 @@ const transitorio = (): ResultadoJornada<string> => ({
 });
 
 /** Puerto y búsqueda con respuestas resueltas a mano. */
-function armar(arbitro?: ArbitroJornadas) {
-  const envios: Array<{ comando: ComandoJornada; clave: string; resolver: (r: ResultadoJornada<string>) => void }> = [];
+function armar(arbitro?: ArbitroJornadas, usuarioEsperado?: string) {
+  const envios: Array<{
+    comando: ComandoJornada;
+    clave: string;
+    opciones?: OpcionesEjecucion;
+    resolver: (r: ResultadoJornada<string>) => void;
+  }> = [];
   const busquedas: Array<{ id: string; fechas: string[]; resolver: (j: Jornada | null | undefined) => void }> = [];
   const publicadas: FaseReasignacion[] = [];
   const releer = vi.fn();
   let n = 0;
   const claves = () => `aaaaaaaa-0000-4000-8000-${(++n).toString(16).padStart(12, "0")}`;
   const puerto = {
-    ejecutar(comando: ComandoJornada, clave: string) {
-      return new Promise<ResultadoJornada<string>>((resolver) => envios.push({ comando, clave, resolver }));
+    ejecutar(comando: ComandoJornada, clave: string, opciones?: OpcionesEjecucion) {
+      return new Promise<ResultadoJornada<string>>((resolver) => envios.push({ comando, clave, opciones, resolver }));
     },
   };
   const buscar: BuscarJornada = (id, fechas) =>
@@ -93,6 +104,7 @@ function armar(arbitro?: ArbitroJornadas) {
   const c = crearControladorReasignacion(puerto, buscar, releer, (f) => publicadas.push(f), {
     generarClave: claves,
     arbitro,
+    usuarioEsperado,
   });
   return { c, envios, busquedas, publicadas, releer, ultima: () => c.obtener() };
 }
@@ -485,6 +497,133 @@ describe("reasignación: participación revocable (cambio de sesión)", () => {
     await p;
     expect(m.publicadas).toHaveLength(publicadasAntes);
     expect(m.releer).not.toHaveBeenCalled();
+  });
+});
+
+// FE-2D (H-2): una respuesta tardía con el controlador detenido se resuelve en
+// el estado interno (sin publicar, verificar ni releer) y `iniciar` la publica.
+describe("FE-2D H-2: detener → respuesta tardía → iniciar", () => {
+  const USUARIO = "66666666-6666-4666-8666-666666666666";
+  const otro = Symbol("otra operación");
+
+  it("O1: éxito del servidor mientras está detenido → no queda «enviando»; al reanudar publica y relee UNA vez", async () => {
+    const m = armar();
+    const { p } = await enviar(m);
+    m.c.detener();
+    m.envios[0].resolver(exito());
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "exito", mensaje: MENSAJE_REASIGNACION_OK });
+    expect(m.publicadas.at(-1)?.fase).toBe("enviando");
+    expect(m.releer).not.toHaveBeenCalled();
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)).toMatchObject({ fase: "exito" });
+    expect(m.releer).toHaveBeenCalledTimes(1);
+    // Otra reanudación sin cambios no republica ni relee.
+    const n = m.publicadas.length;
+    m.c.detener();
+    m.c.iniciar();
+    expect(m.publicadas).toHaveLength(n);
+    expect(m.releer).toHaveBeenCalledTimes(1);
+  });
+
+  it("O2: sin respuesta mientras está detenido → desconocido sin verificar; al reanudar se verifica y reintenta con la MISMA clave", async () => {
+    const m = armar();
+    const { p } = await enviar(m);
+    m.c.detener();
+    m.envios[0].resolver(sinRespuesta());
+    await p;
+    expect(m.busquedas).toHaveLength(0);
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_PENDIENTE_VERIFICAR, reintentable: false });
+    expect(m.c.claveEnCurso()).toBe(m.envios[0].clave);
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)).toMatchObject({ fase: "desconocido", reintentable: false });
+    expect(m.releer).not.toHaveBeenCalled();
+    // Sin verificar no se reintenta.
+    await m.c.reintentar();
+    expect(m.envios).toHaveLength(1);
+    const v = m.c.verificarEstado();
+    await tick();
+    m.busquedas[0].resolver(jornada(1));
+    await v;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: true });
+    const r = m.c.reintentar();
+    await tick();
+    expect(m.envios).toHaveLength(2);
+    expect(m.envios[1].clave).toBe(m.envios[0].clave);
+    m.envios[1].resolver(exito());
+    await r;
+    expect(m.ultima().fase).toBe("exito");
+  });
+
+  it("O2b: 40001 agotado mientras está detenido → también queda desconocido (no se afirma fracaso)", async () => {
+    const m = armar();
+    const { p } = await enviar(m);
+    m.c.detener();
+    m.envios[0].resolver(transitorio());
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: false });
+    expect(m.busquedas).toHaveLength(0);
+  });
+
+  it("O3: rechazo definitivo mientras está detenido → error, intención descartada, sin releer", async () => {
+    const m = armar();
+    const { p } = await enviar(m);
+    m.c.detener();
+    m.envios[0].resolver(rechazo("jornada_estado_invalido"));
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "error" });
+    expect(m.c.claveEnCurso()).toBeNull();
+    expect(m.releer).not.toHaveBeenCalled();
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)).toMatchObject({ fase: "error" });
+  });
+
+  it("O4: detenido durante la verificación → no usa la lectura (ni «registrada» ni «sin efecto»); queda pendiente de verificar", async () => {
+    const m = armar();
+    const { p } = await perderRespuesta(m);
+    m.c.detener();
+    m.busquedas[0].resolver(jornada(1, "abierta", { vendedorId: NUEVO }));
+    await p;
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", mensaje: MENSAJE_PENDIENTE_VERIFICAR, reintentable: false });
+    expect(m.releer).not.toHaveBeenCalled();
+  });
+
+  it("O5: iniciar sin cambios no publica nada", () => {
+    const m = armar();
+    m.c.iniciar();
+    m.c.detener();
+    m.c.iniciar();
+    expect(m.publicadas).toHaveLength(0);
+  });
+
+  it("O6: árbitro — el desconocido sigue reteniendo; éxito y error liberan", async () => {
+    const a1 = crearArbitroJornadas();
+    const m1 = armar(a1);
+    const e1 = await enviar(m1);
+    m1.c.detener();
+    m1.envios[0].resolver(sinRespuesta());
+    await e1.p;
+    expect(a1.retenidaPorOtra(otro, jornada(1).id)).toBe(true);
+
+    const a2 = crearArbitroJornadas();
+    const m2 = armar(a2);
+    const e2 = await enviar(m2);
+    m2.c.detener();
+    m2.envios[0].resolver(exito());
+    await e2.p;
+    expect(a2.retenidaPorOtra(otro, jornada(1).id)).toBe(false);
+  });
+
+  it("O7: el envío pasa `continuar` (sigue a iniciar/detener) y el usuario esperado", async () => {
+    const m = armar(undefined, USUARIO);
+    await enviar(m);
+    const o = m.envios[0].opciones!;
+    expect(o.usuarioEsperado).toBe(USUARIO);
+    expect(o.continuar!()).toBe(true);
+    m.c.detener();
+    expect(o.continuar!()).toBe(false);
+    m.c.iniciar();
+    expect(o.continuar!()).toBe(true);
   });
 });
 

@@ -188,7 +188,12 @@ export function crearControladorReasignacion(
   buscar: BuscarJornada,
   alCambiarJornada: () => void,
   publicar: (fase: FaseReasignacion) => void,
-  opciones: { generarClave?: () => string; arbitro?: ArbitroJornadas } = {}
+  opciones: {
+    generarClave?: () => string;
+    arbitro?: ArbitroJornadas;
+    // FE-2D (H-1): usuario del contexto; ningún intento sale con otra sesión.
+    usuarioEsperado?: string;
+  } = {}
 ) {
   return crearControladorOperacion(
     definicionReasignacion(buscar),
@@ -196,7 +201,8 @@ export function crearControladorReasignacion(
     alCambiarJornada,
     publicar,
     opciones.generarClave,
-    opciones.arbitro
+    opciones.arbitro,
+    opciones.usuarioEsperado
   );
 }
 

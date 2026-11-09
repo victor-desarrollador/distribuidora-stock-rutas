@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { obtenerPuertoJornadas, type Jornada, type PuertoJornadas } from "../lib/jornadas";
+import { esUuid, obtenerPuertoJornadas, type Jornada, type PuertoJornadas } from "../lib/jornadas";
 import {
   obtenerPuertoVendedoresJornada,
   type PuertoVendedoresJornada,
@@ -63,11 +63,13 @@ export function crearSesionReasignacion(
   arbitro: ArbitroJornadas,
   publicarFase: (fase: FaseReasignacion) => void,
   publicarVendedores: (estado: EstadoVendedores) => void,
-  deps: DependenciasReasignacion = DEPENDENCIAS_REALES
+  deps: DependenciasReasignacion = DEPENDENCIAS_REALES,
+  // FE-2D (H-1): usuario del contexto dueño de esta sesión.
+  usuarioId?: string
 ) {
   const participacion = arbitroRevocable(arbitro);
   const jornadas: Pick<PuertoJornadas, "ejecutar" | "leerTodasLasJornadas"> = {
-    ejecutar: (comando, clave) => deps.puertoJornadas().ejecutar(comando, clave),
+    ejecutar: (comando, clave, opciones) => deps.puertoJornadas().ejecutar(comando, clave, opciones),
     leerTodasLasJornadas: (filtro) => deps.puertoJornadas().leerTodasLasJornadas(filtro),
   };
   const controlador = crearControladorReasignacion(
@@ -75,7 +77,7 @@ export function crearSesionReasignacion(
     buscarEnFecha(jornadas),
     releer,
     publicarFase,
-    { arbitro: participacion.arbitro, generarClave: deps.generarClave }
+    { arbitro: participacion.arbitro, generarClave: deps.generarClave, usuarioEsperado: usuarioId }
   );
   const vendedores = crearControladorVendedores(
     { listarVendedores: () => deps.puertoVendedores().listarVendedores() },
@@ -109,6 +111,19 @@ export type SesionReasignacion = ReturnType<typeof crearSesionReasignacion>;
 const nada = () => undefined;
 
 /**
+ * Usuario del contexto de autorización (`contextoAutorizacionCarga`:
+ * `[usuarioId, empresaId, rol]`). null si no tiene esa forma: sin sesión.
+ */
+export function usuarioDeContexto(ctx: string): string | null {
+  try {
+    const v: unknown = JSON.parse(ctx);
+    return Array.isArray(v) && esUuid(v[0]) ? (v[0] as string) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * «Cambiar vendedor» (FE-2B). La lógica vive en `crearSesionReasignacion`;
  * este hook sólo la conecta con React.
  *
@@ -136,13 +151,21 @@ export function useReasignacionJornada(
     return (ctx: string | null): SesionReasignacion | null => {
       if (ctx === null) return null;
       if (actual === null || actual.contexto !== ctx) {
+        const usuarioId = usuarioDeContexto(ctx);
+        // Contexto sin usuario reconocible: falla cerrada, sin sesión.
+        if (usuarioId === null) return null;
+        // Otro contexto: sesión nueva (no hereda la intención ni la clave).
+        // El MISMO contexto reutiliza su sesión: conserva una intención con
+        // resultado desconocido del mismo actor (FE-2D, decisión humana).
         actual = {
           contexto: ctx,
           sesion: crearSesionReasignacion(
             releer,
             arbitro,
             (f) => setFase({ contexto: ctx, fase: f }),
-            (e) => setVendedores({ contexto: ctx, estado: e })
+            (e) => setVendedores({ contexto: ctx, estado: e }),
+            DEPENDENCIAS_REALES,
+            usuarioId
           ),
         };
       }

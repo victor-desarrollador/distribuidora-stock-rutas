@@ -11,6 +11,7 @@ import {
   MENSAJE_ERROR_GENERICO,
   MENSAJE_ERROR_LECTURA,
   MENSAJE_RESULTADO_DESCONOCIDO,
+  MENSAJE_SESION_CAMBIADA,
   MENSAJE_SIN_PERMISO,
   cantidadDesdeTexto,
   clasificarErrorJornada,
@@ -44,24 +45,46 @@ const DUENO = "66666666-6666-4666-8666-666666666666";
 
 type Respuesta = { data: unknown; error: unknown };
 type Llamada = { nombre: string; argumentos: unknown };
+// Usuario de la sesión en cada getSession (null: sin sesión; "lanzar": falla).
+type SesionFalsa = string | null | "lanzar";
 
 /**
  * Cliente falso: registra cada RPC y cada acceso a tablas. Las tablas sólo
  * exponen `select` (y la cadena eq/order). Cualquier método de escritura queda
- * registrado como violación.
+ * registrado como violación. `sesiones` fija el usuario de cada `getSession`
+ * (por defecto, siempre DUENO); el token es `token-<usuario>-<n>`.
  */
-function clienteFalso(opciones: { rpc?: Array<Respuesta | "lanzar"> }) {
+function clienteFalso(opciones: { rpc?: Array<Respuesta | "lanzar">; sesiones?: SesionFalsa[] }) {
   const llamadas: Llamada[] = [];
   const tablas: Array<{ tabla: string; operacion: string; args: unknown[] }> = [];
+  const cabeceras: string[] = [];
   const respuestas = [...(opciones.rpc ?? [])];
+  const sesiones = [...(opciones.sesiones ?? [])];
+  let lecturasSesion = 0;
+  const alLeerSesion: Array<() => void> = [];
 
   const cliente = {
+    auth: {
+      async getSession() {
+        lecturasSesion += 1;
+        for (const f of alLeerSesion) f();
+        const u = sesiones.length > 0 ? sesiones.shift()! : DUENO;
+        if (u === "lanzar") throw new Error("auth caído");
+        return {
+          data: { session: u === null ? null : { user: { id: u }, access_token: `token-${u}-${lecturasSesion}` } },
+          error: null,
+        };
+      },
+    },
     rpc(nombre: string, argumentos: unknown) {
       llamadas.push({ nombre, argumentos });
       const r = respuestas.shift() ?? { data: null, error: { code: "", message: "" } };
-      return r === "lanzar"
-        ? Promise.reject(new Error("red caída"))
-        : Promise.resolve(r);
+      return {
+        setHeader(nombreCabecera: string, valor: string) {
+          cabeceras.push(`${nombreCabecera}: ${valor}`);
+          return r === "lanzar" ? Promise.reject(new Error("red caída")) : Promise.resolve(r);
+        },
+      };
     },
     from(tabla: string) {
       const registrar = (operacion: string) => (...args: unknown[]) => {
@@ -83,7 +106,7 @@ function clienteFalso(opciones: { rpc?: Array<Respuesta | "lanzar"> }) {
     },
   };
 
-  return { cliente: cliente as unknown as SupabaseClient, llamadas, tablas };
+  return { cliente: cliente as unknown as SupabaseClient, llamadas, tablas, cabeceras, alLeerSesion };
 }
 
 const COMANDOS: Array<{ comando: ComandoJornada; rpc: string; args: Record<string, unknown> }> = [
@@ -386,6 +409,129 @@ describe("crearPuertoJornadas.ejecutar (P13: ≤3 intentos, misma clave y payloa
     const puerto = crearPuertoJornadas(cliente);
     for (const { comando } of COMANDOS) await puerto.ejecutar(comando, CLAVE);
     expect(tablas).toHaveLength(0);
+  });
+});
+
+// FE-2D (H-1): cada intento sale con la identidad del primero o no sale. Un
+// intento ya enviado no se cancela ni se da por fallido.
+describe("FE-2D H-1: ejecutar fija la identidad y no emite intentos tras detenerse", () => {
+  const OTRO = "77777777-7777-4777-8777-777777777777";
+  const SIN_RESPUESTA = "lanzar" as const;
+  const DESCONOCIDO_1 = {
+    ok: false,
+    intentos: 1,
+    error: { codigo: null, mensaje: MENSAJE_RESULTADO_DESCONOCIDO, resultadoDesconocido: true },
+  };
+  const NADA_ENVIADO = {
+    ok: false,
+    intentos: 0,
+    error: { codigo: null, mensaje: MENSAJE_SESION_CAMBIADA, resultadoDesconocido: false },
+  };
+
+  it("U1: la sesión pasa a otro usuario tras un intento sin respuesta → no reenvía; desconocido", async () => {
+    const { cliente, llamadas } = clienteFalso({
+      rpc: [SIN_RESPUESTA, { data: OP, error: null }, { data: OP, error: null }],
+      sesiones: [DUENO, OTRO, OTRO],
+    });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE);
+    expect(llamadas).toHaveLength(1);
+    expect(r).toEqual(DESCONOCIDO_1);
+  });
+
+  it("U2: mismo usuario con token renovado → reintenta con el token verificado en cada intento", async () => {
+    const { cliente, llamadas, cabeceras } = clienteFalso({
+      rpc: [SIN_RESPUESTA, SIN_RESPUESTA, { data: OP, error: null }],
+    });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE);
+    expect(r).toEqual({ ok: true, datos: OP, intentos: 3 });
+    expect(llamadas).toHaveLength(3);
+    expect(cabeceras).toEqual([
+      `Authorization: Bearer token-${DUENO}-1`,
+      `Authorization: Bearer token-${DUENO}-2`,
+      `Authorization: Bearer token-${DUENO}-3`,
+    ]);
+  });
+
+  it("U3: sin sesión antes del primer intento → nada enviado, no desconocido", async () => {
+    const { cliente, llamadas } = clienteFalso({ rpc: [{ data: OP, error: null }], sesiones: [null] });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE);
+    expect(llamadas).toHaveLength(0);
+    expect(r).toEqual(NADA_ENVIADO);
+  });
+
+  it("U4: la sesión se cierra antes del segundo intento → no reenvía; desconocido", async () => {
+    const { cliente, llamadas } = clienteFalso({ rpc: [SIN_RESPUESTA, { data: OP, error: null }], sesiones: [DUENO, null] });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE);
+    expect(llamadas).toHaveLength(1);
+    expect(r).toEqual(DESCONOCIDO_1);
+  });
+
+  it("U5: usuarioEsperado distinto de la sesión → nada enviado", async () => {
+    const { cliente, llamadas } = clienteFalso({ rpc: [{ data: OP, error: null }] });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE, { usuarioEsperado: OTRO });
+    expect(llamadas).toHaveLength(0);
+    expect(r).toEqual(NADA_ENVIADO);
+  });
+
+  it("U5b: usuarioEsperado igual a la sesión → envía normalmente", async () => {
+    const { cliente, llamadas } = clienteFalso({ rpc: [{ data: OP, error: null }] });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE, { usuarioEsperado: DUENO });
+    expect(llamadas).toHaveLength(1);
+    expect(r).toEqual({ ok: true, datos: OP, intentos: 1 });
+  });
+
+  it("U6: detenido tras un intento sin respuesta → no reenvía; desconocido (lo enviado no se niega)", async () => {
+    let activo = true;
+    const { cliente, llamadas, alLeerSesion } = clienteFalso({ rpc: [SIN_RESPUESTA, { data: OP, error: null }] });
+    // Se detiene cuando el primer intento ya salió (antes de preparar el segundo).
+    alLeerSesion.push(() => {
+      if (llamadas.length === 1) activo = false;
+    });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE, { continuar: () => activo });
+    expect(r).toEqual(DESCONOCIDO_1);
+    expect(llamadas).toHaveLength(1);
+  });
+
+  it("U6b: detenido antes del primer intento (o mientras se lee la sesión) → nada enviado", async () => {
+    const a = clienteFalso({ rpc: [{ data: OP, error: null }] });
+    expect(await crearPuertoJornadas(a.cliente).ejecutar(COMANDOS[1].comando, CLAVE, { continuar: () => false }))
+      .toEqual(NADA_ENVIADO);
+    expect(a.llamadas).toHaveLength(0);
+
+    let activo = true;
+    const b = clienteFalso({ rpc: [{ data: OP, error: null }] });
+    b.alLeerSesion.push(() => (activo = false));
+    expect(await crearPuertoJornadas(b.cliente).ejecutar(COMANDOS[1].comando, CLAVE, { continuar: () => activo }))
+      .toEqual(NADA_ENVIADO);
+    expect(b.llamadas).toHaveLength(0);
+  });
+
+  it("U7: getSession falla → nada enviado en el primer intento; desconocido en el segundo", async () => {
+    const a = clienteFalso({ rpc: [{ data: OP, error: null }], sesiones: ["lanzar"] });
+    expect(await crearPuertoJornadas(a.cliente).ejecutar(COMANDOS[1].comando, CLAVE)).toEqual(NADA_ENVIADO);
+    expect(a.llamadas).toHaveLength(0);
+
+    const b = clienteFalso({ rpc: [SIN_RESPUESTA, { data: OP, error: null }], sesiones: [DUENO, "lanzar"] });
+    expect(await crearPuertoJornadas(b.cliente).ejecutar(COMANDOS[1].comando, CLAVE)).toEqual(DESCONOCIDO_1);
+    expect(b.llamadas).toHaveLength(1);
+  });
+
+  it("U8: corta tras un 40001 con otra sesión → sin efectos (no desconocido), como al agotar intentos", async () => {
+    const { cliente, llamadas } = clienteFalso({
+      rpc: [{ data: null, error: { code: "40001", message: "x" } }, { data: OP, error: null }],
+      sesiones: [DUENO, OTRO],
+    });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE);
+    expect(llamadas).toHaveLength(1);
+    expect(r).toEqual({ ok: false, intentos: 1, error: { codigo: "40001", mensaje: MENSAJE_CONCURRENCIA, resultadoDesconocido: false } });
+  });
+
+  it("no cambia la política de reintentos (P13 pendiente): 3 intentos máximos con la misma identidad", async () => {
+    expect(MAX_INTENTOS).toBe(3);
+    const { cliente, llamadas } = clienteFalso({ rpc: [SIN_RESPUESTA, SIN_RESPUESTA, SIN_RESPUESTA, { data: OP, error: null }] });
+    const r = await crearPuertoJornadas(cliente).ejecutar(COMANDOS[1].comando, CLAVE, { continuar: () => true });
+    expect(llamadas).toHaveLength(3);
+    expect(r.ok).toBe(false);
   });
 });
 

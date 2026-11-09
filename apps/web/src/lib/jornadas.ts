@@ -144,8 +144,22 @@ export interface PuertoJornadas {
   }): Promise<ResultadoJornada<Jornada[]>>;
   ejecutar(
     comando: ComandoJornada,
-    claveIdempotencia: string
+    claveIdempotencia: string,
+    opciones?: OpcionesEjecucion
   ): Promise<ResultadoJornada<string>>;
+}
+
+/**
+ * FE-2D (H-1): condiciones para EMITIR cada intento. No cambian la política de
+ * reintentos (códigos, cantidad ni espera): sólo impiden enviar uno nuevo.
+ * Un intento ya enviado nunca se cancela ni se da por fallido.
+ */
+export interface OpcionesEjecucion {
+  // Usuario que inició la intención: si la sesión es de otro, no se envía nada.
+  usuarioEsperado?: string;
+  // false: quien envió se detuvo (desmontaje o cambio de contexto); no se
+  // emiten intentos nuevos.
+  continuar?: () => boolean;
 }
 
 // Máximo de `int4` (PostgreSQL): tope de cada cantidad.
@@ -170,6 +184,10 @@ export const MENSAJE_CONCURRENCIA =
 export const MENSAJE_SIN_PERMISO =
   "No tenés permiso para realizar esta operación.";
 export const MENSAJE_DATOS_INVALIDOS = "Los datos de la operación no son válidos.";
+// FE-2D: no se envió ningún intento (sin sesión, sesión de otro usuario o
+// pantalla detenida). Nada pudo registrarse.
+export const MENSAJE_SESION_CAMBIADA =
+  "Tu sesión cambió antes de enviar la operación. No se registró nada.";
 
 const MENSAJES_ERROR: Record<string, string> = {
   jornada_no_autenticado: "Tu sesión no es válida. Volvé a iniciar sesión.",
@@ -622,7 +640,7 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
     leerPaginaJornadas,
     leerTodasLasJornadas,
 
-    async ejecutar(comando, claveIdempotencia) {
+    async ejecutar(comando, claveIdempotencia, opciones = {}) {
       if (!esUuid(claveIdempotencia)) {
         return fallo(
           { codigo: null, mensaje: MENSAJE_ERROR_GENERICO, resultadoDesconocido: false },
@@ -642,9 +660,46 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
         mensaje: MENSAJE_RESULTADO_DESCONOCIDO,
       };
 
+      // Identidad del primer intento: todos los reintentos salen con ella o no salen.
+      let actorFijado: string | null = opciones.usuarioEsperado ?? null;
+
+      // FE-2D (H-1): sin intento nuevo. Si no salió ninguno, nada pudo
+      // registrarse; si salió alguno, se conserva su clasificación (un intento
+      // sin respuesta deja el resultado desconocido: no se cancela ni se niega).
+      const sinEnviar = (enviados: number): ResultadoJornada<string> =>
+        enviados === 0
+          ? fallo({ codigo: null, mensaje: MENSAJE_SESION_CAMBIADA, resultadoDesconocido: false }, 0)
+          : fallo(
+              {
+                codigo: ultima.codigo,
+                mensaje: ultima.mensaje,
+                resultadoDesconocido: ultima.clase === "sin_respuesta",
+              },
+              enviados
+            );
+
       for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+        if (opciones.continuar && !opciones.continuar()) return sinEnviar(intento - 1);
+        let token: string;
         try {
-          const { data, error } = await cliente.rpc(llamada.nombre, llamada.argumentos);
+          const { data: sesion } = await cliente.auth.getSession();
+          const actor = sesion.session?.user.id ?? null;
+          if (!sesion.session || actor === null) return sinEnviar(intento - 1);
+          if (actorFijado === null) actorFijado = actor;
+          if (actor !== actorFijado) return sinEnviar(intento - 1);
+          token = sesion.session.access_token;
+        } catch {
+          return sinEnviar(intento - 1);
+        }
+        // getSession espera: se vuelve a comprobar justo antes de enviar.
+        if (opciones.continuar && !opciones.continuar()) return sinEnviar(intento - 1);
+
+        try {
+          // El token enviado es exactamente el verificado (supabase-js no
+          // reemplaza un Authorization explícito).
+          const { data, error } = await cliente
+            .rpc(llamada.nombre, llamada.argumentos)
+            .setHeader("Authorization", `Bearer ${token}`);
           if (!error) {
             if (esUuid(data)) return { ok: true, datos: data, intentos: intento };
             // Respuesta sin uuid: no se puede confirmar el resultado.

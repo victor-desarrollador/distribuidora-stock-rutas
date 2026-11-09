@@ -1,4 +1,48 @@
 ---
+## 09/11/2026 — FE-2D: corrección de H-1 y H-2 de FE-2B (rama `feat/fe2d-correcciones-seguridad`; SIN COMMIT; SECURITY REVIEW PENDIENTE; P13 SIGUE PENDIENTE)
+
+**Base.** Worktree nuevo `distribuidora-fe2d-correcciones-seguridad`, rama `feat/fe2d-correcciones-seguridad`, creada desde `c80d06945fcedddd238249d0173edf3b0a3398db` (árbol `7751313c…6ebb`, verificado). El worktree FE-2B, su commit y su `AUDITORIA_FE2B_INDEPENDIENTE.md` sin seguimiento no se tocaron ni se copiaron. Plan autorizado: `auditoria-integral-vm/FE2D_PLAN/PLAN_FE2D_CORRECCIONES.md`, SHA-256 `28095ce4a9868561aa5ecf78c3a224c37069f1a3192fc787a0915ac14d8e7927` (verificado). Se aplicaron sólo C1–C3.
+
+**Decisiones humanas (09/11/2026).** G-1: la corrección queda **fuera de ADR-001 P13** (no cambia los códigos reintentables, la cantidad —3— ni la espera; sólo impide emitir un intento). G-2: el corte de reintentos al detener se aplica en el **motor común** (salida, corrección, carga, reasignación); apertura no recibe `continuar`. G-3: un éxito resuelto con la pantalla detenida **se relee una vez** al reanudar. G-4: la identidad se **fija al primer intento** para todos; sólo la reasignación pasa además `usuarioEsperado`. Sesión de reasignación: con el **mismo** contexto se **reutiliza saneada** (conserva la intención desconocida del mismo actor); un contexto distinto crea una sesión nueva sin heredar la clave.
+
+**Causa raíz corregida.**
+- **H-1 (FE2B-05).** El bucle de `ejecutar` (`lib/jornadas.ts`) usaba el cliente singleton, que pone el token vigente en cada fetch, y nada lo detenía. Ahora, antes de cada intento: si `continuar()` es falso no se envía; se lee `auth.getSession()` y, si no hay sesión, si el usuario difiere del fijado en el primer intento o de `usuarioEsperado`, no se envía; se vuelve a comprobar `continuar()` tras esa espera; y la RPC sale con `Authorization` explícito igual al token verificado (supabase-js no reemplaza un `Authorization` explícito). Si no salió ningún intento → `resultadoDesconocido: false`, `intentos: 0`, `MENSAJE_SESION_CAMBIADA`. Si salió alguno → se conserva su clasificación (sin respuesta → **desconocido**). Lo que ya está en vuelo no se cancela ni se da por fallido.
+- **H-2 (FE2B-06).** `jornadas_operacion.ts` descartaba la respuesta tardía con `if (!activo) return;`, dejando la fase en `enviando`/`verificando`. Ahora, detenido: éxito del servidor → `exito` interno sin releer; rechazo definitivo → `error` y clave descartada; dudoso → `desconocido` con `reintentable: false` y `MENSAJE_PENDIENTE_VERIFICAR`, **sin verificar** (la sesión podía ser otra). Una verificación que termina detenida no se usa (queda pendiente de verificar). `iniciar()` publica la fase si difiere de la última publicada y, si es un éxito sin releer, relee **una** vez. El envío pasa `{ continuar: () => activo, usuarioEsperado }`.
+- **C3.** `crearControladorReasignacion` acepta `usuarioEsperado`; `crearSesionReasignacion` recibe el `usuarioId` y reenvía las opciones al puerto; el hook lo deriva del contexto (`usuarioDeContexto`, uuid validado) y, si no es válido, no crea sesión (falla cerrada).
+
+**Archivos.** Código: `apps/web/src/lib/jornadas.ts`, `apps/web/src/pages/jornadas_operacion.ts`, `apps/web/src/pages/jornadas_reasignacion.ts`, `apps/web/src/hooks/useReasignacionJornada.ts`. Pruebas: `lib/jornadas.test.ts`, `pages/jornadas_reasignacion.test.ts`, `pages/jornadas_salida.test.ts`, `hooks/useReasignacionJornada.test.ts`, `pages/Jornadas.reasignacion_gate.test.tsx`. Sin cambios en `supabase/`, `auth/`, `lib/supabase.ts`, `lib/stock.ts`, `jornadas_apertura.ts`, FE-1 (carga), UI (`*.tsx` de pantalla y paneles), ADR-011, DP-1 ni DP-2. Sin dependencias, migraciones, permisos ni cambios de contrato RPC.
+
+**Pruebas nuevas (27).** `lib/jornadas.test.ts` U1–U8 (+U5b, U6b y la guarda de P13): cambio de usuario entre intentos, token renovado del mismo usuario, sin sesión antes del 1.º/2.º intento, `usuarioEsperado` distinto/igual, detenido antes/después del 1.º intento y durante `getSession`, `getSession` que falla, 40001 seguido de cambio de sesión, 3 intentos máximos. `jornadas_reasignacion.test.ts` O1–O7 (+O2b): éxito, sin respuesta, 40001 y rechazo con el controlador detenido; detenido durante la verificación; `iniciar` sin cambios no publica; árbitro; opciones del envío. `jornadas_salida.test.ts`: dos casos del motor común en salida. `useReasignacionJornada.test.ts` S1–S4: `ctx → null → ctx` con éxito y sin respuesta (reintento con la misma clave y el mismo usuario), `ctxA → null → ctxB`, usuario del contexto. `Jornadas.reasignacion_gate.test.tsx`: en la pantalla real, la sesión pasa a otro usuario entre intentos → una sola `reasignar_vendedor`, sólo con el token del usuario de la pantalla; sesión de otro usuario desde el inicio → nada enviado. Los fakes de cliente de `jornadas.test.ts` y de la compuerta se ampliaron con `auth.getSession` y `rpc().setHeader`; **ninguna aserción existente cambió**.
+
+**Reproducción previa (rojo sobre `c80d069`).** Con el código de la base y las pruebas nuevas (copia temporal fuera del repo, ya borrada): 42 fallos en los 5 archivos. Los relevantes por su causa real: la compuerta envía **3** `reasignar_vendedor` con la sesión de otro usuario (esperado 1); S1 y O1 quedan en `enviando` (esperado `exito`). Los casos del wrapper también fallan porque el fake nuevo exige `setHeader`.
+
+**Verificación (`apps/web`).**
+
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0; 64 archivos, 2176 pruebas (antes 2149) |
+| `npm run build` | exit 0 (aviso de tamaño de chunk, previo) |
+| `git diff --check` | exit 0 |
+| `npx playwright test` / pgTAP | **no ejecutados** (por indicación: sin Docker ni Supabase local en esta tarea) |
+
+**Diferencias respecto del plan.**
+1. Plan C2.3: una verificación que termina con la pantalla detenida resolvía `registrada`/`descartada`. Se implementó más conservador: **no se usa ningún resultado** de esa lectura (pudo hacerse con otra sesión) y queda `desconocido` pendiente de verificar.
+2. Plan I2 (re-render `gestión → no gestión → gestión` en la compuerta): no es posible sin DOM de pruebas (el proyecto usa `renderToStaticMarkup`, que no ejecuta efectos). Ese ciclo se cubre en S1/S2 sobre `crearSesionReasignacion`, que es lo que ejecutan los efectos del hook.
+3. Los E2E (E1–E9) y pgTAP del plan quedan para la etapa autorizada con base local.
+
+**Riesgos restantes.**
+1. **Security review pendiente** (auth/sesión, idempotencia, concurrencia; `AGENTS.md` §2.4). Luego, auditoría independiente del hash.
+2. Sin E2E ni pgTAP ejecutados (FE2B-07/08 siguen abiertos).
+3. `lib/stock.ts` repite el patrón de reintentos sobre `movimientos_stock`; fuera de alcance, requiere tarea separada.
+4. Apertura: con la pantalla desmontada sigue reintentando (G-2), aunque con la identidad fijada al primer intento.
+5. Un rechazo definitivo resuelto con la pantalla detenida se publica al reanudar, pero no relee aunque su código lo pida; la pantalla relee al volver a montarse.
+6. Logout del usuario entre la comprobación y el envío: sale con su propio token (identidad correcta), igual que un request en vuelo al cerrar sesión.
+7. `getSession()` toma el lock de auth-js en cada intento: posible latencia, a medir en E2E.
+8. ADR-001 sigue en validación controlada: uso operativo NO APTO.
+
+---
 ## 09/11/2026 — FE-2B: reasignación real de vendedor desde /jornadas (rama `feat/fe2-reasignacion-vendedor`; SIN COMMIT; SECURITY REVIEW PENDIENTE; CARGA Y DESCARGA SIGUEN DESHABILITADAS)
 
 **Base.** Worktree nueva `distribuidora-fe2-reasignacion-vendedor`, rama `feat/fe2-reasignacion-vendedor`, creada desde `29a579b1c9b7024d9bd8cfeaed04d88a4d99c599` (FE-1, verificado). El worktree FE-1 y su commit no se tocaron. Informe de preparación `FE2A_INVENTARIO_Y_PLAN.md`, SHA-256 `6bbbecebccc5230b16192362caabbe60e7223ffdaf9f6656e3b83af6729a579d` (verificado).

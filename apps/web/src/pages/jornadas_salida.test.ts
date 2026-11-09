@@ -297,6 +297,35 @@ describe("confirmar salida: respuesta tardía y desmontaje", () => {
     expect(m.publicadas.length).toBe(antes);
     expect(m.releer).not.toHaveBeenCalled();
   });
+
+  // FE-2D (motor común): mismo comportamiento que en la reasignación.
+  it("FE-2D: el envío no emite reintentos tras detener y la respuesta tardía no deja «enviando»", async () => {
+    const m = armar();
+    m.c.solicitar(jornada(1));
+    const p = m.c.confirmar();
+    m.c.detener();
+    m.envios[0].resolver(sinRespuesta());
+    await p;
+    // La verificación no se hizo detenida: queda pendiente, con la intención.
+    expect(m.verificaciones).toHaveLength(0);
+    expect(m.ultima()).toMatchObject({ fase: "desconocido", reintentable: false });
+    expect(m.c.claveEnCurso()).toBe(m.envios[0].clave);
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)).toMatchObject({ fase: "desconocido" });
+  });
+
+  it("FE-2D: un éxito tardío se publica al reanudar y relee una vez", async () => {
+    const m = armar();
+    m.c.solicitar(jornada(1));
+    const p = m.c.confirmar();
+    m.c.detener();
+    m.envios[0].resolver(exito());
+    await p;
+    expect(m.releer).not.toHaveBeenCalled();
+    m.c.iniciar();
+    expect(m.publicadas.at(-1)).toMatchObject({ fase: "exito", mensaje: MENSAJE_SALIDA_OK });
+    expect(m.releer).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("estabilidad de `releer` (capturado una sola vez por el hook)", () => {

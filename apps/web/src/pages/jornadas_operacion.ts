@@ -19,6 +19,10 @@
 //   ninguna OTRA operación del mismo árbitro puede iniciarse sobre esa jornada.
 //   La exclusión se aplica aquí, no sólo deshabilitando botones.
 // - Tras el desmontaje, las respuestas tardías no publican ni releen.
+// - FE-2D: detenido, el wrapper no emite reintentos nuevos (lo que ya salió no
+//   se cancela). Una respuesta tardía se resuelve sólo en el estado interno
+//   (sin verificar ni releer) y `iniciar` la publica; si fue un éxito del
+//   servidor, relee una vez.
 // El servidor decide siempre permisos, estados y reglas de negocio.
 
 import {
@@ -118,28 +122,49 @@ export interface DefinicionOperacion<E, D extends { jornadaId: string }> {
 // verifica antes de ofrecer el reintento.
 const CODIGOS_TRANSITORIOS: ReadonlySet<string> = new Set(["40001", "40P01"]);
 
+// FE-2D (H-2): respuesta dudosa recibida con la pantalla detenida. No se
+// verificó (la sesión podía ser otra): hay que verificar antes de reintentar.
+export const MENSAJE_PENDIENTE_VERIFICAR =
+  "No se pudo confirmar la operación mientras la pantalla estaba inactiva. Verificá el estado antes de volver a intentarlo.";
+
 export function crearControladorOperacion<E, D extends { jornadaId: string }>(
   definicion: DefinicionOperacion<E, D>,
   puerto: PuertoOperacion,
   alCambiarJornada: () => void,
   publicar: (fase: FaseOperacion) => void,
   generarClave: () => string = nuevaClaveIdempotencia,
-  arbitro?: ArbitroJornadas
+  arbitro?: ArbitroJornadas,
+  // FE-2D (H-1): usuario dueño de las intenciones de este controlador.
+  usuarioEsperado?: string
 ) {
   let fase: FaseOperacion = OPERACION_INACTIVA;
+  // Última fase entregada a `publicar` (para republicar al reanudar).
+  let publicada: FaseOperacion = fase;
   let intencion: { datos: D; clave: string } | null = null;
   // Jornada elegida en el paso de confirmación (todavía sin clave).
   let candidata: Jornada | null = null;
   let activo = true;
   // Identidad de este controlador ante el árbitro.
   const yo = Symbol("operacion");
+  const opcionesEnvio = {
+    continuar: () => activo,
+    ...(usuarioEsperado !== undefined ? { usuarioEsperado } : {}),
+  };
 
   function emitir(nueva: FaseOperacion) {
     fase = nueva;
     // El árbitro se actualiza siempre (también desmontado): la retención
     // describe la intención, no la pantalla.
     arbitro?.actualizar(yo, jornadaRetenida(fase));
-    if (activo) publicar(fase);
+    if (activo) {
+      publicada = fase;
+      publicar(fase);
+    }
+  }
+
+  /** Detenido con una respuesta dudosa: se conserva la intención, sin verificar. */
+  function pendienteDeVerificar(jornadaId: string) {
+    emitir({ fase: "desconocido", jornadaId, mensaje: MENSAJE_PENDIENTE_VERIFICAR, reintentable: false });
   }
 
   const ocupado = () => fase.fase === "enviando" || fase.fase === "verificando";
@@ -203,32 +228,36 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
   async function enviar(i: { datos: D; clave: string }): Promise<void> {
     const jornadaId = i.datos.jornadaId;
     emitir({ fase: "enviando", jornadaId });
-    const r = await puerto.ejecutar(definicion.comando(i.datos), i.clave);
-    if (!activo) return;
+    const r = await puerto.ejecutar(definicion.comando(i.datos), i.clave, opcionesEnvio);
+    // Detenido: la respuesta se resuelve en el estado interno (sin publicar,
+    // verificar ni releer); `iniciar` la publica si vuelve el mismo contexto.
     if (r.ok) {
+      // Única confirmación: el uuid del servidor (nunca una coincidencia de estado).
       intencion = null;
       emitir({ fase: "exito", jornadaId, mensaje: definicion.mensajeExito });
-      alCambiarJornada();
+      if (activo) alCambiarJornada();
       return;
     }
     const dudoso =
       r.error.resultadoDesconocido ||
       (r.error.codigo !== null && CODIGOS_TRANSITORIOS.has(r.error.codigo));
     if (dudoso) {
+      if (!activo) return pendienteDeVerificar(jornadaId);
       await verificarYDecidir(i);
       return;
     }
-    // Rechazo definitivo: la transacción se revirtió y la clave no se consumió.
+    // Rechazo definitivo (o nada enviado): sin efectos y la clave no se consumió.
     intencion = null;
     emitir({ fase: "error", jornadaId, mensaje: r.error.mensaje });
-    if (definicion.releerTrasRechazo(r.error.codigo)) alCambiarJornada();
+    if (activo && definicion.releerTrasRechazo(r.error.codigo)) alCambiarJornada();
   }
 
   async function verificarYDecidir(i: { datos: D; clave: string }): Promise<void> {
     const jornadaId = i.datos.jornadaId;
     emitir({ fase: "verificando", jornadaId });
     const v = await definicion.verificar(i.datos);
-    if (!activo) return;
+    // Detenido durante la lectura: pudo leerse con otra sesión; no se usa.
+    if (!activo) return pendienteDeVerificar(jornadaId);
     switch (v.resultado) {
       case "registrada":
         intencion = null;
@@ -254,9 +283,17 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
     }
   }
 
-  /** (Re)montaje: vuelve a publicar. */
+  /**
+   * (Re)montaje: vuelve a publicar. Si mientras estaba detenido la fase cambió
+   * (respuesta tardía), la publica; si fue un éxito del servidor sin releer,
+   * relee UNA vez (la próxima reanudación ya no difiere).
+   */
   function iniciar(): void {
     activo = true;
+    if (fase === publicada) return;
+    publicada = fase;
+    publicar(fase);
+    if (fase.fase === "exito" && fase.releida !== true) alCambiarJornada();
   }
 
   /** Desmontaje: las respuestas tardías ya no publican ni releen. */
