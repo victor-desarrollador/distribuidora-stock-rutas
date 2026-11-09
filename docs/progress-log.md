@@ -1,4 +1,20 @@
 ---
+## 09/11/2026 — ADR-010 / C1.2b-D1 y C1.2b-D2: APROBADAS (normativa); incorporación documental PREPARADA (rama `feat/adr010-convergencia` sobre `1fb75e7`; **SIN COMMIT**; C1.2b NO implementado; D-IDEM-0 ABIERTO)
+
+**Estado del repositorio.** C1.2a (`crear`, `ejecutar` y `cancelar`) está **cerrada y auditada en el commit `1fb75e7ae1184c96461e7b670473fc12cc3fd2e4`** (padre `7d4b478`). C1.2b (`reconocer` y `listar`) **no está implementada**.
+
+**Aprobación normativa.** El responsable aprobó C1.2b-D1 y C1.2b-D2 según `REVISION_FINAL_PROPUESTAS_C1_2B.md` (SHA-256 `9e574aebbadb2ce21401e837abd181f876c3e5c68c1c396406e746d3c46f8e5d`) sobre `PROPUESTAS_NORMATIVAS_C1_2B_D1_D2.md` (SHA-256 `5b4c31cbe6776fbf21e9a71ac8cd51b0264be2747d1ddf835b9255451ca1fa24`), y autorizó **exclusivamente** preparar su incorporación documental. No autorizó commit ni implementación.
+
+**Qué se hizo (solo documentación, sin commit).**
+- Nuevo `docs/decisions/010-aclaracion-c1-2b-reconocer-y-desde-futuro.md`, en el estilo de C1.2a-D1.
+- **D1:** `reconocer_intencion_operacion(NULL)` con actor autorizado → `PT404 intencion_no_encontrada`; precedencia `PT401` → `PT403` → `PT404`; cero efectos persistentes; no se traslada a `reconocer` el `PT400 intencion_clave_invalida` de `crear`; sin mensajes ni estados nuevos.
+- **D2:** `listar_intenciones_operacion` con `p_desde` futuro → `ventana_desde = p_desde`, `historial` vacío, `sin_resolver` completo y sin filtro temporal; no se rechaza ni se recorta al instante actual; `-infinity` aplica el recorte de 30 días ya aprobado; `infinity` queda documentado como caso residual (el parser A-2 del cliente lo considera fuera de contrato y falla cerrado). La serialización real de `infinity` por PostgREST **queda pendiente de comprobación en C1.4**; no se afirma formato HTTP ni error. Reglas de truncamiento y límites 50/100 sin cambios.
+- Los anexos y actas aprobados, ADR-010, README y Blueprint **no se editaron**: la aclaración declara su precedencia limitada sobre las menciones de que el caso «sigue pendiente».
+
+**Cómo se verificó.** Solo controles documentales (`git diff --check`, `git status`, inventario de archivos, integridad de los anexos por SHA-256). **No se ejecutaron pruebas, SQL, pgTAP ni laboratorios.**
+
+**Pendientes.** Implementar y probar `reconocer` y `listar` (C1.2b); la aserción de inventario de `intenciones_esquema.test.sql` pasará de seis a diez funciones; preflight 50 / 25 / 13 / 38 (a medir). Compuertas posteriores: **C1.3** (clase I, concurrencia estadística, mutantes, versionado del arnés) y **C1.4** (PostgREST y serialización de `infinity`, `supabase test db`, preflight final). Las menciones «sigue pendiente» de ADR-010, la adenda y Blueprint §12 quedan textualmente vigentes hasta una actualización autorizada. F1/F2 no se modificaron. **D-IDEM-0 permanece abierto**; D-IDEM-13 y DT-1 sin cambios.
+
 ## 09/11/2026 — ADR-010 v1.1 / C1.2a: RPC `crear`, `ejecutar` y `cancelar` (rama `feat/adr010-convergencia` sobre `7d4b478`; **SIN COMMIT**; D-IDEM-0 ABIERTO; C1.2b NO iniciado; solo local descartable)
 
 **Autorización.** Implementar y probar localmente C1.2a (crear, ejecutar y cancelar intenciones), incluida la aclaración C1.2a-D1 (identificador nulo, `PT400 intencion_clave_invalida`). No se crearon commits ni ramas; no se tocó F1/F2; sin `db push`, sin Supabase remoto.
