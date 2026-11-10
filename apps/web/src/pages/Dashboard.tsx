@@ -54,6 +54,18 @@ export default function Dashboard() {
         </p>
       </div>
 
+      {/* AVISO VISIBLE: datos de demostración, no información operativa real */}
+      <div
+        role="alert"
+        className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-6"
+      >
+        <AlertTriangle className="text-amber-500" size={20} />
+        <span className="text-sm text-amber-800 font-semibold">
+          Datos de demostración: los valores de esta pantalla son ficticios y
+          no reflejan la operación real de la distribuidora.
+        </span>
+      </div>
+
       {/* Tarjetas de estadísticas */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {estadisticas.map(({ titulo, valor, icono: Icono }) => (

@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import {
-  ClipboardList,
   LogOut,
   UserCircle,
   Menu,
@@ -18,7 +17,6 @@ import {
   MENSAJE_DESCARTE_CIERRE_SESION,
 } from "../ConfirmarDescarteBorrador";
 import { aceptarSalida, pedirSalida } from "./cierre_sesion";
-import { RUTA_JORNADAS_DEMO } from "../../demo/entorno";
 import { itemsMenuPorRol } from "./menu";
 
 export default function Sidebar() {
@@ -44,20 +42,7 @@ export default function Sidebar() {
     };
   }, [menuAbierto]);
 
-  // El acceso a la pantalla demo sólo existe en desarrollo (D2). Debe usar
-  // `import.meta.env.DEV` en línea para que se elimine del build de producción.
-  const menuVisible = itemsMenuPorRol(
-    usuario?.rol,
-    import.meta.env.DEV
-      ? [
-          {
-            nombre: "Jornadas (demo)",
-            icono: ClipboardList,
-            ruta: RUTA_JORNADAS_DEMO,
-          },
-        ]
-      : []
-  );
+  const menuVisible = itemsMenuPorRol(usuario?.rol);
 
   const rolVisible = usuario ? nombreRol(usuario.rol) : "Sin sesión";
 
@@ -126,7 +111,7 @@ export default function Sidebar() {
             </h1>
 
             <p className="mt-1 text-sm text-slate-400">
-              Stock y Autoventa
+              Stock
             </p>
           </div>
 

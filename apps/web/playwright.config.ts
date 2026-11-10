@@ -14,6 +14,10 @@ import { defineConfig, devices } from '@playwright/test'
 // la política global de este archivo no cambia.
 export default defineConfig({
   testDir: './tests',
+  // tests/historico-localstorage/ conserva suites del prototipo demo sobre
+  // localStorage (rutas ya retiradas). No forman parte de la colección activa
+  // de Playwright; recuperarlas requiere una configuración separada.
+  testIgnore: ['historico-localstorage/**'],
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
   reporter: 'list',

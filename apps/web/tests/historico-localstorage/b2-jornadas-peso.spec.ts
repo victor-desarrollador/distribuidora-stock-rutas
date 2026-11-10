@@ -5,7 +5,7 @@
 // sigue bloqueado hasta B4 (P-B2-2). Sólo claves `_demo_v5`.
 import { expect, test, type Page } from "@playwright/test";
 
-import { MENSAJE_PESO_NO_OPERABLE } from "../src/domain/productos";
+import { MENSAJE_PESO_NO_OPERABLE } from "../../src/domain/productos";
 
 const claves = {
   productos: "distribuidora_productos_demo_v5",

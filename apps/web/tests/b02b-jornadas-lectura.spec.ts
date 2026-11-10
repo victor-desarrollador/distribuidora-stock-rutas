@@ -275,9 +275,11 @@ test.describe("roles y aislamiento (backend real, RLS real)", () => {
     await expect(filas(v.page)).toHaveCount(0);
     await expect(v.page.getByText(propia.nombre)).toHaveCount(0);
 
-    // Las rutas de gestión y la demo siguen vedadas para el vendedor.
-    for (const ruta of ["/camiones", "/demo/jornadas", "/rendicion"]) {
-      await v.page.goto(ruta);
+    // Las rutas de gestión siguen vedadas para el vendedor. Las rutas retiradas
+    // (/demo/jornadas, /rendicion, /movimientos, /retornos, /cuentas,
+    // /configuracion-demo, /autoventa) ya no existen en el router.
+    for (const ruta of ["/camiones", "/productos", "/stock"]) {
+      await v.page.goto(ruta)
       await expect(v.page.getByRole("heading", { name: "Acceso no permitido" })).toBeVisible();
     }
     await v.contexto.close();

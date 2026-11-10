@@ -51,6 +51,85 @@
 Sin `git commit`, push, merge ni deploy aún: pendiente autorización humana.
 
 ---
+## 10/11/2026 — Integración local JWT-1 + retiro de rutas demo (sin commit)
+
+**Base HEAD:** `229b03775c81ad0a0971992345cde6f87276473d`.
+**Segundo padre previsto:** `a4cc8cbec39b4f5b9450abe5dab2f8e5d13ba6ab`.
+**Rama temporal:** `chore/integracion-local-jwt1-demo`.
+**Estado:** integración funcional sin conflictos pendientes.
+
+**Verificación (`apps/web/`):**
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npm test` (Vitest) | 2251 PASS, 67 archivos |
+| `npm run build` | PASS |
+| `npx playwright test --list` | 172 tests en 17 archivos; 0 históricos descubiertos |
+| Playwright E2E | pendiente |
+| pgTAP | pendiente |
+
+No push ni deploy.
+No afirmar que el merge ya está commiteado.
+
+---
+## 09/11/2026 — Retiro de rutas demo con localStorage de negocio (rama `chore/retirar-rutas-demo-negocio` sobre `f1129d0`; SIN COMMIT; SIN PUSH/MERGE/DEPLOY)
+
+**Objetivo.** Retirar del acceso operativo todas las pantallas que usan `localStorage` como fuente de verdad de negocio, preservando Supabase Auth y las pantallas reales conectadas a Supabase (`/productos`, `/stock`, `/clientes`, `/camiones`, `/jornadas`). No se modificó Supabase Auth, ni RPC/RLS/migraciones, ni FE-2F. No se borró código histórico ni datos del navegador.
+
+**H-01 — Dashboard ficticio y fallback del router.**
+- `apps/web/src/pages/Dashboard.tsx`: se agregó un aviso visible (`role="alert"`) al inicio de la pantalla que declara explícitamente que los valores son **datos de demostración ficticios**, no información operativa real. No se conectó el Dashboard a ninguna RPC nueva ni se inventaron métricas.
+- `apps/web/src/App.tsx`: el fallback `*` ahora redirige explícitamente a `/` (`<Navigate to="/" replace />`) en lugar de renderizar `Inicio` directamente, respetando autenticación y roles. El vendedor/piloto aterriza en `/` (no hay bucle hacia `/autoventa`, que ya no existe).
+
+**H-02 — Pruebas Playwright.**
+- `apps/web/playwright.config.ts`: se agregó `testIgnore: ['historico-localstorage/**']` para que las suites históricas de localStorage no formen parte de la colección activa. Como `testDir` ya es `./tests`, el patrón se resuelve desde ese directorio. El patrón anterior `./tests/historico-localstorage/**` no coincidía y fue corregido después de que la auditoría detectara las 12 suites dentro de la colección.
+- `apps/web/tests/historico-localstorage/` (nuevo directorio): se movieron aquí las 12 suites que prueban el prototipo demo sobre `localStorage` (rutas ya retiradas), con su `README.md` explicando la exclusión. No se borraron ni se presentan como pruebas actuales.
+- `apps/web/tests/rutas-retiradas.spec.ts` (nuevo): pruebas parametrizadas de acceso directo a las 8 rutas retiradas (`/demo/jornadas`, `/autoventa`, `/ventas`, `/movimientos`, `/rendicion`, `/retornos`, `/cuentas`, `/configuracion-demo`), sin sesión (redirigen a `/login`) y con sesión de dueño (no muestran pantalla de negocio demo, aterrizan en `/`).
+- `apps/web/tests/dashboard.spec.ts` (nuevo): verifica el aviso de datos demostrativos en el Dashboard y la redirección del fallback (`*` → `/` con sesión, `*` → `/login` sin sesión).
+- `apps/web/tests/auth/auth.spec.ts`: actualizadas las rutas retiradas (`/rendicion`, `/autoventa`, `/demo/jornadas`, `/configuracion-demo`) por rutas válidas (`/productos`, `/stock`, `/camiones`, `/jornadas`, `/`).
+- `apps/web/tests/b02b-jornadas-lectura.spec.ts`: ruta de prueba de vendedor actualizada de `["/camiones", "/demo/jornadas", "/rendicion"]` a `["/camiones", "/productos", "/stock"]`.
+- `apps/web/tests/productos-catalogo.spec.ts`: eliminado el bloque `test.describe("Convivencia temporal con el catálogo demo (DE-12)")` que referenciaba rutas retiradas.
+
+**Qué se hizo (rutas).**
+- `apps/web/src/App.tsx`: eliminadas las rutas `/demo/jornadas`, `/autoventa`, `/ventas`, `/movimientos`, `/rendicion`, `/retornos`, `/cuentas` y `/configuracion-demo`; eliminadas las importaciones de `JornadasDemo`, `Autoventa`, `Movimientos`, `Rendicion`, `Retornos`, `CuentasCorrientes`, `ConfiguracionDemo`, `Suspense`/`lazy`, `ROLES_SOLO_DUENO` y `RUTA_JORNADAS_DEMO`.
+- `apps/web/src/auth/roles.ts`: `inicioPorRol()` devuelve siempre `/`.
+- `apps/web/src/pages/Login.tsx`: llama `inicioPorRol()` sin argumentos.
+- `apps/web/src/components/layout/AppLayout.tsx`: eliminado el enlace rápido móvil `<Link to="/autoventa">` y los imports `Link`/`ShoppingCart`; label del header ajusta a "Stock".
+- `apps/web/src/components/layout/Sidebar.tsx`: eliminado el enlace de menú demo `/demo/jornadas` (bloque `import.meta.env.DEV`), el import `RUTA_JORNADAS_DEMO` y el icono `ClipboardList`; label ajusta a "Stock".
+- `apps/web/src/components/layout/menu.ts`: eliminadas del array `MENU` las rutas `/autoventa`, `/movimientos`, `/rendicion`, `/retornos`, `/cuentas` y `/configuracion-demo`; `RUTAS_VENDEDOR` queda `["/clientes", "/jornadas"]`; eliminados imports de iconos ya no usados.
+- `apps/web/src/app_rutas.test.ts`: reescrito para verificar la ausencia de las 8 rutas retiradas y la conservación de las rutas reales de Supabase.
+- `apps/web/src/components/layout/menu.test.ts`: actualizado a las nuevas rutas del vendedor y ausencia de `/configuracion-demo`.
+
+**Componentes conservados como referencia (sin ruta operativa):** `JornadasDemo.tsx`, `Autoventa.tsx`, `Movimientos.tsx`, `Rendicion.tsx`, `Retornos.tsx`, `CuentasCorrientes.tsx`, `ConfiguracionDemo.tsx`, los hooks antiguos de localStorage y `data/clavesStorage.ts`. Ningún dato del navegador se borró.
+
+**Rutas retiradas (8):** `/demo/jornadas`, `/autoventa`, `/ventas`, `/movimientos`, `/rendicion`, `/retornos`, `/cuentas`, `/configuracion-demo`.
+
+**Rutas preservadas (Supabase):** `/login`, `/` (Dashboard con aviso de datos de demostración), `/productos`, `/stock`, `/clientes`, `/camiones`, `/jornadas`.
+
+**Funcionalidades temporalmente no disponibles** (no existen en Supabase; su única implementación era el demo sobre localStorage): autoventa/venta digital, movimientos de reparto (merma/devolución/cambio), rendición/cierre de jornada, retornos al depósito, cuentas corrientes/cobros, configuración de demo.
+
+**Verificación (`apps/web/`).**
+
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` (Vitest) | exit 0; 64 archivos, 2227 pruebas |
+| `npm run build` | exit 0 (un solo chunk JS; sin chunks de pantallas demo) |
+| `git diff --check` | exit 0 |
+| `npx playwright test --list` | exit 0; 172 tests en 17 archivos: 1 setup y 171 pruebas actuales; 0 casos de `historico-localstorage/`. Se conservaron `auth/auth.spec.ts`, `productos-catalogo.spec.ts`, las suites de jornadas, `dashboard.spec.ts` y `rutas-retiradas.spec.ts` |
+| `npx playwright test --list tests/historico-localstorage` | exit 1 esperado; `No tests found`, total 0 tests en 0 archivos por `testIgnore` |
+| Playwright E2E / pgTAP / Docker / SQL | **no ejecutados** (no hay entorno local aislado autorizado ni base remota) |
+
+**Riesgos y funcionalidades no implementadas.**
+1. Las 5 funcionalidades de negocio listadas arriba no están disponibles hasta que se implementen sobre Supabase (tareas posteriores, pendientes de ADR-001 y migraciones autorizadas).
+2. Los tests E2E de Playwright no se ejecutaron (no hay backend local ni entorno aislado autorizado); se dejan para la etapa con entorno aislado.
+3. `demo/entorno.ts` conserva `RUTA_JORNADAS_DEMO` (ya sin importadores en el código activo).
+4. No se creó commit, push, merge ni deploy. Pendiente de revisión del diff y autorización humana.
+
+Sin `git add`, commit, push, merge ni deploy.
+
+---
 ## 09/11/2026 — FE-2F: cuarto ciclo EXCEPCIONAL — O-1, verificación atada a la identidad de la intención (rama `feat/fe2f-verificacion-identidad` sobre `b28aa0d`; SIN COMMIT; SECURITY REVIEW PENDIENTE; P13 SIGUE PENDIENTE)
 
 **Excepción registrada (decisión humana, 09/11/2026).** Se autorizó **excepcionalmente un cuarto ciclo** de corrección (`AGENTS.md` §2.3.5, máximo 3 ciclos), **exclusivamente para O-1** mediante la opción A. Razones: O-1 lo identificó la security review FE-2E del ciclo 3 (`auditoria-integral-vm/FE2E_SECURITY_REVIEW/INFORME_SECURITY_REVIEW_FE2E_CICLO3.md`, SHA-256 `4ba9730eb9462f54ad744959d3b3489b566a69cfb2e3a37a69fb6227bf9333c5`, verificado), que lo elevó a decisión humana en lugar de iniciar un ciclo automático. Es un riesgo de integridad (pérdida de la clave de una intención con resultado desconocido y posible duplicación por una intención nueva) y su corrección es acotada. **La excepción no autoriza otras correcciones ni modifica el límite de ciclos para tareas futuras.** Si aparece otro defecto, no se inicia un quinto ciclo: se pide intervención humana.
