@@ -16,7 +16,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(58);
+select plan(60);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como propietario; se revierten al final)
@@ -49,10 +49,19 @@ create temp table tablas_negocio (tabla regclass);
 insert into tablas_negocio values
   ('public.empresas'), ('public.perfiles'), ('public.productos'),
   ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
-  ('public.operaciones'), ('public.movimientos_stock');
+  ('public.operaciones'), ('public.movimientos_stock'),
+  ('public.jornadas'), ('public.reasignaciones_vendedor'),
+  ('public.correcciones_jornada'),
+  -- ADR-010 v1.1 (C1.1): sólo se usa en las pruebas P11 (service_role denegado);
+  -- el contrato completo de ACL y RLS de estas dos tablas está en
+  -- intenciones_esquema.test.sql.
+  ('public.intenciones_operacion'), ('public.intenciones_reconocimientos');
 grant select on tablas_negocio to public;
 
--- Las 20 firmas de negocio (fachadas + implementaciones).
+-- Las 38 firmas de negocio (fachadas + implementaciones): 20 de productos, camiones y
+-- clientes, 2 de abrir_jornada (T1), 2 de reasignar_vendedor (T2), 2 de registrar_carga (T5),
+-- 2 de registrar_descarga (T6), 2 de confirmar_salida (T7), 2 de corregir_jornada (T4) y
+-- 6 de intenciones (ADR-010 C1.2a: crear, ejecutar y cancelar). Stock se verifica por separado.
 create temp table rpc_negocio (firma regprocedure);
 insert into rpc_negocio values
   ('public.crear_producto(text,text,text,text,numeric,integer)'),
@@ -65,6 +74,15 @@ insert into rpc_negocio values
   ('public.actualizar_cliente(uuid,text,text,text,text)'),
   ('public.validar_cliente(uuid)'),
   ('public.cambiar_estado_cliente(uuid,boolean)'),
+  ('public.abrir_jornada(uuid,uuid,date,uuid)'),
+  ('public.reasignar_vendedor(uuid,uuid,uuid)'),
+  ('public.registrar_carga(uuid,uuid,uuid[],integer[])'),
+  ('public.registrar_descarga(uuid,uuid,uuid[],integer[],text)'),
+  ('public.confirmar_salida(uuid,uuid)'),
+  ('public.corregir_jornada(uuid,uuid,date,uuid,text)'),
+  ('public.crear_intencion_operacion(uuid,text,jsonb)'),
+  ('public.ejecutar_intencion_operacion(uuid)'),
+  ('public.cancelar_intencion_operacion(uuid)'),
   ('privado.crear_producto(text,text,text,text,numeric,integer)'),
   ('privado.actualizar_producto(uuid,text,text,numeric,integer)'),
   ('privado.cambiar_estado_producto(uuid,boolean)'),
@@ -74,7 +92,16 @@ insert into rpc_negocio values
   ('privado.crear_cliente(text,text,text,text)'),
   ('privado.actualizar_cliente(uuid,text,text,text,text)'),
   ('privado.validar_cliente(uuid)'),
-  ('privado.cambiar_estado_cliente(uuid,boolean)');
+  ('privado.cambiar_estado_cliente(uuid,boolean)'),
+  ('privado.abrir_jornada(uuid,uuid,date,uuid)'),
+  ('privado.reasignar_vendedor(uuid,uuid,uuid)'),
+  ('privado.registrar_carga(uuid,uuid,uuid[],integer[])'),
+  ('privado.registrar_descarga(uuid,uuid,uuid[],integer[],text)'),
+  ('privado.confirmar_salida(uuid,uuid)'),
+  ('privado.corregir_jornada(uuid,uuid,date,uuid,text)'),
+  ('privado.crear_intencion_operacion(uuid,text,jsonb)'),
+  ('privado.ejecutar_intencion_operacion(uuid)'),
+  ('privado.cancelar_intencion_operacion(uuid)');
 grant select on rpc_negocio to public;
 
 -- ===========================================================================
@@ -120,7 +147,7 @@ select is(
   (select count(*)::int from rpc_negocio r
     where has_function_privilege('service_role', r.firma, 'EXECUTE')),
   0,
-  'P11: service_role sin EXECUTE sobre las 20 firmas de negocio (fachadas e implementaciones)');
+  'P11: service_role sin EXECUTE sobre las 38 firmas de negocio (fachadas e implementaciones)');
 
 select is(
   (select count(*)::int from pg_proc p
@@ -213,8 +240,8 @@ select is(
   (select count(*)::int from rpc_negocio r join pg_proc p on p.oid = r.firma
     where p.pronamespace = 'privado'::regnamespace
       and p.prosecdef and p.proowner = 'propietario_rpc'::regrole),
-  10,
-  'O-3: las 10 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
+  19,
+  'O-3: las 19 implementaciones privadas siguen SECURITY DEFINER y de propietario_rpc');
 
 select ok(
   not exists (select 1 from pg_auth_members
@@ -346,14 +373,19 @@ select case when (select f from o4) is null
           'postgres', 'O-4: rls_auto_enable() sigue siendo de postgres') end;
 select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
-  else is((select array_to_string(proconfig, ',') from pg_proc where oid = (select f from o4)),
-          'search_path=pg_catalog', 'O-4: rls_auto_enable() conserva search_path=pg_catalog') end;
+  else is((select proconfig::text from pg_proc where oid = (select f from o4)),
+          '{"search_path=pg_catalog, pg_temp"}',
+          'O-4 (O4-PGTEMP, RA): proconfig exacto {search_path=pg_catalog, pg_temp}') end;
 select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
   else ok(not exists (select 1 from pg_proc p,
                         aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
                        where p.oid = (select f from o4) and a.grantee = 0),
           'O-4: PUBLIC sin EXECUTE sobre rls_auto_enable()') end;
+select case when (select f from o4) is null
+  then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
+  else ok((select p.proacl = array['postgres=X/postgres'::aclitem] from pg_proc p where p.oid = (select f from o4)),
+          'E-O4-ACL: la ACL de rls_auto_enable() es exactamente {postgres=X/postgres}') end;
 select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
   else ok(not has_function_privilege('anon', (select f from o4), 'EXECUTE'),
@@ -370,8 +402,32 @@ select case when (select f from o4) is null
   then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
   else ok(exists (select 1 from pg_event_trigger
                    where evtname = 'ensure_rls' and evtfoid = (select f from o4)
-                     and evtenabled <> 'D'),
-          'O-4: ensure_rls sigue habilitado y apunta a rls_auto_enable()') end;
+                     and evtowner = 'postgres'::regrole
+                     and evtevent = 'ddl_command_end'
+                     and evtenabled = 'O'
+                     and array_ndims(evttags) = 1
+                     and array(select u.tag from unnest(evttags) u(tag) order by u.tag collate "C")
+                         = array['CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO']::text[])
+          and (select count(*) from pg_event_trigger
+                where evtname = 'ensure_rls' or evtfoid = (select f from o4)) = 1
+          and not exists (select 1 from pg_trigger where tgfoid = (select f from o4)),
+          'O-4: ensure_rls es el único event trigger de rls_auto_enable(): owner postgres, ddl_command_end, evtenabled O y exactamente las 3 tags, sin duplicados') end;
+-- Identidad exacta de la función remediada (O4-PGTEMP, RB: cuerpo de staging
+-- con 3 referencias calificadas; contrato aprobado sólo como norma, ADR-001
+-- §18.2.1). El cuerpo anterior
+-- 325ae266… es vulnerable y queda rechazado. El hash identifica el cuerpo; no
+-- certifica su seguridad funcional (F7/F8 siguen abiertos).
+select case when (select f from o4) is null
+  then skip('O-4: public.rls_auto_enable() no existe en este entorno (local)', 1)
+  else ok(exists (select 1 from pg_proc p join pg_language l on l.oid = p.prolang
+                   where p.oid = (select f from o4)
+                     and p.prokind = 'f'
+                     and p.prorettype = 'event_trigger'::regtype
+                     and l.lanname = 'plpgsql'
+                     and p.prosqlbody is null and p.probin is null
+                     and encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex')
+                         = 'e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e'),
+          'O-4: rls_auto_enable() tiene la identidad remediada (plpgsql, event_trigger, SHA-256 de prosrc e1b231fb…)') end;
 
 -- Coherencia sin falsos positivos: la función y su trigger existen juntos o
 -- faltan juntos.

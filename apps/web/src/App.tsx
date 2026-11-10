@@ -11,10 +11,10 @@ import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 import { AuthProvider } from "./AuthContext";
+import { BorradorCargaProvider } from "./hooks/BorradorCargaProvider";
 import { useAuth } from "./auth/useAuth";
 import {
   ROLES_GESTION,
-  ROLES_SOLO_DUENO,
   ROLES_TODOS,
 } from "./auth/roles";
 import {
@@ -24,16 +24,11 @@ import {
 
 import Dashboard from "./pages/Dashboard";
 import Productos from "./pages/Productos";
+import Stock from "./pages/Stock";
 import Clientes from "./pages/Clientes";
 import Camiones from "./pages/Camiones";
 import Jornadas from "./pages/Jornadas";
-import Autoventa from "./pages/Autoventa";
-import Movimientos from "./pages/Movimientos";
-import Rendicion from "./pages/Rendicion";
-import Retornos from "./pages/Retornos";
-import CuentasCorrientes from "./pages/CuentasCorrientes";
 import Login from "./pages/Login";
-import ConfiguracionDemo from "./pages/ConfiguracionDemo";
 
 // Dueño y encargado: lo que tenía el administrador del prototipo.
 // Vendedor/piloto: lo que tenía el vendedor. El rol "depósito" no existe
@@ -42,12 +37,9 @@ const gestion = ROLES_GESTION;
 const todos = ROLES_TODOS;
 
 function Inicio() {
-  const { usuario } = useAuth();
-
-  if (usuario?.rol === "vendedor_piloto") {
-    return <Navigate to="/autoventa" replace />;
-  }
-
+  // La página de inicio es común para todos los roles autenticados. La ruta
+  // /autoventa se retiró porque depende de localStorage como fuente de verdad
+  // de negocio; no se redirige a una pantalla demo operativa.
   return <Dashboard />;
 }
 
@@ -88,6 +80,15 @@ function RutasPrivadas() {
         />
 
         <Route
+          path="/stock"
+          element={
+            <ProtectedRoute roles={gestion}>
+              <Stock />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
           path="/clientes"
           element={
             <ProtectedRoute roles={todos}>
@@ -105,66 +106,17 @@ function RutasPrivadas() {
           }
         />
 
+        {/* Real: lectura. El vendedor sólo ve su jornada (RLS decide las filas). */}
         <Route
           path="/jornadas"
           element={
-            <ProtectedRoute roles={gestion}>
+            <ProtectedRoute roles={todos}>
               <Jornadas />
             </ProtectedRoute>
           }
         />
 
-        <Route
-          path="/autoventa"
-          element={
-            <ProtectedRoute roles={todos}>
-              <Autoventa />
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/ventas"
-          element={<Navigate to="/autoventa" replace />}
-        />
-
-        <Route
-          path="/movimientos"
-          element={
-            <ProtectedRoute roles={todos}>
-              <Movimientos />
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/rendicion"
-          element={
-            <ProtectedRoute roles={gestion}>
-              <Rendicion />
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/retornos"
-          element={
-            <ProtectedRoute roles={gestion}>
-              <Retornos />
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/cuentas"
-          element={
-            <ProtectedRoute roles={todos}>
-              <CuentasCorrientes />
-            </ProtectedRoute>
-          }
-        />
-
-        <Route path="*" element={<Inicio />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>
   );
@@ -173,20 +125,16 @@ function RutasPrivadas() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/configuracion-demo"
-            element={
-              <ProtectedRoute roles={ROLES_SOLO_DUENO}>
-                <ConfiguracionDemo />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/*" element={<RutasPrivadas />} />
-        </Routes>
-      </BrowserRouter>
+      {/* FE-1D: borrador de carga sobre el router (sobrevive a la navegación
+          interna; se descarta al cambiar de usuario). No registra cargas. */}
+      <BorradorCargaProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/*" element={<RutasPrivadas />} />
+          </Routes>
+        </BrowserRouter>
+      </BorradorCargaProvider>
     </AuthProvider>
   );
 }

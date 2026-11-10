@@ -3,46 +3,25 @@ import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import {
-  LayoutDashboard,
-  Package,
-  Users,
-  Truck,
-  ShoppingCart,
-  Wallet,
-  ClipboardList,
-  RefreshCw,
-  ClipboardCheck,
-  Warehouse,
   LogOut,
   UserCircle,
-  Settings,
   Menu,
   X,
 } from "lucide-react";
 
 import { useAuth } from "../../auth/useAuth";
 import { nombreRol } from "../../auth/roles";
-
-const menu = [
-  { nombre: "Inicio", icono: LayoutDashboard, ruta: "/" },
-  { nombre: "Productos", icono: Package, ruta: "/productos" },
-  { nombre: "Clientes", icono: Users, ruta: "/clientes" },
-  { nombre: "Camiones", icono: Truck, ruta: "/camiones" },
-  { nombre: "Jornadas", icono: ClipboardList, ruta: "/jornadas" },
-  { nombre: "Autoventa", icono: ShoppingCart, ruta: "/autoventa" },
-  { nombre: "Movimientos", icono: RefreshCw, ruta: "/movimientos" },
-  { nombre: "Rendición", icono: ClipboardCheck, ruta: "/rendicion" },
-  { nombre: "Retornos", icono: Warehouse, ruta: "/retornos" },
-  { nombre: "Cuentas corrientes", icono: Wallet, ruta: "/cuentas" },
-  {
-    nombre: "Configuración",
-    icono: Settings,
-    ruta: "/configuracion-demo",
-  },
-];
+import { useBorradorCarga } from "../../hooks/borradorCargaContexto";
+import {
+  ConfirmarDescarteBorrador,
+  MENSAJE_DESCARTE_CIERRE_SESION,
+} from "../ConfirmarDescarteBorrador";
+import { aceptarSalida, pedirSalida } from "./cierre_sesion";
+import { itemsMenuPorRol } from "./menu";
 
 export default function Sidebar() {
   const { usuario, cerrarSesion } = useAuth();
+  const borradorCarga = useBorradorCarga();
 
   const [menuAbierto, setMenuAbierto] = useState(false);
 
@@ -63,33 +42,22 @@ export default function Sidebar() {
     };
   }, [menuAbierto]);
 
-  const menuVisible = menu.filter((item) => {
-    if (usuario?.rol === "dueno") {
-      return true;
-    }
-
-    if (usuario?.rol === "encargado") {
-      return item.ruta !== "/configuracion-demo";
-    }
-
-    if (usuario?.rol === "vendedor_piloto") {
-      return [
-        "/clientes",
-        "/autoventa",
-        "/movimientos",
-        "/cuentas",
-      ].includes(item.ruta);
-    }
-
-    return false;
-  });
+  const menuVisible = itemsMenuPorRol(usuario?.rol);
 
   const rolVisible = usuario ? nombreRol(usuario.rol) : "Sin sesión";
 
-  function salir() {
+  // FE-1E: con un borrador de carga escrito, cerrar sesión pide confirmar el
+  // descarte; el menú queda abierto para mostrar la pregunta.
+  function cerrarYOcultar() {
     setMenuAbierto(false);
     void cerrarSesion();
   }
+
+  function salir() {
+    pedirSalida(borradorCarga, cerrarYOcultar);
+  }
+
+  const confirmandoSalida = borradorCarga.pendiente?.tipo === "cerrar_sesion";
 
   return (
     <>
@@ -143,7 +111,7 @@ export default function Sidebar() {
             </h1>
 
             <p className="mt-1 text-sm text-slate-400">
-              Stock y Autoventa
+              Stock
             </p>
           </div>
 
@@ -209,6 +177,17 @@ export default function Sidebar() {
 
         {/* CERRAR SESIÓN */}
         <div className="shrink-0 border-t border-slate-700 pt-4">
+          {confirmandoSalida && (
+            <ConfirmarDescarteBorrador
+              id="descarte-carga-cierre-sesion"
+              mensaje={MENSAJE_DESCARTE_CIERRE_SESION}
+              textoCancelar="Seguir con el borrador"
+              textoAceptar="Descartar y cerrar sesión"
+              onCancelar={borradorCarga.cancelarDescarte}
+              onAceptar={() => aceptarSalida(borradorCarga, cerrarYOcultar)}
+            />
+          )}
+
           <button
             type="button"
             onClick={salir}

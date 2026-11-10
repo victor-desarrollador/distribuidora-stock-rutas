@@ -1,8 +1,8 @@
 # ADR-001 — Puerta de entrada SQL para operaciones privilegiadas
 
-**Fecha:** 12/10/2026 · **Última revisión documental:** 29/10/2026
+**Fecha:** 12/10/2026 · **Última revisión documental:** 07/11/2026
 **Estado:** APROBADA PARA VALIDACIÓN CONTROLADA
-**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15)
+**Versión:** 1.5 (registro de las decisiones humanas P2–P4; P5–P7 en v1.4) + anexo §18.1 (decisiones acotadas al slice productos, 23/10/2026) + anexo §18.2 (decisiones transversales P11 global, O-3 y O-4, 24/10/2026) + anexo §18.3 (decisiones acotadas al dominio Stock, 25/10/2026; ampliado con el slice `stock-cuarentena-merma`) + anexo §18.4 (jornadas y carga: v0.4 con fe de erratas E1–E3 y correcciones H-01, H-02, H2-R1, H2-R2, A-01 a A-03, L-01 y L-02; **aprobado para validación controlada el 29/10/2026**, acotado a jornadas y carga; ver 18.4.14; cierre de D-2 en 18.4.15; enmienda E-SL1 en 18.4.16, **aprobada para validación controlada el 04/11/2026**)
 
 > **Aviso de alcance.** La decisión humana resolvió P1, P19 y P20; el 22/10/2026, P5, P6 y P7; el 23/10/2026, P2, P3 y P4 (§18); y el 24/10/2026, P11 global y las observaciones O-3 y O-4, para validación controlada (§18.2). Esta ADR autoriza exclusivamente el diseño, las migraciones y las pruebas necesarias para validar la Topología D en local/staging, una vez resueltas las decisiones P8–P10 y P12–P17 que requiera el alcance de la validación. **No autoriza producción**, no resuelve P8–P10 ni P12–P17 y no convierte P18 en requisito. La aceptación productiva exige pruebas, auditoría independiente y aceptación humana final (`AGENTS.md` §3 y §5; `BLUEPRINT.md` §10; `docs/decisions/README.md`).
 
@@ -30,6 +30,12 @@
 | v1.5 + anexo §18.4 (candidato) | Claude Code | Incorpora §18.4 v0.4 (contrato técnico de las seis RPC de ADR-007) con la fe de erratas E1–E3, como **PROPUESTA TÉCNICA NO APROBADA**. No aprueba el anexo, no cambia el estado de la ADR, no modifica ADR-007, no autoriza SQL ni producción; D-1, D-2, arnés, CI y security review siguen pendientes. |
 | v1.5 + anexo §18.4 (aprobado) | Claude Code | Registra la decisión humana del 29/10/2026: aprueba, **para validación controlada local/staging y acotado a jornadas y carga de camiones**, el contenido de §18.4 auditado por Codex en `05c3dfe85984f9ed3f492b80d7dd2e9ae29ed855` (SHA-256 `0170ab56afff633457dc4547ec46ef6a1ada007ec904a7a33cffdb4f0f9763dd`). Resuelve P10 y P12–P17 sólo para las seis RPC de ADR-007 y D-N1. No aprueba P8 ni P9, otros dominios, decisiones globales ni producción; el estado de la ADR no cambia. Registra la excepción aceptada a `AGENTS.md` §2.2 (OpenCode no auditó) y los ciclos que superaron `AGENTS.md` §2.3.5. Sólo cambian rótulos, referencias y trazabilidad; el contrato técnico no se modifica. |
 | v1.5 + anexo §18.4 (cierre D-2) | Claude Code | Registra el cierre de D-2 (18.4.15): commit auditado `e826d308aab9a0b108ece17128c5c3448d7729ae`, PASS de Codex y de OpenCode, aceptación humana de esos informes como security review sólo para D-2, merge del PR #33 (`4654a95fb478c7b118dca4f67368ccd6a9b331b7`), CI en verde y el despliegue automático de Vercel a Production. Registra las aclaraciones C-1 y C-2 sobre el texto de 18.4.2.1 sin editarlo, y C-3 y C-4. No modifica 18.4.1 a 18.4.12, no cambia el estado de la ADR, no autoriza D-1, el arnés, las seis RPC ni producción. |
+| v1.5 + anexo §18.4 (E-SL1 propuesta) | Claude Code | Agrega 18.4.16: enmienda E-SL1 (paso 0 de rechazo de transacciones de sólo lectura en `abrir_jornada` y `reasignar_vendedor`, código `25006 jornada_metodo_no_permitido`), como **PROPUESTA TÉCNICA NO APROBADA**, con la dirección técnica humana del 03/11/2026 registrada sin aprobarla. No modifica 18.4.1 a 18.4.15 ni el estado de la ADR; no autoriza producción. |
+| v1.5 + anexo §18.4 (E-SL1 aprobada) | Claude Code | Registra la decisión humana del 04/11/2026: E-SL1 (18.4.16) queda **APROBADA PARA VALIDACIÓN CONTROLADA**, con el texto presentado y sin cambios, como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006 jornada_metodo_no_permitido`) y §16 T14. El punto 4 de la dirección técnica rige para `corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida` en sus tareas autorizadas. No modifica 18.4.1 a 18.4.15, no cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. |
+| v1.5 + remisión ADR-010 | Claude Code | Registra, por decisión humana del 06/11/2026, una nota de remisión al final de §18.3 hacia ADR-010 (APROBADA, normativa): excepción acotada a P15-stock para las intenciones persistidas de stock y su relación con P13-stock y P16-stock. No modifica ninguna decisión de §18.1–§18.4, no cambia el estado de la ADR ni autoriza implementación ni producción. |
+| v1.5 + anexo §18.2.1 (O-4 RB + RA) | Claude Code | Registra la decisión humana del 07/11/2026 (14:13, America/Argentina/Tucuman) que aprueba, **para validación controlada y sólo como norma**, la alternativa A de la enmienda de O-4: contrato verificable RB + RA de `public.rls_auto_enable()` (§18.2.1). No cambia el estado de la ADR, no autoriza migraciones en staging ni en producción y no resuelve F7, F8, H-04 ni PB12C. |
+| v1.5 + anexo §18.2.2 (E-O4-ACL y T3-01-L/R) | Claude Code | Registra las decisiones humanas del 07/11/2026 sobre T3-01 (§18.2.2), **sólo para validación controlada y LOCAL**: E-O4-ACL (ACL exacta `{postgres=X/postgres}` de `public.rls_auto_enable()`), PB12C-2 resuelto, procedimiento L5 (sin acceso remoto autorizado), secuencia de creación del rol LOGIN, separación normativa T3-01-L / T3-01-R (R-STG y R-PROD), la regla de ACL distinta en plataforma hospedada y los puntos que siguen abiertos (F7, F8, B/C, H-04). No cambia el estado de la ADR, no modifica 18.2.1, no autoriza migraciones en staging ni en producción, no declara cerrado T3-01-L y no autoriza ADR-010. |
+| v1.5 + anexo §18.4 (E-PL1) | Claude Code | Formaliza E-PL1 (18.4.2.2), **APROBADA PARA VALIDACIÓN CONTROLADA** (local/staging) por decisión humana expresa (A-1, A-2, A-3, A-4): agrega la RPC de lectura `listar_vendedores_jornada()` y amplía **expresamente** D-2 (18.4.2.1) de cuatro a cinco columnas (`nombre`) para `lector_perfiles_rpc` y la vista `privado.perfiles_empresa_gestion`. No cambia ninguna política de RLS, ningún rol autorizado ni el estado de la ADR; no autoriza staging ni producción. |
 
 ---
 
@@ -391,6 +397,7 @@ Base: `BLUEPRINT.md` §12, con pgTAP en `supabase/tests/` ejecutado por `supabas
 Está documentado y **no es una incógnita del entorno**. Se prueba para detectar errores de implementación; puede probarse **localmente**.
 
 - `SET search_path = ''`: con search path vacío todo objeto debe estar calificado con su esquema (PostgreSQL *CREATE FUNCTION*; Supabase lint 0011). Se prueba que cada función lo tenga fijado y que funcione con nombres calificados.
+  - **Nota aclaratoria (PROPUESTA — pendiente de aprobación humana; 04/11/2026, plan de remediación pg_temp, A1).** No modifica la regla ni el estado de esta ADR; sólo precisa su alcance. «Todo objeto» incluye los **tipos** (declaraciones, firmas, `%TYPE`, `CAST(... AS tipo)` y casts `::tipo`) y las **relaciones**, no sólo las funciones. Con `search_path = ''`, PostgreSQL busca `pg_temp` **antes** que `pg_catalog` para tipos y relaciones sin calificar; no lo hace para funciones ni operadores. Por eso se escribe, por ejemplo, `::pg_catalog.uuid`. La prueba correspondiente crea objetos temporales hostiles y verifica que no se ejecuten como el owner técnico (`supabase/tests/pg_temp_rpc_privilegiadas*.test.sql`).
 - `EXECUTE` a `PUBLIC` por defecto en funciones nuevas, y su revocación efectiva.
 - Que un `REVOKE` de privilegios por defecto hecho por esquema no elimina un grant global (sección 12.6).
 - Que el propietario de una tabla elude RLS salvo `FORCE`, y que `BYPASSRLS` o superusuario la eluden siempre.
@@ -519,6 +526,80 @@ Implementación y evidencia: `supabase/migrations/20261023140000_catalogo_produc
 
 Implementación y evidencia local: `supabase/migrations/20261024232059_hardening_adr001_p11_o3_o4.sql`, `supabase/tests/hardening_adr001.test.sql`, `supabase/tests/grants_default_privileges.test.sql` y la entrada «Hardening transversal ADR-001: P11 global, O-3 y O-4» de `docs/progress-log.md`. La aplicación de la migración en staging y su validación posterior quedan pendientes de autorización humana.
 
+#### 18.2.1 Enmienda de O-4: contrato RB + RA de `public.rls_auto_enable()` (decisión humana del 07/11/2026, 14:13 America/Argentina/Tucuman)
+
+> **Alcance estricto.** Decisión humana del responsable del proyecto, **aprobada exclusivamente como norma y para preparar la validación controlada**. **No autoriza** ejecutar migraciones en staging ni en producción, **no cambia el estado de esta ADR** (APROBADA PARA VALIDACIÓN CONTROLADA), no autoriza cambios de SQL, RLS, RPC, tests o scripts adicionales y no resuelve P8–P10 ni P12–P17. Aprueba la **alternativa A** de la propuesta `PROPUESTA_ENMIENDA_ADR001_18_2.md` (SHA-256 `7844b4728ba41e6c0ab96dead4a2dc361d92976335c131b142dd1a61d2af8a28`, 06/11/2026; evidencia externa de T3-01, fuera de este repositorio). Reemplaza a la propuesta B.1.2b/B.1.2c, cuyo cuerpo `325ae266…` pasa a ser una definición prohibida.
+
+**Texto aprobado.** Se conservan `public.rls_auto_enable()` y el event trigger `ensure_rls` y se adopta el cuerpo remediado RB (SHA-256 `e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e`) con la configuración RA (`search_path=pg_catalog, pg_temp`), manteniendo los contratos de propietario, privilegios, OID y event trigger definidos en la propuesta. Se conserva el comportamiento funcional **observable** de `ensure_rls` (los tres DDL dejan la RLS activa); el cuerpo y `proconfig` de la función sí cambian respecto del observado en staging.
+
+**Contrato verificable (RB + RA).**
+
+- Función `public.rls_auto_enable()`, identificada por OID: `prokind = 'f'`, `SECURITY DEFINER`, owner `postgres`, retorno `event_trigger`, lenguaje `plpgsql`, `prosqlbody` y `probin` nulos.
+- `proconfig` exactamente `{"search_path=pg_catalog, pg_temp"}` (RA).
+- SHA-256 de `convert_to(prosrc, 'UTF8')` = `e1b231fb7db1d25c9dfab71d09dbc968c092c00c0049aca1f529f7e79296fb6e` (RB): el cuerpo `325ae266…` con `cmd pg_catalog.record`, `tbl pg_catalog.name` y `FROM pg_catalog.pg_event_trigger_ddl_commands()`.
+- Sin `EXECUTE` para PUBLIC ni efectivo para `anon`, `authenticated` o `service_role` (§18.2 vigente); sin homónimos, sobrecargas ni triggers de tabla.
+- Event trigger `ensure_rls`: único y asociado sólo a la función, owner `postgres`, `ddl_command_end`, `evtenabled = 'O'` y `evttags` unidimensional con exactamente `CREATE TABLE`, `CREATE TABLE AS` y `SELECT INTO`, en cualquier orden y sin duplicados ni NULL.
+- Cuerpo `325ae266…` (`search_path=pg_catalog`): **definición prohibida**; vulnerable a la resolución de tipos en `pg_temp` (O4-PGTEMP). Está prohibido restaurarlo.
+
+**Límites.**
+
+- Se aprueba únicamente la norma. La migración `20261110120000_o4_pgtemp_remediacion.sql` queda como implementación local (forward-only, ADR-009) y **no está autorizada** en staging ni en producción.
+- No se modifica el comportamiento funcional de `ensure_rls`, no se eliminan objetos de plataforma y no se amplía el alcance de la migración O-4.
+- El hash identifica el cuerpo; **no certifica su seguridad**.
+- Si la plataforma recrea o modifica la función, el preflight falla cerrado; se requiere extracción read-only, comparación y una decisión humana nueva.
+- No se ha confirmado que la plataforma admita `CREATE OR REPLACE` sobre este objeto.
+- En local la función no existe: el preflight rechaza la ausencia de O-4 (`[O4_AUSENTE]`) salvo marcador explícito de laboratorio local (nunca `ESTADO_A`).
+
+**Pendientes (siguen abiertos; bloquean producción).**
+
+- **F7:** `EXCEPTION WHEN OTHERS THEN RAISE LOG` absorbe la falla al habilitar RLS: la tabla de `public` puede quedar sin RLS con el DDL exitoso. Compensación vigente: RLS explícita en las migraciones (P4) y preflight T3P-05.
+- **F8:** los DDL de roles reservados y superusuario no disparan `ensure_rls`; para `supabase_admin` es una inferencia no registrada.
+- **H-04** y **PB12C:** pendientes de resolución humana.
+- Decisión entre las alternativas B (fail-closed de F7) y C (retirar O-4 con RLS explícita) a partir de evidencia de la plataforma; inventario read-only de roles con LOGIN del entorno destino; revisión de seguridad; auditoría independiente del hash que corresponda; y autorización humana explícita de staging y de producción (cada una por separado).
+
+#### 18.2.2 Decisiones humanas del 07/11/2026 sobre T3-01: E-O4-ACL, L5, secuencia LOGIN y separación T3-01-L / T3-01-R
+
+> **Alcance estricto.** Decisiones humanas **para validación controlada y LOCAL**. **No autorizan** ejecutar migraciones en staging ni en producción, **no cambian el estado de esta ADR** (APROBADA PARA VALIDACIÓN CONTROLADA), **no modifican el texto aprobado de 18.2.1**, no conceden accesos remotos y **no declaran cerrado T3-01-L**. No resuelven P8–P10 ni P12–P17 y no autorizan la implementación de ADR-010.
+
+**Base técnica auditada.** Commit `f33044db55ede0c57421a72a034d0d14e4047b4d`, rama `fix/t3-01-cierre-local`; auditoría de Codex: FAVORABLE (informada por el responsable del proyecto).
+
+**Decisiones aprobadas.**
+
+1. **PB12C-2 — RESUELTO.** Se confirma el contrato de 18.2.1: el event trigger `ensure_rls` tiene exactamente `CREATE TABLE`, `CREATE TABLE AS` y `SELECT INTO`, sin duplicados ni NULL. No requiere nueva enmienda.
+2. **E-O4-ACL — APROBADA normativamente para LOCAL.** La ACL de `public.rls_auto_enable()` debe ser **exactamente** `{postgres=X/postgres}`: una única entrada, otorgante y beneficiario `postgres`, sólo `EXECUTE`, **sin entradas adicionales ni opción de delegación** (`WITH GRANT OPTION`). Una ACL `NULL` (la ACL por defecto incluye a PUBLIC), vacía o distinta debe provocar **rechazo fail-closed**. **No se extiende a otras funciones.** Complementa el contrato RB + RA de 18.2.1; no cambia P11 ni el comportamiento de `ensure_rls`.
+3. **L5 — APROBADO como procedimiento, sin acceso remoto autorizado.** El historial de migraciones (`supabase_migrations.schema_migrations`, sólo `version` y `name`) lo consulta un **operador humano autorizado, con su propia identidad**, usando **SQL revisado y fijado por hash** (el hash del SQL exacto se consigna en la autorización humana de cada ejecución). **No se otorga `USAGE` ni `SELECT` sobre `supabase_migrations` al rol dedicado de lectura.** El resultado se deposita sanitizado en la carpeta de evidencia. Es un acto remoto: no se ejecuta en local. Mientras tanto Q4 sigue informando «DEPENDENCIA PENDIENTE», y es aceptable.
+4. **Secuencia LOGIN — APROBADA.** En entornos compartidos, **primero** se aplica y verifica RB + RA y **recién después**, con **autorización separada**, se crea el rol LOGIN dedicado de lectura. Motivo: crear un rol LOGIN con `TEMP` antes de aplicar RB + RA reabre la precondición de O4-PGTEMP. **No se crean roles nuevos ahora.**
+5. **T3-01-L / T3-01-R — APROBADA la separación normativa.** T3-01-L es la aceptación técnica **local** y exige cumplir las condiciones L-01 a L-12 sobre un **único hash H_L**. T3-01-R se divide en **R-STG** (staging) y **R-PROD** (producción), con autorizaciones independientes. **Aprobar la separación no significa que T3-01-L esté cerrado.**
+6. **F7, F8 y B/C — ABIERTOS.** No se elige la alternativa B ni la C. Siguen siendo bloqueos para la aceptación productiva.
+7. **H-04 — ABIERTO.** No se acepta ni se cierra un hallazgo cuyo contenido no fue recuperado. Se debe solicitar a Codex una reconstrucción puntual antes de decidir.
+8. **ACL en plataforma hospedada.** No se aprueba ninguna excepción por anticipado. Si la ACL real difiere de la exacta, **se detiene la secuencia** y se presenta cada diferencia (beneficiario, privilegio, opción de delegación) para **autorización nominada**. **Nunca** se admite `EXECUTE` para PUBLIC, `anon`, `authenticated` ni `service_role`. Ninguna corrección con `GRANT`/`REVOKE` se aplica sin autorización humana separada.
+
+**Condiciones de T3-01-L (todas, sobre un único hash H_L).**
+
+- L-01 Árbol limpio en H_L; todas las evidencias vinculadas estrictamente (`GIT_COMMIT_ESPERADO` / `GIT_ARBOL_ESPERADO`); evidencia con árbol sucio = «NO VINCULADA» y no cuenta.
+- L-02 Migraciones: las 25 de la línea T3-01 sin cambios de contenido respecto de `983ea69`, salvo decisión humana nominada. La migración O-4 (RB + RA, cuerpo SHA-256 `e1b231fb…`, `proconfig = {search_path=pg_catalog, pg_temp}`) no contiene el cuerpo vulnerable `325ae266…`.
+- L-03 Suite oficial `supabase test db` en H_L: 0 fallas (cifra a registrar).
+- L-04 Preflight `validar_topologia_propietario_rpc.sql` ejecutado en SOLO LECTURA sobre la base construida con el CLI desde H_L: exitoso; inventario cerrado de 40 firmas; etiquetas como multiconjunto ordenado; EXECUTE efectivo (PUBLIC/anon/authenticated/service_role); y, con O-4 presente, ACL exacta (E-O4-ACL).
+- L-05 Paquete de inventario RO (Q0–Q6, ejecutor, vínculo de evidencia): `probar_ejecutor_ro.sh` y `probar_consultas_ro.sh` sin fallas, digest de imagen del repositorio (.004) y paridad .003.
+- L-06 Arnés de explotación O-4 X01–X08 re-ejecutado contra la migración vigente, todos con el resultado esperado.
+- L-07 `probar_o4_docker.sh` (M-01/B-01) y O-4 presente sin fallas.
+- L-08 Decisiones humanas registradas: PB12C-2 (cierre), E-O4-ACL, H-04 (recuperar o caracterizar) y procedimiento L5. *Nota: H-04 sigue ABIERTO (decisión 7); mientras no se recupere o caracterice con aceptación humana, L-08 no se cumple.*
+- L-09 Security review (`AGENTS.md` §2.4: RLS, RPC, SECURITY DEFINER, grants, `service_role`, O-4) cerrada.
+- L-10 Auditoría independiente de Codex Y OpenCode sobre H_L, con dictámenes archivados; ningún hallazgo bloqueante abierto.
+- L-11 Aprobación humana explícita de H_L como «T3-01-L cerrado».
+- L-12 Cualquier cambio posterior a la auditoría genera un hash nuevo y se re-audita (`AGENTS.md` §2.3.4); máximo 3 ciclos.
+
+**T3-01-R.** R-STG (staging) y R-PROD (producción) son hitos separados; cada paso remoto requiere autorización humana propia y nominada. Nada de T3-01-L ni de R-STG habilita producción. El lote de migraciones a aplicar, el rol dedicado de lectura y la ejecución de Q0–Q6 son pasos remotos distintos y no están autorizados por esta sección.
+
+**Estado de las condiciones al registrar esta decisión.** La implementación local de E-O4-ACL (preflight, Q2/Q6, pruebas) está en la rama `feat/t3-01-l-acl-exacta`, **sin commit y sin auditar**. T3-01-L **no está cerrado**: no hay H_L designado, falta la verificación sobre ese hash, la security review, la auditoría de Codex y OpenCode sobre el hash final y la aprobación humana.
+
+**Pendientes (siguen abiertos).**
+
+- **F7, F8 y la decisión B/C**, con evidencia de plataforma (bloquean producción).
+- **H-04:** reconstrucción puntual por Codex y decisión humana posterior.
+- Todo acceso remoto: lecturas previas, lote de migraciones, rol dedicado y Q0–Q6, proyecto hospedado descartable para B/C; cada uno con autorización separada.
+- La cabecera de la migración `20261110120000_o4_pgtemp_remediacion.sql` sigue diciendo «PROPUESTA NO APROBADA»: no se modifica para preservar el hash auditado (L-02).
+
 ### 18.3 Decisiones acotadas al dominio Stock (25/10/2026)
 
 > **Alcance estricto.** Decisiones humanas **aprobadas para validación controlada** que aplican **únicamente al dominio Stock** (`public.operaciones`, `public.movimientos_stock`, `public.stock_actual` y sus RPC; slices `stock-ingreso` y `stock-cuarentena-merma`). **No resuelven P10–P17 globalmente**: jornadas, ventas, dinero, retiros, conteos, rendiciones y cierres siguen pendientes. **No cambian el estado de esta ADR**, que sigue siendo **APROBADA PARA VALIDACIÓN CONTROLADA**, y **no autorizan producción**.
@@ -534,6 +615,8 @@ Implementación y evidencia local: `supabase/migrations/20261024232059_hardening
 | P17-stock | La auditoría de operaciones exitosas de Stock es `operaciones` (actor, empresa, tipo, clave, huella, `creado_en`) + `movimientos_stock` (operación, actor, motivo, producto, cantidad, origen, destino, `creado_en`); sin tabla genérica `auditoria` (Blueprint §10). `jornada_id` se agrega en la Etapa 3 con FK real. Append-only por grants y RLS, sin trigger. | P17 global pendiente |
 
 Implementación y evidencia: `supabase/migrations/20261025021032_stock_operaciones_ingreso.sql`, `supabase/tests/stock_ingreso.test.sql` y la entrada «Etapa 2 — Stock, slice 1: stock-ingreso» de `docs/progress-log.md`.
+
+> **Remisión a [ADR-010](010-intenciones-persistidas-de-operacion.md) (APROBADA, decisión humana del 06/11/2026; aprobación normativa, sin implementación).** ADR-010 aprueba una **excepción acotada a P15-stock**: la `idempotency_key` de una operación de stock de los tipos `ingreso`, `a_cuarentena` y `merma` puede persistirse además como `id` de su intención en `public.intenciones_operacion` (ADR-010 §7.1). `operaciones.idempotency_key` sigue siendo la **única** barrera de unicidad e idempotencia (P12-stock) y sigue prohibido copiar la clave a `movimientos_stock` o a cualquier documento hijo. Para la vía de intenciones, ADR-010 §5.8 antepone al lock de stock de P13-stock un lock por actor (solo en `crear`) y el bloqueo de la fila de la intención, y §5.7 devuelve los rechazos de negocio de una lista cerrada como estado `rechazada` (HTTP 200) en lugar del `PTxyz` de P16-stock. **Esta remisión no modifica** ninguna fila de la tabla anterior, las RPC de Stock ni sus contratos, ni el estado de esta ADR; no autoriza implementación, staging ni producción.
 
 #### Slice 2 `stock-cuarentena-merma` (25/10/2026)
 
@@ -617,6 +700,7 @@ Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotenci
 | `registrar_carga(uuid, uuid, uuid[], integer[])` | `uuid` operación | `dueno`, `encargado` | `abierta`, `cargada` |
 | `registrar_descarga(uuid, uuid, uuid[], integer[], text)` | `uuid` operación | `dueno`, `encargado` | `cargada` |
 | `confirmar_salida(uuid, uuid)` | `uuid` operación | `dueno`, `encargado` | `cargada`, carga neta > 0 |
+| `listar_vendedores_jornada()` — sin parámetros (E-PL1, 18.4.2.2) | `TABLE (usuario_id uuid, nombre text, rol text)` | `dueno`, `encargado` (activos) | lectura pura; sin estado de jornada |
 
 **Grants.** En ninguno de estos objetos reciben privilegios `service_role` ni `anon`; `authenticated` no recibe DML.
 
@@ -626,7 +710,7 @@ Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotenci
 | Historiales | `SELECT` | `INSERT` por columna (todas salvo `id`, `tipo_operacion` y `creado_en`). Sin `SELECT`. | — |
 | `operaciones` | sin cambios | se agrega `INSERT (jornada_id)` | — |
 | `movimientos_stock` | sin cambios | se agrega `INSERT (jornada_id)` | — |
-| `perfiles` | sin cambios | **sin cambios** (sólo `SELECT`; sus políticas no cambian) | `SELECT (usuario_id, empresa_id, rol, activo)` |
+| `perfiles` | sin cambios | **sin cambios** (sólo `SELECT`; sus políticas no cambian) | `SELECT (usuario_id, empresa_id, rol, activo, nombre)` (cinco columnas desde E-PL1, 18.4.2.2; antes cuatro) |
 | `privado.perfiles_empresa_gestion` (vista) | — | `SELECT` | owner |
 | `privado.empresa_gestion_actual()` | — | `EXECUTE` | — |
 | esquema `privado` | `USAGE` (sin cambios) | `USAGE` (sin cambios) | **ninguno** en el estado final; `CREATE` sólo transitorio durante la migración (18.4.2.1) |
@@ -658,9 +742,9 @@ Sin cambios: las seis RPC, I-CAMION, D6/D8, el contrato funcional de idempotenci
 
 | Pieza | Especificación |
 |---|---|
-| **Rol `lector_perfiles_rpc`** | `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`. No es miembro de ningún rol. Su único miembro es `postgres`, con las dos filas del patrón O-3 (ver «Membresía»). No es propietario de tablas ni de funciones. Su único privilegio es `SELECT (usuario_id, empresa_id, rol, activo)` sobre `public.perfiles`. En el estado final no tiene `USAGE` ni `CREATE` en ningún esquema: no los necesita para resolver la vista ni la política. Se crea en la misma migración que su único objeto (P2–P4: sin objetos anticipados). |
+| **Rol `lector_perfiles_rpc`** | `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`. No es miembro de ningún rol. Su único miembro es `postgres`, con las dos filas del patrón O-3 (ver «Membresía»). No es propietario de tablas ni de funciones. Su único privilegio es `SELECT (usuario_id, empresa_id, rol, activo, nombre)` sobre `public.perfiles` (cinco columnas desde E-PL1, 18.4.2.2; el texto aprobado originalmente de D-2 fijaba cuatro y excluía `nombre`). En el estado final no tiene `USAGE` ni `CREATE` en ningún esquema: no los necesita para resolver la vista ni la política. Se crea en la misma migración que su único objeto (P2–P4: sin objetos anticipados). |
 | **Capa 1: helper `privado.empresa_gestion_actual() returns uuid`** | `LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''`, owner `propietario_rpc`. Cuerpo: `select p.empresa_id from public.perfiles p where p.usuario_id = privado.usuario_actual() and p.activo and p.rol in ('dueno','encargado')`. Devuelve NULL si el llamador no es dueño o encargado activo. `REVOKE ALL` de `PUBLIC`, `anon`, `authenticated` y `service_role`; `GRANT EXECUTE` sólo a `propietario_rpc`. Corre como `propietario_rpc` y sólo lo alcanza la política vigente `perfiles_select_propio_propietario_rpc`, que no llama a ninguna función. Por ser `SECURITY DEFINER` y tener `proconfig`, no se inlinea. Sin parámetros: no deriva empresa ni rol del JWT, sólo de `perfiles` (P5–P7). |
-| **Capa 2: vista `privado.perfiles_empresa_gestion`** | `WITH (security_invoker = false, security_barrier = true) AS select usuario_id, empresa_id, rol, activo from public.perfiles`. Owner `lector_perfiles_rpc`, así que la RLS de `perfiles` se le aplica a ese rol. `REVOKE ALL` de `PUBLIC`, `anon`, `authenticated` y `service_role`; `GRANT SELECT` sólo a `propietario_rpc`. Vive en `privado`, que no está expuesto. |
+| **Capa 2: vista `privado.perfiles_empresa_gestion`** | `WITH (security_invoker = false, security_barrier = true) AS select usuario_id, empresa_id, rol, activo, nombre from public.perfiles` (cinco columnas desde E-PL1, 18.4.2.2; `nombre` va al final). Owner `lector_perfiles_rpc`, así que la RLS de `perfiles` se le aplica a ese rol. `REVOKE ALL` de `PUBLIC`, `anon`, `authenticated` y `service_role`; `GRANT SELECT` sólo a `propietario_rpc`. Vive en `privado`, que no está expuesto. |
 | **Política `perfiles_select_empresa_lector`** | `ON public.perfiles FOR SELECT TO lector_perfiles_rpc USING (empresa_id = (select privado.empresa_gestion_actual()))`. Llamador no gestor, inactivo, sin perfil o sin `sub` ⇒ 0 filas. Sólo perfiles de la empresa del llamador. |
 
 **Por qué no hay recursión.**
@@ -682,7 +766,7 @@ No se introduce `INHERIT` ni ningún permiso para roles de la Data API.
 **Procedimiento de migración (orden obligatorio).**
 1. `CREATE ROLE lector_perfiles_rpc NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` (si ya existe por ser global del clúster, se verifican sus atributos y se falla si difieren, como con `propietario_rpc`).
 2. `GRANT lector_perfiles_rpc TO postgres WITH INHERIT FALSE, SET TRUE`.
-3. `GRANT SELECT (usuario_id, empresa_id, rol, activo) ON public.perfiles TO lector_perfiles_rpc`.
+3. `GRANT SELECT (usuario_id, empresa_id, rol, activo) ON public.perfiles TO lector_perfiles_rpc` (procedimiento original de D-2; `nombre` se agrega después con la migración de E-PL1, 18.4.2.2).
 4. Helper (patrón O-3): `CREATE FUNCTION` → `GRANT CREATE ON SCHEMA privado TO propietario_rpc` → `ALTER FUNCTION … OWNER TO propietario_rpc` → `REVOKE CREATE ON SCHEMA privado FROM propietario_rpc` → `SET ROLE propietario_rpc` → `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role` → `GRANT EXECUTE … TO propietario_rpc` → `RESET ROLE`.
 5. Vista: `CREATE VIEW` → `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role` → `GRANT SELECT … TO propietario_rpc` → **`GRANT CREATE ON SCHEMA privado TO lector_perfiles_rpc`** → `ALTER VIEW … OWNER TO lector_perfiles_rpc` → **`REVOKE CREATE ON SCHEMA privado FROM lector_perfiles_rpc`**. Sin el `CREATE` temporal, el `ALTER … OWNER` falla con `42501` (18.4.12).
 6. `CREATE POLICY perfiles_select_empresa_lector`.
@@ -712,6 +796,37 @@ No se introduce `INHERIT` ni ningún permiso para roles de la Data API.
 | `USING (true)` | Permite lectura entre empresas |
 | GUC de sesión | Lo puede fijar la propia sesión |
 | FK con `activo` | Bloquea la baja posterior que ADR-007 §2.3 admite |
+
+##### 18.4.2.2 Enmienda E-PL1 — `listar_vendedores_jornada()` y ampliación de D-2 (APROBADA PARA VALIDACIÓN CONTROLADA, local/staging)
+
+**Registro.** Decisión humana expresa (A-1, A-2, A-3 y A-4, con E-PL1 corregida), registrada el 07/11/2026. Alcance: jornadas (ADR-007 §2.3). **No autoriza staging ni producción**, no cambia el estado de la ADR, no cambia ninguna política de RLS ni los roles autorizados, y no es una regla funcional nueva: sólo da al dueño o encargado una lectura protegida de los candidatos a vendedor que ADR-007 §2.3 ya define.
+
+**E-PL1.1 — RPC de lectura.** Se agrega al catálogo de 18.4.2 la RPC `listar_vendedores_jornada()`: fachada `public.listar_vendedores_jornada()` (`SECURITY INVOKER`, `search_path = ''`, owner `postgres`, `LANGUAGE sql`, `STABLE`) que delega en `privado.listar_vendedores_jornada()` (`SECURITY DEFINER`, `STABLE`, `search_path = ''`, owner `propietario_rpc`, `LANGUAGE plpgsql`). Sin parámetros y sin sobrecargas (18.4.6). Es una lectura pura: no crea `operaciones`, no usa clave de idempotencia ni bloqueos, y se admite en transacciones de sólo lectura (E-SL1 no le aplica).
+
+**E-PL1.2 — Autorización y errores.**
+- Sin identidad (`privado.usuario_actual()` NULL): `PT401 jornada_no_autenticado`.
+- Llamador que no es `dueno` o `encargado` activo (vendedor, sin perfil, perfil inactivo): `PT403 jornada_no_autorizado`.
+- Los códigos son los ya definidos en 18.4.7; no se agregan códigos nuevos.
+- `anon` y `service_role` reciben `42501` (sin `EXECUTE`).
+
+**E-PL1.3 — Respuesta.** `TABLE (usuario_id uuid, nombre text, rol text)`, exactamente esas tres columnas y en ese orden. Filas: perfiles con `activo = true` de la **empresa del llamador** cuyo `rol` es `dueno`, `encargado` o `vendedor_piloto` (los tres roles que ADR-007 §2.3 admite como vendedor), incluido el propio llamador. Orden: `ORDER BY nombre COLLATE "C", usuario_id`. Defensa en profundidad (H-01): además de la RLS del lector, la implementación compara el `empresa_id` de cada perfil con el de la empresa del llamador obtenida una sola vez de `privado.empresa_gestion_actual()` (sin cambiar el resultado esperado ni los permisos); declara sus variables con tipos calificados (`pg_catalog.uuid`) por la regla de `pg_temp` (P7). `nombre` se devuelve tal como está almacenado, sin transformación: el esquema garantiza que no es nulo ni vacío (`NOT NULL` y `CHECK perfiles_nombre_no_vacio`). No se expone `usuario` (identificador de login), ni `creado_en`, ni datos de otra empresa.
+
+**E-PL1.4 — Ampliación expresa de D-2.** Esta enmienda **modifica la exclusión de `nombre` de 18.4.2.1**: `lector_perfiles_rpc` pasa a tener `SELECT` sobre cinco columnas de `public.perfiles` (`usuario_id`, `empresa_id`, `rol`, `activo`, `nombre`) y `privado.perfiles_empresa_gestion` pasa a exponer esas cinco, en ese orden. No se exponen `usuario` ni `creado_en`. La política `perfiles_select_empresa_lector` y las demás políticas de `perfiles` no cambian. Ningún otro rol recibe privilegios nuevos sobre `perfiles` ni sobre la vista.
+
+**E-PL1.5 — Mecánica de la migración.** Antes de cualquier cambio la migración verifica fail-closed el contrato de D-2 vigente (copia literal de la sección 1b de `20261030120000_jornadas_esquema.sql`: atributos del rol `lector_perfiles_rpc`, membresías, privilegios efectivos, ACL por defecto, helper `empresa_gestion_actual()` —definición, owner y ACL—, política `perfiles_select_empresa_lector` —expresión, roles y comando—, vista y sus opciones) más los atributos de `propietario_rpc` y la ausencia de configuración propia de ambos roles (`pg_db_role_setting`); si algo difiere, aborta sin aplicar grants ni cambiar la vista. Luego ejecuta, en un único bloque `DO` (atómico aunque el ejecutor no envuelva el archivo en una transacción), en este orden:
+1. `GRANT SELECT (nombre) ON public.perfiles TO lector_perfiles_rpc`.
+2. `GRANT CREATE ON SCHEMA privado TO lector_perfiles_rpc` (transitorio; no se concede `USAGE`).
+3. `SET ROLE lector_perfiles_rpc`.
+4. `CREATE OR REPLACE VIEW privado.perfiles_empresa_gestion WITH (security_invoker = false, security_barrier = true) AS SELECT usuario_id, empresa_id, rol, activo, nombre FROM public.perfiles`. Las opciones `WITH` son obligatorias: `CREATE OR REPLACE VIEW` las descarta si se omiten.
+5. `RESET ROLE`.
+6. `REVOKE CREATE ON SCHEMA privado FROM lector_perfiles_rpc`.
+7. Verificación fail-closed dentro del mismo bloque: `lector_perfiles_rpc` sin `USAGE` ni `CREATE` en `privado`, sin `CREATE` en `public` y sin entradas propias en la ACL de ningún esquema; vista de tipo `v`, dueña `lector_perfiles_rpc`, con exactamente `security_barrier=true` y `security_invoker=false`; columnas exactas y ordenadas; ACL de la vista igual a `propietario_rpc:SELECT`; `lector_perfiles_rpc` dueño de una sola relación y de ninguna función; sin privilegios de escritura sobre `perfiles`; columnas con `SELECT` exactamente las cinco.
+
+Las migraciones ya aplicadas no se editan (ADR-009): el precheck de cuatro columnas de `20261030120000_jornadas_esquema.sql` corre antes de esta migración y no se rompe. Toda verificación futura del contrato de D-2 usa el de cinco columnas.
+
+**E-PL1.6 — Acceso a la implementación privada.** `authenticated` conserva `EXECUTE` sobre `privado.listar_vendedores_jornada()` y `USAGE` sobre `privado`: ambos son necesarios para que la fachada `SECURITY INVOKER` funcione (verificado: sin cualquiera de los dos la fachada falla con `42501`). No existe una ruta con menos controles: la llamada directa a la función privada aplica las mismas comprobaciones y devuelve lo mismo. La barrera de exposición externa es que `privado` no está expuesto por la Data API (`schemas = ["public", "graphql_public"]` en `supabase/config.toml`). `anon`, `service_role` y `lector_perfiles_rpc` no tienen `USAGE` sobre `privado` ni `EXECUTE`; `propietario_rpc` no tiene `EXECUTE` sobre la fachada. `service_role` no recibe ninguna excepción nueva (P11).
+
+**E-PL1.7 — Pruebas obligatorias** (`supabase/tests/jornadas_listar_vendedores.test.sql`, más los ajustes de P2, P4 y P14 en `lector_perfiles_rpc.test.sql`, y las pruebas negativas de deriva del precheck en `supabase/laboratorio/e-pl1/precheck_drift.sh`, que necesitan superusuario y un contenedor aislado): positivos (dueño y encargado, tres roles, sólo activos y de la empresa propia, orden y columnas exactas); negativos (`anon` y `service_role` `42501`; vendedor, sin perfil, dueño inactivo y encargado inactivo `PT403`; sin `sub` `PT401`; otra empresa); acceso directo a la función privada (mismas comprobaciones) y a la vista (`42501`); defensa en profundidad con la política del lector alterada (`USING (true)`); privilegios efectivos (`has_*_privilege`, no sólo ACL) y ACL exactas de ambas funciones; `authenticated` ve únicamente su perfil por `public.perfiles`; columnas y `reloptions` exactas de la vista, dueño y ACL; `lector_perfiles_rpc` sin `USAGE`/`CREATE` en `privado`; atomicidad con fallo inyectado; `nombre` no nulo ni vacío; transacción de sólo lectura; `privado` no expuesto por la API; políticas de `perfiles` sin cambios.
 
 #### 18.4.3 Orden de ejecución de cada implementación
 
@@ -942,9 +1057,9 @@ Comprenden las 24 pruebas normativas de ADR-007 §7 y los grupos de abajo. Los r
 | # | Caso | Esperado |
 |---|---|---|
 | P1 | **Membresía (patrón O-3)**, igual que para `propietario_rpc` en `hardening_adr001`: exactamente dos filas para `roleid = lector_perfiles_rpc`, ambas con `member = postgres`: (a) grantor con `rolsuper`, `admin = t`, `inherit = f`, `set = f`; (b) grantor `postgres`, `admin = f`, `inherit = f`, `set = t`. Ninguna fila con `inherit = t`. `lector_perfiles_rpc` no es miembro de ningún rol. `pg_has_role(postgres, …, 'SET') = t` y `'USAGE' = f`. `anon`, `authenticated`, `authenticator`, `service_role` y `propietario_rpc` sin SET ni USAGE | exacto |
-| P2 | Atributos NOLOGIN/NOSUPERUSER/NOBYPASSRLS/NOCREATEDB/NOCREATEROLE/NOREPLICATION; privilegio de 4 columnas `SELECT` sobre `perfiles`; ningún otro privilegio de tabla; sin `USAGE` ni `CREATE` sobre `privado` ni `public`; dueño de exactamente una relación (la vista) y de ninguna función | exacto |
+| P2 | Atributos NOLOGIN/NOSUPERUSER/NOBYPASSRLS/NOCREATEDB/NOCREATEROLE/NOREPLICATION; privilegio de 5 columnas `SELECT` sobre `perfiles` (`usuario_id`, `empresa_id`, `rol`, `activo`, `nombre`; E-PL1); ningún otro privilegio de tabla; sin `USAGE` ni `CREATE` sobre `privado` ni `public`; dueño de exactamente una relación (la vista) y de ninguna función | exacto |
 | P3 | Helper: `SECURITY DEFINER`, owner `propietario_rpc`, `search_path=""`, `STABLE`, sin parámetros, ACL exacta (sólo `propietario_rpc`) y sin sobrecargas; `has_function_privilege` falso para `lector_perfiles_rpc`, `authenticated`, `anon`, `service_role` y `postgres` | exacto |
-| P4 | Vista: owner `lector_perfiles_rpc`, `security_invoker=false`, `security_barrier=true`, 4 columnas, ACL sólo con owner y `SELECT` de `propietario_rpc` | exacto |
+| P4 | Vista: owner `lector_perfiles_rpc`, `security_invoker=false`, `security_barrier=true`, 5 columnas (`nombre` al final; E-PL1), ACL sólo con owner y `SELECT` de `propietario_rpc` | exacto |
 | P5 | Políticas de `perfiles`: las de `authenticated` y de `propietario_rpc` iguales a hoy; una sola nueva, `SELECT TO lector_perfiles_rpc`; ninguna de escritura | exacto |
 | P6 | Como `propietario_rpc`, con el claim de un dueño de A, se lee la vista | todos los perfiles de A, incluidos inactivos y vendedores; ninguno de B; sin `42P17` ni `54001` |
 | P7 | Lo mismo con encargado de A, vendedor de A, dueño inactivo, sin perfil y sin `sub` | encargado: los de A; los otros cuatro: 0 filas |
@@ -1233,6 +1348,42 @@ Este apartado es sólo trazabilidad. No forma parte del contrato técnico de 18.
 **Despliegue a Production de Vercel.** El push del merge a `main` disparó un despliegue automático de Vercel en el entorno **Production** (GitHub deployment `7428037655`, creado por `vercel[bot]` el 30/10/2026 01:03:06 UTC; estado `success`). **No hubo una autorización humana de deploy** (`AGENTS.md` §2.2.1 y §2.3.8). Hechos verificados en el repositorio: el merge no modifica `apps/web/`, y `apps/web/vercel.json` sólo declara un `rewrite` al `index.html` y no ejecuta migraciones. No hay evidencia de que la migración de D-2 se haya aplicado en el Supabase remoto, pero tampoco se verificó su estado. La forma de impedir que se repita queda pendiente de decisión humana. Registro: `docs/incidents/2026-10-30-vercel-production-automatico.md` (abierto).
 
 **Pendiente después del cierre:** D-1, la tabla `jornadas`, las seis RPC (con P11/P12 de D-2), el arnés y su integración en CI, el corte de jornada y el control del despliegue automático a Production. Producción sigue bloqueada para ADR-001 (§15 y §19).
+
+#### 18.4.16 Enmienda E-SL1 — rechazo de transacciones de sólo lectura antes del replay (APROBADA PARA VALIDACIÓN CONTROLADA, 04/11/2026)
+
+**Estado: APROBADA PARA VALIDACIÓN CONTROLADA (decisión humana del 04/11/2026).** Propuesta el 03/11/2026 como PROPUESTA TÉCNICA NO APROBADA, redactada por Claude Code dentro de la corrección extraordinaria T1/T2 autorizada por el usuario; el usuario la aprobó el 04/11/2026 con el texto de esta sección, sin cambios. Desde esa fecha, el «Texto propuesto» rige como enmienda de 18.4.3 (paso 0), 18.4.7 (`25006`) y §16 T14, con la «Dirección técnica humana» de abajo. Esos apartados no se reescriben: se leen junto con esta enmienda, que prevalece donde los precisa. No cambia el estado de la ADR, no autoriza producción y no aprueba ADR-009. El punto 4 de la dirección técnica rige para las otras cuatro RPC de jornadas, cada una dentro de su propia tarea autorizada.
+
+**Problema.** §6 y T14 (§16) exigen que GET sobre una RPC de escritura responda 405 porque PostgREST lo ejecuta en una transacción READ ONLY. El orden de 18.4.3 hace el replay (pasos 5 y 8a) antes de cualquier escritura, y un replay sólo lee. Resultado observado con PostgREST real sobre `90672be`: GET y HEAD con una `idempotency_key` ya usada respondían **200** con el uuid guardado, y con otra huella **409**; el 405 sólo aparecía cuando la primera escritura fallaba, con el texto interno de PostgreSQL (`cannot execute INSERT in a read-only transaction` / `… SELECT FOR UPDATE …`) en `message`.
+
+**Texto propuesto.**
+
+1. **18.4.3, paso 0 (nuevo, antes del paso 1).** En `abrir_jornada` y `reasignar_vendedor`, la primera sentencia de la implementación privada es:
+   `transaction_read_only = on` → `SQLSTATE 25006`, `message = jornada_metodo_no_permitido`.
+   Precede al aislamiento (paso 1), a la identidad y el rol (paso 2), a la estructura (paso 3), a la huella y a todo replay (pasos 5 y 8a). No lee tablas ni toma bloqueos. Los pasos 1 a 12 no cambian.
+2. **18.4.7.** Se agrega a la tabla: `25006` → `jornada_metodo_no_permitido` (método HTTP no admitido / transacción de sólo lectura). Es la única excepción a la regla «SQLSTATE `PTxyz`»: PostgREST traduce `25006` a 405 (*PostgREST, Errors → SQLSTATE to HTTP status*). Los tests verifican el SQLSTATE y el código de `message`.
+3. **§16, T14 (precisión).** GET y HEAD sobre `abrir_jornada` y `reasignar_vendedor` responden 405 con clave nueva, con clave ya usada y misma huella, y con clave ya usada y otra huella, para dueño, encargado, vendedor/piloto y usuarios de otra empresa. `anon` y `service_role` siguen rechazados antes del cuerpo por falta de `EXECUTE` (`42501`; HTTP 401 y 403). Un rechazo por sólo lectura no reserva la clave: el POST posterior con esa clave se ejecuta como primera ejecución, y con una clave ya usada devuelve la respuesta original.
+
+**Consecuencias.**
+- Para un authenticated sin `sub`, sin perfil o con rol no autorizado, un GET responde 405 en lugar de 401/403: la guarda precede a la autorización. El 405 no revela datos ni el estado de la clave, porque es idéntico para todo llamador con `EXECUTE`.
+- Una llamada SQL interna en una transacción de sólo lectura (por ejemplo, `BEGIN READ ONLY`) también se rechaza, aun cuando sería un replay.
+- No cambia idempotencia, bloqueos, permisos, RLS, grants ni la huella.
+
+**Alternativas.**
+- *Sin guarda (estado anterior):* contradice T14 (200 en el replay) y expone texto interno de PostgreSQL.
+- *`PT405` en lugar de `25006`:* PostgREST traduce `PTxyz` a HTTP `xyz`, así que también daría 405 y respetaría la convención `PTxyz` de 18.4.7. Se usó `25006` porque así lo especificó la autorización de la corrección y es el SQLSTATE nativo de PostgreSQL para este caso. El usuario mantuvo `25006` (dirección técnica de abajo).
+- *Rechazar en la fachada `public`:* la fachada es SQL `SECURITY INVOKER` que sólo delega (18.4.6); la guarda en la implementación cubre también la llamada directa a `privado` y no agrega funciones.
+
+**Dirección técnica humana (03/11/2026).** El usuario fijó, como dirección para esta enmienda, que:
+1. la condición de rechazo es `transaction_read_only = on`;
+2. el SQLSTATE es `25006` (no `PT405`), con `message = jornada_metodo_no_permitido`;
+3. la guarda va antes del replay idempotente (paso 0, antes de los pasos 1 a 12);
+4. el mismo requisito rige para las futuras RPC de jornadas que tengan operaciones de escritura o replay (`corregir_jornada`, `registrar_carga`, `registrar_descarga` y `confirmar_salida`, todavía no implementadas).
+
+Esta dirección, por sí sola, no aprobaba E-SL1 ni modificaba 18.4.1 a 18.4.15 (texto del 03/11/2026, conservado). La aprobación llegó por la decisión humana del 04/11/2026 registrada abajo. Para las cuatro RPC futuras, el punto 4 se aplica a través de E-SL1 aprobada y de la tarea autorizada de cada RPC.
+
+**Decisión humana (04/11/2026).** E-SL1 queda **APROBADA PARA VALIDACIÓN CONTROLADA** (local/staging), conforme al texto de esta sección y a la dirección técnica anterior. No autoriza producción ni cambia el estado de ADR-001; ADR-009 sigue PROPUESTA — NO APROBADA. Con la misma decisión, el usuario eligió construir el endurecimiento pg_temp de jornadas (B1) sobre los cuerpos con esta guarda.
+
+**Implementación candidata (local, sin commit).** Rama `fix/jornadas-rpc-solo-lectura` desde `90672be`: `supabase/migrations/20261104120000_jornadas_rpc_rechazo_solo_lectura.sql`, `supabase/tests/jornadas_solo_lectura.test.sql` y `apps/web/tests/jornadas-rpc-http.spec.ts`. Evidencia en `docs/progress-log.md` (entrada del 03/11/2026).
 
 ---
 

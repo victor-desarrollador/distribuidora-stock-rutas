@@ -9,7 +9,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(150);
+select plan(151);
 
 -- ---------------------------------------------------------------------------
 -- Datos de prueba (como owner; se revierten al final)
@@ -133,11 +133,11 @@ select is(
                            'movimientos_stock_forma_por_tipo', 'movimientos_stock_motivo_codigo_valido',
                            'movimientos_stock_motivo_por_tipo')
          order by conname::text),
-  array['movimientos_stock_forma_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (ubicacion_origen_id IS NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NULL))))',
+  array['movimientos_stock_forma_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (ubicacion_origen_id IS NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NULL)) OR ((tipo_movimiento = ANY (ARRAY[''carga''::text, ''descarga''::text])) AND (ubicacion_origen_id IS NOT NULL) AND (ubicacion_destino_id IS NOT NULL))))',
         'movimientos_stock_motivo_codigo_valido:CHECK (((motivo_codigo IS NULL) OR (motivo_codigo = ANY (ARRAY[''vencido''::text, ''roto_danado''::text, ''mal_estado''::text, ''error_pedido''::text, ''cambio''::text, ''otro''::text]))))',
-        'movimientos_stock_motivo_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (motivo_codigo IS NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (motivo_codigo IS NULL) AND (motivo IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (motivo_codigo IS NOT NULL) AND ((motivo_codigo <> ''otro''::text) OR (motivo IS NOT NULL)))))',
-        'movimientos_stock_tipo_valido:CHECK ((tipo_movimiento = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text])))',
-        'operaciones_tipo_valido:CHECK ((tipo = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text])))'],
+        'movimientos_stock_motivo_por_tipo:CHECK ((((tipo_movimiento = ''ingreso''::text) AND (motivo_codigo IS NULL)) OR ((tipo_movimiento = ''a_cuarentena''::text) AND (motivo_codigo IS NULL) AND (motivo IS NOT NULL)) OR ((tipo_movimiento = ''merma''::text) AND (motivo_codigo IS NOT NULL) AND ((motivo_codigo <> ''otro''::text) OR (motivo IS NOT NULL))) OR ((tipo_movimiento = ''carga''::text) AND (motivo_codigo IS NULL) AND (motivo IS NULL)) OR ((tipo_movimiento = ''descarga''::text) AND (motivo_codigo IS NULL) AND (motivo IS NOT NULL))))',
+        'movimientos_stock_tipo_valido:CHECK ((tipo_movimiento = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text, ''carga''::text, ''descarga''::text])))',
+        'operaciones_tipo_valido:CHECK ((tipo = ANY (ARRAY[''ingreso''::text, ''a_cuarentena''::text, ''merma''::text, ''apertura_jornada''::text, ''reasignacion_vendedor''::text, ''correccion_jornada''::text, ''carga''::text, ''descarga''::text, ''salida_jornada''::text])))'],
   'tipos, forma por tipo y motivos: definiciones exactas (catálogo literal de Blueprint §7.7)');
 
 select is(
@@ -162,6 +162,15 @@ select ok(
           and with_check ~ 'merma' and with_check ~ 'o\.tipo = movimientos_stock\.tipo_movimiento'
      from pg_policies where policyname = 'movimientos_stock_insert_propietario_rpc'),
   'la policy de INSERT del ledger fija la forma por tipo y el tipo de la operación');
+
+-- D-1 (ADR-001 §18.4.10): aserción hermana para carga y descarga; las
+-- condiciones de Stock de arriba se conservan sin cambios.
+select ok(
+  (select with_check ~ 'carga' and with_check ~ 'descarga'
+          and with_check ~ 'NOT \(o\.jornada_id IS DISTINCT FROM movimientos_stock\.jornada_id\)'
+          and with_check ~ 'd\.camion_id = j\.camion_id' and with_check ~ 'o\.camion_id = j\.camion_id'
+     from pg_policies where policyname = 'movimientos_stock_insert_propietario_rpc'),
+  'la policy de INSERT del ledger fija además carga y descarga contra el camión de la jornada y la jornada de la operación (D-1)');
 
 select is(
   (select p.prosecdef::text || '|' || p.proowner::regrole::text || '|' || array_to_string(p.proconfig, ',')

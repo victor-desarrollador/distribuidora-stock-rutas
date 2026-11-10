@@ -32,7 +32,9 @@ select t.tabla, r.rol, p.privilegio,
   end
 from (values ('public.empresas'), ('public.perfiles'), ('public.productos'),
              ('public.camiones'), ('public.clientes'), ('public.ubicaciones'),
-             ('public.operaciones'), ('public.movimientos_stock')) t(tabla),
+             ('public.operaciones'), ('public.movimientos_stock'),
+             ('public.jornadas'), ('public.reasignaciones_vendedor'),
+             ('public.correcciones_jornada')) t(tabla),
      (values ('anon'), ('authenticated'), ('service_role')) r(rol),
      (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
              ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(privilegio);
@@ -96,7 +98,8 @@ select ok(
                      'public.productos'::regclass, 'public.camiones'::regclass,
                      'public.clientes'::regclass, 'public.ubicaciones'::regclass,
                      'public.operaciones'::regclass, 'public.movimientos_stock'::regclass,
-                     'public.stock_actual'::regclass)
+                     'public.jornadas'::regclass, 'public.reasignaciones_vendedor'::regclass,
+                     'public.correcciones_jornada'::regclass, 'public.stock_actual'::regclass)
        and a.grantee = 0),
   'PUBLIC no tiene privilegios sobre las tablas de negocio ni sobre stock_actual');
 
@@ -167,33 +170,53 @@ select is(
          where p.pronamespace in ('public'::regnamespace, 'privado'::regnamespace)
            and has_function_privilege('authenticated', p.oid, 'execute')
          order by 1),
-  array['actualizar_camion(uuid,text,text)',
+  array['abrir_jornada(uuid,uuid,date,uuid)',
+        'actualizar_camion(uuid,text,text)',
         'actualizar_cliente(uuid,text,text,text,text)',
         'actualizar_producto(uuid,text,text,numeric,integer)',
         'cambiar_estado_camion(uuid,boolean)',
         'cambiar_estado_cliente(uuid,boolean)',
         'cambiar_estado_producto(uuid,boolean)',
+        'cancelar_intencion_operacion(uuid)',
+        'confirmar_salida(uuid,uuid)',
+        'corregir_jornada(uuid,uuid,date,uuid,text)',
         'crear_camion(text,text)',
         'crear_cliente(text,text,text,text)',
+        'crear_intencion_operacion(uuid,text,jsonb)',
         'crear_producto(text,text,text,text,numeric,integer)',
+        'ejecutar_intencion_operacion(uuid)',
+        'listar_vendedores_jornada()',
         'mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
+        'privado.abrir_jornada(uuid,uuid,date,uuid)',
         'privado.actualizar_camion(uuid,text,text)',
         'privado.actualizar_cliente(uuid,text,text,text,text)',
         'privado.actualizar_producto(uuid,text,text,numeric,integer)',
         'privado.cambiar_estado_camion(uuid,boolean)',
         'privado.cambiar_estado_cliente(uuid,boolean)',
         'privado.cambiar_estado_producto(uuid,boolean)',
+        'privado.cancelar_intencion_operacion(uuid)',
+        'privado.confirmar_salida(uuid,uuid)',
+        'privado.corregir_jornada(uuid,uuid,date,uuid,text)',
         'privado.crear_camion(text,text)',
         'privado.crear_cliente(text,text,text,text)',
+        'privado.crear_intencion_operacion(uuid,text,jsonb)',
         'privado.crear_producto(text,text,text,text,numeric,integer)',
+        'privado.ejecutar_intencion_operacion(uuid)',
+        'privado.listar_vendedores_jornada()',
         'privado.mover_a_cuarentena(uuid,uuid,uuid,integer,text)',
+        'privado.reasignar_vendedor(uuid,uuid,uuid)',
+        'privado.registrar_carga(uuid,uuid,uuid[],integer[])',
+        'privado.registrar_descarga(uuid,uuid,uuid[],integer[],text)',
         'privado.registrar_ingreso(uuid,uuid,integer,text)',
         'privado.registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'privado.validar_cliente(uuid)',
+        'reasignar_vendedor(uuid,uuid,uuid)',
+        'registrar_carga(uuid,uuid,uuid[],integer[])',
+        'registrar_descarga(uuid,uuid,uuid[],integer[],text)',
         'registrar_ingreso(uuid,uuid,integer,text)',
         'registrar_merma(uuid,uuid,uuid,integer,text,text)',
         'validar_cliente(uuid)'],
-  'authenticated ejecuta únicamente las veintiséis firmas aprobadas: productos, camiones, clientes y stock (Topología D sin cambios)');
+  'authenticated ejecuta únicamente las cuarenta y seis firmas aprobadas: productos, camiones, clientes, stock, abrir_jornada, reasignar_vendedor, registrar_carga, registrar_descarga, confirmar_salida, corregir_jornada, las tres de intenciones (ADR-010, C1.2a) y listar_vendedores_jornada (E-PL1) (Topología D sin cambios)');
 
 -- ---------------------------------------------------------------------------
 -- pg_default_acl del rol creador de las migraciones (postgres)
