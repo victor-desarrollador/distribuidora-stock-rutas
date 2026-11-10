@@ -1,5 +1,105 @@
 ---
-## 10/11/2026 — JWT-1: corrección definitiva de identidad por petición en lecturas de verificación de jornadas (rama `feat/jwt1-verificacion-jornadas` sobre `f1129d0`; SIN COMMIT; SECURITY REVIEW PENDIENTE)
+## 10/11/2026 — Preparación de la base de desarrollo para Etapa 3 (rama `chore/preparacion-etapa-3`, worktree `distribuidora-etapa-3`; SIN COMMIT; SOLO DOCUMENTACIÓN Y PREPARACIÓN, SIN IMPLEMENTACIÓN DE FUNCIONALIDADES)
+
+**Objetivo de negocio entendido.** Preparar una base de desarrollo limpia y trazable para comenzar la Etapa 3 del BLUEPRINT, preservando íntegramente las evidencias, ramas y trabajos históricos. No se implementa funcionalidad de Etapa 3 ni se toca SQL, RPC, RLS, grants, migraciones ni código de frontend.
+
+**Secciones de BLUEPRINT.md aplicables:** §4 (alcance Fase 1), §7 (reglas de negocio), §12 (pruebas obligatorias), §14 (plan de trabajo por etapas).
+
+**ADR aprobadas aplicables:** ADR-001 (APROBADA PARA VALIDACIÓN CONTROLADA; P8–P10 y P12–P17 pendientes), ADR-005 (fiambres por peso, no autoriza migración), ADR-006 (una línea por producto), ADR-007 (jornadas y carga de camiones, contrato técnico aún PROPUESTA TÉCNICA NO APROBADA), ADR-010 (intenciones persistidas, aprobada normativamente, no implementada).
+
+**Contexto de docs/PRD.md:** Fase 1 distribuidora de lácteos y fiambres; control de mercadería por camión, jornada y vendedor; roles dueño/encargado/vendedor-piloto; una sola empresa operativa.
+
+**Estado actual del código:** origin/main = 2597155d (merge PR #37). HEAD del repo principal = 2a0aa43 (rama feat/b-01-stock-real, no se toca). 22 worktrees históricas + la nueva. 3 stashes preservados. 4 AUDIT_REPORT_*.md preservados.
+
+**Fuera de alcance:** implementar reglas PROPUESTA NO APROBADA, ADR en estado propuesta, sección 5 de BLUEPRINT (Fase 2), migraciones, SQL, RLS, RPC, grants, cambios de frontend.
+
+**Decisiones pendientes:** ADR-001 P8–P10 y P12–P17; C1.2b implementación; T3-01 cierre; D-IDEM-0 (idempotencia tras recarga); redondeo de líneas `unidad` y documentos mixtos; DNI/cuenta de clientes; numeración de presupuestos; cierre de jornada.
+
+**Plan corto (esta tarea):** crear worktree `chore/preparacion-etapa-3` desde origin/main en `/home/tuculandia/Documentos/tiopancho/distribuidora-etapa-3`; agregar únicamente esta entrada a `docs/progress-log.md`; ejecutar `git diff --check`; entregar diff documental para aprobación humana. Sin commit, sin push, sin merge, sin deploy.
+
+### 1. Integración del PR #37 a main
+
+El PR #37 `feat/integracion-controlada-353f230` fue integrado a `main`. Resultado: merge commit `2597155d4ec89a8768d0e9112b2f51f60ad99095` (fecha 06/11/2026 según el árbol auditado). El merge combina la rama de integración controlada con el árbol auditado `353f230`.
+
+### 2. Merge commit 2597155d
+
+Commit `2597155d4ec89a8768d0e9112b2f51f60ad99095`: `Merge pull request #37 from victor-desarrollador/feat/integracion-controlada-353f230`. Es el HEAD de `origin/main` y la base sobre la que se crea la rama `chore/preparacion-etapa-3`. No es ancestro del HEAD local `2a0aa43` (rama `feat/b-01-stock-real`), que se preserva sin modificar.
+
+### 3. Referencia al árbol auditado 353f230
+
+Árbol de origen auditado: `9bb6562bb8e4141796fa6ec9f5c0e24349827bb5`. El PR #37 lleva el sufijo `353f230` en su nombre de rama (`feat/integracion-controlada-353f230`), que corresponde al commit `353f230 test(web): estabilizar pruebas e2e del dashboard` presente en el historial de `origin/main`. Se documenta como referencia de trazabilidad del PR integrado.
+
+### 4. Resultado informado de CI en GitHub
+
+El CI de GitHub Actions (workflow `.github/workflows/ci.yml`) se ejecuta al abrir el PR. En esta tarea **no se ejecutó CI** (no hay push ni PR nuevo). El resultado informado es el del entorno de integración del PR #37 previo al merge; no hay un job CI vinculado a este hash de preparación. Cualquier afirmación de CI verde debe corroborarse contra la ejecución real de GitHub Actions sobre el merge `2597155d`.
+
+### 5. Resultados de pruebas informados (evidencia reportada vs ejecutada)
+
+Los siguientes resultados fueron **reportados/informados** en entradas previas de `docs/progress-log.md` y en evidencias externas del repositorio; **no se ejecutaron en esta tarea** (es una tarea de preparación, sin pruebas funcionales):
+
+| Prueba | Resultado informado | Fuente | Estado en esta tarea |
+|---|---|---|---|
+| pgTAP | 2637 PASS, 0 fallos | Entrada CV-1G (09/11/2026), `supabase test db`, Files=40 | Reportada, no ejecutada; stack local descartable (`cv1g-cierre`, 28 migraciones), no el estado actual de `origin/main` (25 migraciones vigentes hasta `20261110120000`). No vinculada a un hash. |
+| Vitest | 2251 PASS, 67 archivos | Entrada de integración local JWT-1 + retiro de rutas demo (10/11/2026) | Reportada, no ejecutada. Las cifras varían entre entradas (2251, 2244, 2227, 1428); ninguna fue re-verificada en esta tarea. No vinculada a un hash. |
+| Playwright | 172 tests en 17 archivos | Entrada de integración local JWT-1 + retiro de rutas demo (10/11/2026); 171 pruebas actuales + 1 setup | Reportada, no ejecutada. `npx playwright test --list` descubre 172 en 17 archivos, pero **no hay ejecución funcional ni reporte de `passed`**; se registran como listados, no como evidencia de prueba ejecutada. |
+
+**Evidencia ejecutada en esta tarea:** ninguna prueba de ningún tipo. Solo comandos de Git de inspección (worktree, stash, status, show). Las cifras anteriores son informadas en entradas previas y no fueron re-verificadas.
+
+### 6. Limpieza realizada
+
+Nueve worktrees retiradas en total, aproximadamente 2,4 GB recuperados. Esta información proviene del informe del operador humano; **no fue re-verificada por este agente** y no consta como evidencia de esta tarea. Las worktrees históricas restantes (incluida la nueva `distribuidora-etapa-3`) se verificaron intactas mediante `git worktree list`.
+
+### 7. Tres stashes preservados
+
+Los tres stashes del repositorio principal se registran y no se modificaron:
+
+| Stash | SHA | Mensaje |
+|---|---|---|
+| stash@{0} | 153eafa | On fix/pg-temp-jornadas: B1 v1 (árbol 0ccf9cb7) antes del merge GET/HEAD |
+| stash@{1} | 9ac1af2 | On main: wip: artefactos locales antes de PR lint |
+| stash@{2} | 914ff62 | On docs/adr-001-revision: wip: playwright-cli tooling |
+
+### 8. Worktrees con cambios locales preservadas
+
+Las worktrees con archivos staged, unstaged o untracked se preservaron sin modificar:
+
+- `distribuidora-adr010-frontend`: `docs/progress-log.md` modificado; 4 archivos sin seguimiento (`intenciones_operacion.ts`, `intenciones_operacion.test.ts`, `stock_intenciones.ts`, `stock_intenciones.test.ts`)
+- `distribuidora-d2-prueba`: `apps/web/D1-refuerzo-H3.patch` sin seguimiento
+- `distribuidora-fe2-reasignacion-vendedor`: `AUDITORIA_FE2B_INDEPENDIENTE.md` sin seguimiento
+- `distribuidora-t6-descarga`: 6 archivos `INFORME-*.md` y `VERIFICACION-AUTENTICIDAD.md` sin seguimiento
+
+El repositorio principal tiene 4 `AUDIT_REPORT_*.md` sin seguimiento (no se modifican ni se agregan al índice).
+
+### 9. Commit exclusivo 476a84f y su estado pendiente
+
+Commit `476a84f8ae864b1b053fd46a26f5ee24031012a8`: `fix(rollback): ampliar barrido de funciones D-1 a todos los esquemas`. Modifica 2 archivos (`docs/progress-log.md` +40 líneas, `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql` +29/-10). Vive en la worktree `distribuidora-d1-a5` (rama `feat/d1-a5-barrido-funciones`).
+
+**Estado respecto de origin/main:** `476a84f` NO es ancestro de `origin/main`. El efecto real del commit es limitado a esos 2 archivos; **no se describe como el efecto completo de una comparación entre árboles divergentes**, pues esa diferencia refleja estados de ramas distintas y no el cambio del commit.
+
+**Afecta rollback, SQL y seguridad:** sí — toca un archivo de rollback manual (fuera de `supabase/migrations/`) y el historial de funciones D-1. De integrarse, requeriría security review (Supabase, RPC, RLS, grants, `movimientos_stock`), pruebas pgTAP/Vitest y auditoría independiente del hash.
+
+**Conclusión:** no se hace cherry-pick ni merge de `476a84f`. Queda como compromiso pendiente de decisión humana autorizada, con revisión de seguridad y auditoría independientes previas a cualquier integración.
+
+### 10. Restricciones de ADR-010, C1.2b y T3-01-R
+
+- **ADR-010 (v1.0 y v1.1, adenda A-1 a A-4):** aprobada normativamente; **no implementada ni probada**. No autoriza migraciones, SQL, RPC, permisos, RLS ni frontend. La implementación requiere autorización propia después del cierre de T3-01 y aceptación técnica humana. D-IDEM-13 y D-IDEM-0 siguen abiertas; `p_desde` futuro pendiente.
+- **C1.2b (`reconocer` y `listar`):** aprobada normativamente (documentación preparada en `docs/decisions/010-aclaracion-c1-2b-reconocer-y-desde-futuro.md`), **no implementada**. **Pendiente de implementar y probar `reconocer` y `listar`, con pgTAP y preflight.** No autoriza migraciones remotas.
+- **T3-01-R:** no cerrada. Pendientes: security review, auditoría independiente de Codex y OpenCode, F7, F8, B/C y acceso remoto. La cabecera de la migración `20261110120000_o4_pgtemp_remediacion.sql` conserva el comentario «PROPUESTA NO APROBADA» por decisión del responsable (hash auditado conservado). **No se autorizan migraciones remotas.**
+
+### 11. Estado de Etapa 2 y alcance pendiente de Etapa 3
+
+**Etapa 2 no se declara formalmente cerrada.** Sus compuertas pendientes incluyen: security review de múltiples ramas sin commitear (FE-2B, FE-2D, FE-2E, FE-2F, FE-1, JWT-1), auditorías independientes de hashes, pgTAP en stack local autorizado, Playwright E2E con base local, y decisiones humanas sobre H-1/H-2 de FE-2B, DP-1 y D-IDEM-0.
+
+**Etapa 3 no se declara completada.** Ninguna funcionalidad de Etapa 3 se implementa en esta tarea. El alcance pendiente (inventario, no implementación): comparar implementación real contra BLUEPRINT §4, §7, §12, §14 y ADR-005/006/007/010. Cubrir: jornadas y cargas existentes, talonarios y notas de papel, ventas y detalle de productos, pagos mixtos, clientes, idempotencia, numeración y duplicados, reglas de cantidades en unidades o gramos. Proponer el primer slice mínimo para completar Etapa 3.
+
+### 12. Referencia a BLUEPRINT §12 y §14
+
+- **BLUEPRINT §12 (Pruebas obligatorias):** define las pruebas normativas que ningún módulo da por terminado sin ellas (stock, jornada, apertura/carga/salida ADR-007, rendición, ventas una línea por producto, ventas en papel, presupuestos, seguridad, intenciones persistidas ADR-001). Ninguna de estas pruebas se ejecutó en esta tarea. Sirven como referencia para el primer slice de Etapa 3.
+- **BLUEPRINT §14 (Plan de trabajo — Fase 1):** define las etapas 0 a 7, presupuestos y prueba real. Etapa 0 (inventario) y Etapa 1 (base) están en curso; Etapa 2 (stock) y Etapa 3 (jornada y ventas 1A) son el alcance pendiente. El cambio de modelo a peso (ADR-005) es el siguiente bloque técnico, no autorizado por este documento.
+
+**Etapa 2 no declarada cerrada:** sus compuertas pendientes no están satisfechas, por lo que no se anuncia cierre formal de Etapa 2.
+
+Sin `git commit`, push, merge, rebase ni deploy. Entrega: diff documental de `docs/progress-log.md` para aprobación humana.
 
 **Decisión humana (10/11/2026).** Intervención explícita posterior al cuarto ciclo FE-2F (`AGENTS.md` §2.3.5), limitada al problema demostrado de JWT en lecturas de verificación de jornadas. No constituye autorización para modificar otras partes de las correcciones previas. No es un quinto ciclo de FE-2F; es una tarea independiente de FE-2F.
 
@@ -49,6 +149,64 @@
 **Necesidad de security review:** SÍ (antes del commit). No declarar corregido A→B→A sin la prueba de que el JWT realmente se transmite (R1–R2 lo demuestran con cliente real + fetch interceptado; T1–T3 son guarda de regresión con fake).
 
 Sin `git commit`, push, merge ni deploy aún: pendiente autorización humana.
+
+### Frontend real activo y rutas demo retiradas (verificación de esta tarea)
+
+Las ocho rutas demo de negocio (`/demo/jornadas`, `/autoventa`, `/ventas`, `/movimientos`, `/rendicion`, `/retornos`, `/cuentas`, `/configuracion-demo`) ya fueron retiradas del acceso operativo (entrada del 09/11/2026). No se propone migrarlas a gramos: su código permanece como referencia sin ruta operativa, y el prototipo demo sigue en pieza/media pieza hasta Slice B (no autorizado por esta tarea).
+
+Frontend real activo (routes de Supabase, lectura por RLS): `/login`, `/` (Dashboard con aviso de datos demostrativos), `/productos`, `/stock`, `/clientes`, `/camiones`, `/jornadas`. `/jornadas` usa `ProtectedRoute roles={todos}`: el vendedor/piloto lee solo su jornada (RLS decide las filas); dueño y encargado leen todas. No hay rutas demo activas en producción (`import.meta.env.DEV` en línea; `dist` sin chunk demo).
+
+### Matriz funcional de jornadas de Etapa 3 (estado real, sin afirmar ausencias no examinadas)
+
+| Funcionalidad | RPC implementada (migración) | Pruebas existentes | Integración frontend | Ruta operativa accesible | Habilitación para uso real |
+|---|---|---|---|---|---|
+| Apertura de jornada | `abrir_jornada` (`20261031120000`) | pgTAP `jornadas_abrir` (153/169), `jornadas_abrir_aislamiento` (33/33) | `jornadas_apertura.ts`, `JornadaAperturaPanel`, hook `useAperturaJornada` | `/jornadas` → «Nueva jornada» (solo gestión) | Habilitada para dueño/encargado (local, sin staging/producción) |
+| Reasignación de vendedor | `reasignar_vendedor` (`20261101120000`) | pgTAP `jornadas_reasignar` (168/168), `jornadas_reasignar_aislamiento` (33/33), `jornadas_listar_vendedores` (70) | `jornadas_reasignacion.ts`, `JornadaReasignacionPanel`, hook `useReasignacionJornada` | `/jornadas` detalle (abierta/cargada) | Habilitada para dueño/encargado (E-PL1, `listar_vendedores_jornada`, D-F2-3 autorizado) |
+| Carga de camión | `registrar_carga` (`20261106120000`) | pgTAP `jornadas_carga` | `jornadas_carga.ts`, `JornadaCargaPanel`, `carga_borrador.ts` | `/jornadas` detalle → «Cargar mercadería» (borrador) | **Deshabilitada:** «Confirmar carga» sin manejador; DP-1 abierta, `registrar_carga` no habilitada |
+| Descarga de camión | `registrar_descarga` (`20261107120000`) | pgTAP `jornadas_descarga` | `jornadas_historial.ts` (solo lectura) | No hay pantalla de descarga operativa | **Deshabilitada:** no hay `registrar_descarga` en UI |
+| Salida de jornada | `confirmar_salida` (`20261108120000`) | pgTAP `jornadas_salida` (65/65); E2E `b02b2-jornadas-salida` (10 casos, 145/145 PASS en `0e45c65`) | `jornadas_salida.ts`, `JornadaSalidaPanel`, hook `useSalidaJornada` | `/jornadas` detalle (cargada) | Habilitada para dueño/encargado (E2E ejecutado en laboratorio local autorizado) |
+| Corrección de jornada | `corregir_jornada` (`20261109120000`) | pgTAP `jornadas_correccion` (105) | `jornadas_correccion.ts`, `JornadaCorreccionPanel`, hook `useCorreccionJornada` | `/jornadas` detalle (abierta) | Habilitada para dueño/encargado |
+| Listado vendedores de jornada | `listar_vendedores_jornada` (`20261111120200`) | pgTAP `jornadas_listar_vendedores` (70) | `vendedores_jornada.ts`, hook `useVendedoresJornada` | Usado por apertura y reasignación | Habilitada (E-PL1, cinco columnas, D-2) |
+| Lectura de jornadas | (SELECT por RLS, no RPC) | pgTAP `jornadas_esquema`, `jornadas_solo_lectura` | `jornadas_lectura.ts`, `JornadasVista`, hook `useJornadasLectura` | `/jornadas` | Habilitada (lectura real, B-02b.1) |
+| Historial de cargas/descargas | (SELECT, no RPC) | pgTAP `jornadas_esquema` | `jornadas_historial.ts`, `JornadaHistorialPanel` | `/jornadas` detalle (solo lectura) | Habilitada (solo lectura, no opera) |
+| Estado de cierre / continuidad | (ninguna, derivado) | `jornadas_continuidad.test.ts` | `jornadas_continuidad.ts`, `JornadaContinuidadPanel` | `/jornadas` detalle | Solo lectura informativa; no resuelve bloqueo (cierre por RPC pendiente) |
+
+Notas de la matriz: la RPC implementada no implica uso operativo; carga y descarga siguen sin habilitar en el frontend (DP-1 abierta); el uso operativo requiere ADR-001 en validación controlada, security review, auditoría independiente y aceptación humana (no autorizado por este documento).
+
+### Primer slice mínimo recomendado para Etapa 3 (partiendo del estado real actual)
+
+**Objetivo:** completar el bloque de jornadas y ventas 1A de BLUEPRINT §14 sin presionar decisiones pendientes (ADR-007 contrato técnico aún propuesta; D-IDEM-0 abierta; P8–P10/P12–P17 de ADR-001 pendientes; redondeo de líneas `unidad` y documentos mixtos abierto).
+
+**Dependencias previas (no resueltas por este documento):**
+- ADR-007 contrato técnico aprobado (apertura, carga, salida — actualmente PROPUESTA TÉCNICA NO APROBADA; requiere decisión humana).
+- Resolución del redondeo de líneas `unidad` y documentos mixtos `peso`+`unidad` (§15 del Blueprint, abierto).
+- D-IDEM-0 (idempotencia tras recarga) — bloquea carga/venta real; requiere ADR-010 implementada.
+- Security review de las RPC de jornadas y auditoría independiente de los hashes de migración.
+
+**Slice mínimo (orden sugerido):**
+1. **Jornadas y ventas 1A:** apertura, carga, salida, talonarios, notas de papel, clientes, `venta_pagos` desglosada (efectivo, transferencia, a cuenta). Reusa RPC ya implementadas (`abrir_jornada`, `reasignar_vendedor`, `corregir_jornada`, `confirmar_salida`, `registrar_carga`, `registrar_descarga`, `listar_vendedores_jornada`).
+2. **Habilitar carga y descarga en frontend:** completar DP-1 (confirmación de carga), conectar `registrar_carga`/`registrar_descarga` con idempotencia, montar controlador con árbitro de pantalla.
+3. **Conteo y rendición 1A:** finalización de ventas, conteo por tercero, clasificación física, retiros físicos de ruta cargados diferidamente y confirmados por ambos, gastos autorizados, conciliación por medio de pago.
+4. **Tests obligatorios (BLUEPRINT §12):** stock, jornada, apertura/carga/salida (ADR-007), rendición, ventas una línea por producto (ADR-006), ventas en papel, presupuestos, seguridad, idempotencia. Ninguna ejecutada en esta tarea.
+
+**Autorizaciones requeridas (ninguna otorgada por este documento):**
+- Decisión humana sobre ADR-007 contrato técnico.
+- Security review (Supabase, RPC, RLS, grants, `movimientos_stock`, idempotencia, concurrencia).
+- Auditoría independiente de Codex y OpenCode sobre el hash del commit resultante.
+- Aprobación humana para commit, merge y deploy (ninguno de estos pasos está autorizado aún).
+
+### Tabla de afirmaciones corregidas y evidencia correspondiente
+
+| Afirmación inexacta (entrada documental previa) | Corrección aplicada | Evidencia |
+|---|---|---|
+| pgTAP 2637 PASS sobre el estado actual de origin/main | Corresponde a stack local descartable (`cv1g-cierre`, 28 migraciones), no a `origin/main` (25 migraciones vigentes hasta `20261110120000`); no vinculada a un hash | Entrada CV-1G (09/11/2026); `supabase test db`, Files=40; reportada, no ejecutada en esta tarea |
+| Playwright 172 tests ejecutados y pasando | 172 tests listados por `npx playwright test --list` (17 archivos); **no hay ejecución funcional ni reporte de `passed`**; no hay `playwright-report/` ni `test-results/` en el árbol | `apps/web/tests/` (16 spec + `auth/` + `historico-localstorage/`); directorios de reportes ausentes |
+| Vitest 2251 PASS como línea base verificada | Cifra informada, no re-verificada; varía entre entradas (2251, 2244, 2227, 1428) | Entradas previas del progress-log; ninguna ejecutada en esta tarea |
+| Commit `476a84f` retira masivamente 214 archivos / ~58.700 líneas vs `origin/main` | Efecto real: 2 archivos (+59/-10), `docs/progress-log.md` y `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql`; **no es ancestro de `origin/main`** | `git show --stat 476a84f`; `git merge-base --is-ancestor 476a84f origin/main` → NO |
+| Ruta del rollback en `supabase/migrations/` | Ruta real: `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql` (fuera de `migrations/`) | `git show --name-only 476a84f` |
+| Nueve worktrees retiradas / ~2,4 GB recuperados (verificado) | Información del operador humano, **no re-verificada** por esta tarea | Informe del operador; no hay evidencia de esta tarea |
+| Etapa 2 cerrada / Etapa 3 completada | No se declara cerrada Etapa 2 ni completada Etapa 3; compuertas de Etapa 2 pendientes | BLUEPRINT §14; sección 11 de esta entrada |
+| Ocho rutas demo de negocio activas | Ya retiradas del acceso operativo; código permanece como referencia sin ruta operativa | Entrada 09/11/2026 (retiro de rutas demo); `apps/web/src/App.tsx` (rutas activas: `/login`, `/`, `/productos`, `/stock`, `/clientes`, `/camiones`, `/jornadas`) |
 
 ---
 ## 10/11/2026 — Integración local JWT-1 + retiro de rutas demo (sin commit)
