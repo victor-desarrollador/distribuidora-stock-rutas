@@ -1,11 +1,11 @@
 ---
-## 10/11/2026 — Preparación de la base de desarrollo para Etapa 3 (rama `chore/preparacion-etapa-3`, worktree `distribuidora-etapa-3`; SIN COMMIT; SOLO DOCUMENTACIÓN Y PREPARACIÓN, SIN IMPLEMENTACIÓN DE FUNCIONALIDADES)
+## 10/11/2026 — Preparación de la base de desarrollo para Etapa 3 (rama `chore/preparacion-etapa-3`, worktree `distribuidora-etapa-3`; COMMIT DOCUMENTAL `fc75514ca722631cac2a0d902b97f11b395b8c1c` sobre `2597155d4ec89a8768d0e9112b2f51f60ad99095`; SOLO DOCUMENTACIÓN Y PREPARACIÓN, SIN IMPLEMENTACIÓN DE FUNCIONALIDADES)
 
 **Objetivo de negocio entendido.** Preparar una base de desarrollo limpia y trazable para comenzar la Etapa 3 del BLUEPRINT, preservando íntegramente las evidencias, ramas y trabajos históricos. No se implementa funcionalidad de Etapa 3 ni se toca SQL, RPC, RLS, grants, migraciones ni código de frontend.
 
 **Secciones de BLUEPRINT.md aplicables:** §4 (alcance Fase 1), §7 (reglas de negocio), §12 (pruebas obligatorias), §14 (plan de trabajo por etapas).
 
-**ADR aprobadas aplicables:** ADR-001 (APROBADA PARA VALIDACIÓN CONTROLADA; P8–P10 y P12–P17 pendientes), ADR-005 (fiambres por peso, no autoriza migración), ADR-006 (una línea por producto), ADR-007 (jornadas y carga de camiones, contrato técnico aún PROPUESTA TÉCNICA NO APROBADA), ADR-010 (intenciones persistidas, aprobada normativamente, no implementada).
+**ADR aprobadas aplicables:** ADR-001 (APROBADA PARA VALIDACIÓN CONTROLADA; P8–P10 y P12–P17 pendientes), ADR-005 (fiambres por peso, no autoriza migración), ADR-006 (una línea por producto), ADR-007 (jornadas y carga de camiones, APROBADA el 29/10/2026; contrato técnico de algunas operaciones abierto por separado), ADR-010 (intenciones persistidas, aprobada normativamente; C1.1 y C1.2a implementadas, C1.2b pendiente).
 
 **Contexto de docs/PRD.md:** Fase 1 distribuidora de lácteos y fiambres; control de mercadería por camión, jornada y vendedor; roles dueño/encargado/vendedor-piloto; una sola empresa operativa.
 
@@ -15,7 +15,7 @@
 
 **Decisiones pendientes:** ADR-001 P8–P10 y P12–P17; C1.2b implementación; T3-01 cierre; D-IDEM-0 (idempotencia tras recarga); redondeo de líneas `unidad` y documentos mixtos; DNI/cuenta de clientes; numeración de presupuestos; cierre de jornada.
 
-**Plan corto (esta tarea):** crear worktree `chore/preparacion-etapa-3` desde origin/main en `/home/tuculandia/Documentos/tiopancho/distribuidora-etapa-3`; agregar únicamente esta entrada a `docs/progress-log.md`; ejecutar `git diff --check`; entregar diff documental para aprobación humana. Sin commit, sin push, sin merge, sin deploy.
+**Plan corto (esta tarea):** crear worktree `chore/preparacion-etapa-3` desde origin/main en `/home/tuculandia/Documentos/tiopancho/distribuidora-etapa-3`; agregar únicamente esta entrada a `docs/progress-log.md`; ejecutar `git diff --check`; entregar diff documental para aprobación humana. Commit documental `fc75514ca722631cac2a0d902b97f11b395b8c1c` creado sobre `2597155d4ec89a8768d0e9112b2f51f60ad99095`; sin push, sin merge, sin deploy.
 
 ### 1. Integración del PR #37 a main
 
@@ -39,7 +39,7 @@ Los siguientes resultados fueron **reportados/informados** en entradas previas d
 
 | Prueba | Resultado informado | Fuente | Estado en esta tarea |
 |---|---|---|---|
-| pgTAP | 2637 PASS, 0 fallos | Entrada CV-1G (09/11/2026), `supabase test db`, Files=40 | Reportada, no ejecutada; stack local descartable (`cv1g-cierre`, 28 migraciones), no el estado actual de `origin/main` (25 migraciones vigentes hasta `20261110120000`). No vinculada a un hash. |
+| pgTAP | 2637 PASS, 0 fallos | Entrada CV-1G (09/11/2026), `supabase test db`, Files=40 | Reportada, no ejecutada; stack local descartable (`cv1g-cierre`, 28 migraciones), no el estado actual de `origin/main` (28 migraciones vigentes hasta `20261111120200`). No vinculada a un hash. |
 | Vitest | 2251 PASS, 67 archivos | Entrada de integración local JWT-1 + retiro de rutas demo (10/11/2026) | Reportada, no ejecutada. Las cifras varían entre entradas (2251, 2244, 2227, 1428); ninguna fue re-verificada en esta tarea. No vinculada a un hash. |
 | Playwright | 172 tests en 17 archivos | Entrada de integración local JWT-1 + retiro de rutas demo (10/11/2026); 171 pruebas actuales + 1 setup | Reportada, no ejecutada. `npx playwright test --list` descubre 172 en 17 archivos, pero **no hay ejecución funcional ni reporte de `passed`**; se registran como listados, no como evidencia de prueba ejecutada. |
 
@@ -82,8 +82,7 @@ Commit `476a84f8ae864b1b053fd46a26f5ee24031012a8`: `fix(rollback): ampliar barri
 
 ### 10. Restricciones de ADR-010, C1.2b y T3-01-R
 
-- **ADR-010 (v1.0 y v1.1, adenda A-1 a A-4):** aprobada normativamente; **no implementada ni probada**. No autoriza migraciones, SQL, RPC, permisos, RLS ni frontend. La implementación requiere autorización propia después del cierre de T3-01 y aceptación técnica humana. D-IDEM-13 y D-IDEM-0 siguen abiertas; `p_desde` futuro pendiente.
-- **C1.2b (`reconocer` y `listar`):** aprobada normativamente (documentación preparada en `docs/decisions/010-aclaracion-c1-2b-reconocer-y-desde-futuro.md`), **no implementada**. **Pendiente de implementar y probar `reconocer` y `listar`, con pgTAP y preflight.** No autoriza migraciones remotas.
+- **ADR-010 (v1.0 y v1.1, adenda A-1 a A-4):** aprobada normativamente. **C1.1 implementada** (esquema y seguridad de intenciones persistidas). **C1.2a implementada** (`crear`, `ejecutar`, `cancelar` con pruebas pgTAP existentes). **C1.2b (`reconocer` y `listar`) pendiente de implementación y prueba**. No autoriza migraciones, SQL, RPC, permisos, RLS ni frontend para las partes no implementadas. D-IDEM-0 y D-IDEM-13 siguen abiertas; `p_desde` futuro pendiente.
 - **T3-01-R:** no cerrada. Pendientes: security review, auditoría independiente de Codex y OpenCode, F7, F8, B/C y acceso remoto. La cabecera de la migración `20261110120000_o4_pgtemp_remediacion.sql` conserva el comentario «PROPUESTA NO APROBADA» por decisión del responsable (hash auditado conservado). **No se autorizan migraciones remotas.**
 
 ### 11. Estado de Etapa 2 y alcance pendiente de Etapa 3
@@ -95,7 +94,7 @@ Commit `476a84f8ae864b1b053fd46a26f5ee24031012a8`: `fix(rollback): ampliar barri
 ### 12. Referencia a BLUEPRINT §12 y §14
 
 - **BLUEPRINT §12 (Pruebas obligatorias):** define las pruebas normativas que ningún módulo da por terminado sin ellas (stock, jornada, apertura/carga/salida ADR-007, rendición, ventas una línea por producto, ventas en papel, presupuestos, seguridad, intenciones persistidas ADR-001). Ninguna de estas pruebas se ejecutó en esta tarea. Sirven como referencia para el primer slice de Etapa 3.
-- **BLUEPRINT §14 (Plan de trabajo — Fase 1):** define las etapas 0 a 7, presupuestos y prueba real. Etapa 0 (inventario) y Etapa 1 (base) están en curso; Etapa 2 (stock) y Etapa 3 (jornada y ventas 1A) son el alcance pendiente. El cambio de modelo a peso (ADR-005) es el siguiente bloque técnico, no autorizado por este documento.
+- **BLUEPRINT §14 (Plan de trabajo — Fase 1):** define las etapas 0 a 7, presupuestos y prueba real. Etapa 0 (inventario) y Etapa 1 (base) están en curso; Etapa 2 (stock) y Etapa 3 (jornada y ventas 1A) son el alcance pendiente. **El modelo de gramos (ADR-005) tiene su Slice A implementado en `origin/main`** (migración `20261027001542_modelo_peso_gramos.sql`, entre las 28 migraciones vigentes); el trabajo pendiente corresponde al Slice B del prototipo (adaptación de pantallas y flujos operativos), no a un requisito genérico de toda Etapa 3.
 
 **Etapa 2 no declarada cerrada:** sus compuertas pendientes no están satisfechas, por lo que no se anuncia cierre formal de Etapa 2.
 
@@ -173,27 +172,41 @@ Frontend real activo (routes de Supabase, lectura por RLS): `/login`, `/` (Dashb
 
 Notas de la matriz: la RPC implementada no implica uso operativo; carga y descarga siguen sin habilitar en el frontend (DP-1 abierta); el uso operativo requiere ADR-001 en validación controlada, security review, auditoría independiente y aceptación humana (no autorizado por este documento).
 
-### Primer slice mínimo recomendado para Etapa 3 (partiendo del estado real actual)
+### Primer slice mínimo recomendado para Etapa 3: habilitación controlada de carga y descarga desde frontend (partiendo del estado real actual)
 
-**Objetivo:** completar el bloque de jornadas y ventas 1A de BLUEPRINT §14 sin presionar decisiones pendientes (ADR-007 contrato técnico aún propuesta; D-IDEM-0 abierta; P8–P10/P12–P17 de ADR-001 pendientes; redondeo de líneas `unidad` y documentos mixtos abierto).
+**Objetivo:** habilitar de forma controlada la carga y descarga de camión desde el frontend, reutilizando las RPC ya implementadas, sin presionar decisiones pendientes (ADR-007 contrato técnico abierto por separado; D-IDEM-0 abierta; ADR-010 C1.2b pendiente).
 
-**Dependencias previas (no resueltas por este documento):**
-- ADR-007 contrato técnico aprobado (apertura, carga, salida — actualmente PROPUESTA TÉCNICA NO APROBADA; requiere decisión humana).
-- Resolución del redondeo de líneas `unidad` y documentos mixtos `peso`+`unidad` (§15 del Blueprint, abierto).
-- D-IDEM-0 (idempotencia tras recarga) — bloquea carga/venta real; requiere ADR-010 implementada.
-- Security review de las RPC de jornadas y auditoría independiente de los hashes de migración.
+**Estado actual de las RPC:**
+- `abrir_jornada` (`20261031120000`): implementada, pgTAP `jornadas_abrir` (153/169).
+- `reasignar_vendedor` (`20261101120000`): implementada, pgTAP `jornadas_reasignar` (168/168).
+- `registrar_carga` (`20261106120000`): implementada, pgTAP `jornadas_carga`.
+- `registrar_descarga` (`20261107120000`): implementada, pgTAP `jornadas_descarga`.
+- `confirmar_salida` (`20261108120000`): implementada, pgTAP `jornadas_salida` (65/65); E2E 145/145 PASS en `0e45c65`.
+- `corregir_jornada` (`20261109120000`): implementada, pgTAP `jornadas_correccion` (105).
+- `listar_vendedores_jornada` (`20261111120200`): implementada, pgTAP `jornadas_listar_vendedores` (70).
 
-**Slice mínimo (orden sugerido):**
-1. **Jornadas y ventas 1A:** apertura, carga, salida, talonarios, notas de papel, clientes, `venta_pagos` desglosada (efectivo, transferencia, a cuenta). Reusa RPC ya implementadas (`abrir_jornada`, `reasignar_vendedor`, `corregir_jornada`, `confirmar_salida`, `registrar_carga`, `registrar_descarga`, `listar_vendedores_jornada`).
-2. **Habilitar carga y descarga en frontend:** completar DP-1 (confirmación de carga), conectar `registrar_carga`/`registrar_descarga` con idempotencia, montar controlador con árbitro de pantalla.
-3. **Conteo y rendición 1A:** finalización de ventas, conteo por tercero, clasificación física, retiros físicos de ruta cargados diferidamente y confirmados por ambos, gastos autorizados, conciliación por medio de pago.
-4. **Tests obligatorios (BLUEPRINT §12):** stock, jornada, apertura/carga/salida (ADR-007), rendición, ventas una línea por producto (ADR-006), ventas en papel, presupuestos, seguridad, idempotencia. Ninguna ejecutada en esta tarea.
+**Estado de pruebas:** pgTAP existentes para cada RPC; E2E de salida ejecutado en laboratorio local autorizado; Vitest reportado pero no re-verificado en esta tarea; Playwright E2E de carga/descarga no ejecutado.
 
-**Autorizaciones requeridas (ninguna otorgada por este documento):**
-- Decisión humana sobre ADR-007 contrato técnico.
+**Estado de pantallas y manejadores:**
+- `jornadas_carga.ts`, `JornadaCargaPanel`, `carga_borrador.ts`: borrador de carga preparado, «Confirmar carga» sin manejador (DP-1 abierta).
+- `jornadas_historial.ts`, `JornadaHistorialPanel`: historial de cargas/descargas, solo lectura.
+- No hay pantalla ni manejador de descarga operativa (`registrar_descarga` no conectado al frontend).
+
+**Dependencias reales:**
+- **DP-1:** confirmación de carga — pendiente de decisión humana; «Confirmar carga» sin manejador.
+- **D-IDEM-0:** idempotencia tras recarga — abierta; bloquea carga/venta real; requiere ADR-010 implementada.
+- **ADR-010 C1.2b:** `reconocer` y `listar` pendientes de implementación cuando aplique.
+
+**No incluido en este slice:** talonarios, notas de papel, ventas, `venta_pagos` desglosada, rendición.
+
+**Pruebas exigidas por BLUEPRINT §12:** stock, jornada, apertura/carga/salida (ADR-007), rendición, ventas una línea por producto (ADR-006), ventas en papel, presupuestos, seguridad, idempotencia. Ninguna ejecutada en esta tarea.
+
+**Decisiones humanas pendientes:**
+- DP-1 (confirmación de carga).
+- ADR-007 contrato técnico (apertura, carga, salida).
 - Security review (Supabase, RPC, RLS, grants, `movimientos_stock`, idempotencia, concurrencia).
-- Auditoría independiente de Codex y OpenCode sobre el hash del commit resultante.
-- Aprobación humana para commit, merge y deploy (ninguno de estos pasos está autorizado aún).
+- Auditoría independiente de Codex y OpenCode.
+- Aprobación humana para commit, merge y deploy (ninguno autorizado aún).
 
 ### Tabla de afirmaciones corregidas y evidencia correspondiente
 
@@ -207,6 +220,58 @@ Notas de la matriz: la RPC implementada no implica uso operativo; carga y descar
 | Nueve worktrees retiradas / ~2,4 GB recuperados (verificado) | Información del operador humano, **no re-verificada** por esta tarea | Informe del operador; no hay evidencia de esta tarea |
 | Etapa 2 cerrada / Etapa 3 completada | No se declara cerrada Etapa 2 ni completada Etapa 3; compuertas de Etapa 2 pendientes | BLUEPRINT §14; sección 11 de esta entrada |
 | Ocho rutas demo de negocio activas | Ya retiradas del acceso operativo; código permanece como referencia sin ruta operativa | Entrada 09/11/2026 (retiro de rutas demo); `apps/web/src/App.tsx` (rutas activas: `/login`, `/`, `/productos`, `/stock`, `/clientes`, `/camiones`, `/jornadas`) |
+
+---
+## 10/11/2026 — JWT-1: corrección definitiva de identidad por petición en lecturas de verificación de jornadas (rama `feat/jwt1-verificacion-jornadas` sobre `f1129d0`; SIN COMMIT; SECURITY REVIEW PENDIENTE)
+
+**Decisión humana (10/11/2026).** Intervención explícita posterior al cuarto ciclo FE-2F (`AGENTS.md` §2.3.5), limitada al problema demostrado de JWT en lecturas de verificación de jornadas. No constituye autorización para modificar otras partes de las correcciones previas. No es un quinto ciclo de FE-2F; es una tarea independiente de FE-2F.
+
+**Causa raíz confirmada.** `apps/web/src/lib/jornadas.ts` (líneas 559–572 originales): el wrapper central de lectura (`leerPaginaJornadas` / `leerTodasLasJornadas`) despacha la consulta sin fijar `Authorization` por petición, dependiendo del token vigente en el cliente singleton en el instante del fetch. Durante una carrera A→B→A, una lectura podía enviarse con el JWT de B. Los chequeos de usuario antes y después no cierran esa carrera, y los GET pueden reintentarse automáticamente, por lo que el JWT debe permanecer fijo también en reintentos.
+
+**Qué se hace (mínimo, sin tocar P13, sin nuevos RPC, sin esquema/RLS/grants/migraciones, sin dependencias nuevas, sin rutas demo ni Dashboard):**
+- `lib/jornadas.ts`: `OpcionesLecturaJornadas` acepta `actorEsperado`. Cuando se provee, `leerPaginaJornadas` obtiene identidad y token del mismo `getSession` por página (un solo snapshot, sin await de sesión entre validación y captura), valida que la sesión vigente sea de ese actor y que el `access_token` no esté vacío, y fija `Authorization: Bearer <token>` mediante `.setHeader()` incondicionalmente antes de despachar (sin caer nunca al token global del cliente). Si la sesión es de otro actor, es nula, `getSession` falla o el token está vacío, no se despacha (falla cerrado: error sin respuesta, intención conservada en desconocido). `getSession` se ejecuta por página: se garantiza el actor esperado y el mismo token dentro de cada petición/reintento, no necesariamente el mismo token literal entre páginas (un refresh legítimo de A puede cambiar el token entre páginas).
+- `jornadas_operacion.ts`: `verificar(datos, actorEsperado?)` propaga el actor esperado de la intención.
+- `jornadas_salida.ts`, `jornadas_correccion.ts`, `jornadas_carga.ts`: `verificar`/`BuscarJornada` aceptan `actorEsperado` y lo pasan a la lectura.
+- `jornadas_apertura.ts`: `informar` pasa `actorEsperado` a `leerTodasLasJornadas`.
+- Hooks `useSalidaJornada.ts` y `useCorreccionJornada.ts`: `verificarConLectura` / `buscarConLectura` propagan `actorEsperado`.
+- `hooks/useReasignacionJornada.ts`: `buscarEnFecha(puerto, actorEsperado)` propaga el actor fijado al crear la sesión de reasignación (usuario del contexto de autorización), no el usuario global vigente en el momento del fetch.
+- Lecturas ordinarias sin `actorEsperado` mantienen su contrato existente (sin JWT explícito).
+- `docs/progress-log.md`: esta entrada.
+- `lib/jornadas_lectura_jwt.test.ts`: pruebas T1–T6 (nuevo archivo, cliente fake en memoria que ejecuta realmente la lógica de lectura y captura `setHeader`).
+- `hooks/jwt1_reasignacion_actor.test.ts`: pruebas H-1 (nuevo archivo, reasignación con `actorEsperado`).
+
+**Pruebas nuevas (24 casos):**
+- T1–T6 (13 casos en `lib/jornadas_lectura_jwt.test.ts`): cliente fake en memoria que ejecuta realmente la lógica de `leerPaginaJornadas` y captura `setHeader`. T1 JWT de A; T2 sesión de B → cero consultas; T3 JWT de A capturado antes del despacho (títulos corregidos: no afirma "carrera A→B→A durante un fetch" ni "reintentos automáticos"); T4 sesión nula / `getSession` falla / token vacío → cero consultas, falla cerrado; T5 múltiples lecturas independientes → mismo JWT de A; T6 regresión (sin `actorEsperado`, fecha inválida).
+- H-1 (3 casos en `hooks/jwt1_reasignacion_actor.test.ts`): cliente fake en memoria para reasignación. A inicia reasignación con su actor; sesión de B al verificar intención de A → cero consultas con B, falla cerrado; sin `actorEsperado` → contrato previo sin pin.
+- R1–R6 (8 casos en `lib/jornadas_lectura_http.test.ts`): **cliente Supabase real** (`createClient` de `@supabase/supabase-js@2.117.3`) con `global.fetch` interceptado (sin red, storage en memoria, cero dependencias nuevas, sin credenciales reales). Ejerce el wrapper de producción `crearPuertoJornadas`. R1: captura JWT de A, cambia sesión a B antes del fetch → Authorization = A. R2: HTTP 503 → reintento conserva el mismo JWT de A. R3: sesión B con actor esperado A → cero peticiones. R4: sesión nula / `getSession` falla / token vacío → cero peticiones. R5: HTTP 401 → error sin éxito. R6: lectura ordinaria sin actor esperado → contrato previo intacto.
+
+**Verificación (`apps/web/`):**
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` (Vitest) | exit 0; 67 archivos, 2244 pruebas (antes 2220) |
+| `npm run build` | exit 0 (aviso de tamaño de chunk, preexistente) |
+| `git diff --check` | exit 0 |
+
+**Árbol Git (staged, SIN commit):** base `f1129d0`; 13 archivos en el índice (10 modificados, 3 nuevos: `lib/jornadas_lectura_http.test.ts`, `lib/jornadas_lectura_jwt.test.ts`, `hooks/jwt1_reasignacion_actor.test.ts`); sin cambios unstaged ni untracked. El hash del árbol (`git write-tree`) se recalcula tras cualquier edición de este log y no se declara como hash definitivo aquí, para evitar referencias autorreferenciales incorrectas.
+
+**Resolución de hallazgos security review (H-1 a H-4):**
+- H-1 (alto, reasignación): `buscarEnFecha` acepta y propaga `actorEsperado`; `useReasignacionJornada` lo fija desde el usuario del contexto de autorización. Test H-1 agregado (3 casos, títulos corregidos: no afirma cambio de sesión durante el fetch).
+- H-2 (medio, pruebas reales): `lib/jornadas_lectura_http.test.ts` agregado con cliente Supabase real (`createClient` de `@supabase/supabase-js@2.117.3`) y `global.fetch` interceptado (sin red, storage en memoria, cero dependencias nuevas, sin credenciales reales). Cubre R1–R6 (captura JWT de A con cambio a B antes del fetch; reintento HTTP 503 conserva el mismo JWT de A; sesión B con actor esperado A → cero peticiones; sesión nula / `getSession` falla / token vacío → cero peticiones; HTTP 401 → error sin éxito; lectura ordinaria sin actor esperado → contrato previo intacto). Las pruebas T1–T6 con cliente fake se mantienen como guarda de regresión.
+- H-3 (medio, token vacío): `lib/jornadas.ts` falla cerrado si `access_token` está vacío/ausente; `setHeader` incondicional cuando hay actor; sin fallback al token global. Pruebas negativas T4 + R4 agregadas.
+- H-4 (bajo, documentación): encabezado FE-2F restaurado; SHA y árbol corregidos; tipo de pruebas documentado (fake + cliente real HTTP); trazabilidad previa conservada; se eliminó la afirmación falsa de que el entorno no soporta `fetch` real.
+
+**Riesgos residuales:**
+1. Security review pendiente (toca Supabase, auth, RLS, RPC — superficie sensible de AGENTS.md §2.4). Previa a auditoría independiente y commit.
+2. Auditoría independiente del hash aún no ejecutada (Codex/OpenCode).
+3. Sin Playwright E2E ni pgTAP (sin base local autorizada en esta tarea). Pendientes para etapa autorizada.
+4. La garantía de actor esperado depende de que los llamadores pasen `actorEsperado` (salida, corrección, carga, apertura, reasignación lo hacen vía hooks); las lecturas ordinarias de pantalla de jornadas no lo usan y conservan su contrato.
+5. Evidencia HTTP versionada en el repo (pruebas R1–R6); antes solo existía fuera del repo (script de la security review).
+
+**Necesidad de security review:** SÍ (antes del commit). No declarar corregido A→B→A sin la prueba de que el JWT realmente se transmite (R1–R2 lo demuestran con cliente real + fetch interceptado; T1–T3 son guarda de regresión con fake).
+
+Sin `git commit`, push, merge ni deploy aún: pendiente autorización humana.
 
 ---
 ## 10/11/2026 — Integración local JWT-1 + retiro de rutas demo (sin commit)
