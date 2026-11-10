@@ -1,4 +1,71 @@
 ---
+## 10/11/2026 — Gate funcional local de Etapa 2: Stock (rama `chore/preparacion-etapa-3`; base `2597155d4ec89a8768d0e9112b2f51f60ad99095`; registro documental, sin implementación de funcionalidades)
+
+**Fecha del gate:** 10/11/2026.
+**SHA exacto de referencia:** `2597155d4ec89a8768d0e9112b2f51f60ad99095` (origin/main, contenido en HEAD).
+**Árbol de referencia:** `9bb6562bb8e4141796fa6ec9f5c0e24349827bb5`.
+
+### Stack local descartable
+- PostgreSQL 17.11, project_id `gate-etapa-2-lab`, puertos 60321–60325.
+- Stack creado y destruido exclusivamente para este gate; sin conexión a staging ni producción.
+- Rutas de evidencia (fuera del repositorio Git):
+  - `/home/tuculandia/Documentos/tiopancho/auditoria-integral-vm/gate-etapa-2-evidencia/`
+  - `/tmp/opencode/gate-etapa-2-arnes-output.txt`
+
+### pgTAP — 2637/2637 PASS, RC 0
+- `supabase test db` ejecutado sobre el stack local aislado.
+- Files=40, Tests=2637, Result: PASS.
+- 0 fallos, 0 omitidos (salvo el bootstrap de concurrencia no pgTAP).
+- Cobertura: catálogo de productos, camiones, clientes, ubicaciones, stock ingreso, stock cuárentena/merma, aislamiento REPEATABLE READ/SERIALIZABLE, hardening ADR-001, grants/default privileges, RLS, intenciones (ADR-010), pg_temp (seguridad contra inyección de tipos temporales), esquema de jornadas, las 6 RPC de jornadas (abrir, reasignar, corregir, cargar, descargar, salida), listar vendedores, solo lectura.
+
+### Concurrencia — 1068/1068 PASS, sin saldos negativos ni residuos
+- Arnés de concurrencia (`supabase/tests/concurrencia/arnes.sh`) ejecutado sobre el stack local aislado.
+- 1068 verificaciones, 0 fallas, RC 0.
+- Sin saldos negativos, sin movimientos duplicados, sin residuos, sin bloqueos inesperados.
+- Logs completos en `/tmp/opencode/gate-etapa-2-arnes-output.txt`.
+
+### Vitest — cinco suites de Stock y Peso, 160/160 PASS, RC 0
+- `src/domain/peso.test.ts` — validación de pesos (1,250 kg → 1250 g, 28,680 kg → 28680 g, 1,005 kg → 1005 g, rechazos de fracciones inválidas).
+- `src/lib/stock.test.ts` — cliente de stock (55 pruebas): consulta de stock y falla cerrada ante error o red; `armarDatosStock` con rechazo de filas inválidas, de ubicaciones y productos desconocidos y de respuestas que no son arreglos; parámetros de las RPC de ingreso, cuarentena y merma sin empresa ni actor; traducción de errores de negocio (`stock_insuficiente`, `stock_no_autorizado`, `stock_conflicto_idempotencia`, `stock_producto_inactivo`, 42501); clasificación de errores (P13-stock); reintentos (máximo 3, misma clave y mismo payload). **No es evidencia de aislamiento entre empresas**: ese aislamiento se acredita con pgTAP y Playwright.
+- `src/pages/stock_controlador.test.ts` — controlador de stock.
+- `src/pages/stock_formulario.test.ts` — formulario de stock (validaciones de cantidad).
+- `src/pages/StockVista.test.tsx` — vista de stock.
+- Test Files 5 passed (5), Tests 160 passed (160).
+- Evidencia de esta revalidación (fuera del repositorio): manifiesto `/home/tuculandia/Documentos/tiopancho/auditoria-integral-vm/gate-etapa-2-evidencia/vitest-revalidacion/manifiesto.md` y log `/home/tuculandia/Documentos/tiopancho/auditoria-integral-vm/gate-etapa-2-evidencia/vitest-revalidacion/vitest-verbose.log` (SHA-256 `f1773eb3f80e6fbe58364e465b495c8048b7b907b6187b218e1d9369751b4c0f`).
+
+### Playwright — setup + 26 casos, 27/27 PASS, RC 0
+- `tests/b01-stock.spec.ts` ejecutado contra el stack local aislado (puertos 60321–60325).
+- Setup de autenticación: PASS.
+- 26 casos funcionales: todos PASS.
+- Cobertura: ingreso, cuárentena, merma, validaciones, idempotencia, respuesta perdida, doble clic, roles (dueño/encargado/vendedor), aislamiento por empresa, viewports PC y Android.
+- 27 passed (setup + 26 casos), 0 FAIL, 0 SKIP.
+
+### Validación independiente de Codex
+- Codex validó previamente pgTAP, concurrencia y Playwright, y posteriormente verificó de forma focalizada la ejecución de las cinco suites Vitest, incluida `domain/peso.test.ts`. La revisión documental de esta entrada permanece separada.
+- No consta un dictamen independiente global de Codex sobre esta entrada.
+
+### Ubicación del manifiesto y logs
+- Manifiesto inicial: `/home/tuculandia/Documentos/tiopancho/auditoria-integral-vm/gate-etapa-2-manifiesto.md`. Es evidencia inicial, **superada para la ejecución Vitest** por la revalidación de cinco suites, 160/160 PASS (`.../gate-etapa-2-evidencia/vitest-revalidacion/manifiesto.md`; log `.../vitest-revalidacion/vitest-verbose.log`).
+- Logs de pgTAP, Vitest y Playwright: `/home/tuculandia/Documentos/tiopancho/auditoria-integral-vm/gate-etapa-2-evidencia/`
+- Log de concurrencia: `/tmp/opencode/gate-etapa-2-arnes-output.txt`
+- **Estas rutas están fuera del repositorio Git y no forman parte del control de versiones.**
+
+### Limitaciones
+- Este gate funcional local **no equivale** a un gate de staging ni de producción.
+- No se ejecutaron pruebas contra entornos remotos ni productivos.
+- pgTAP corre con autenticación emulada (sin GoTrue real); se usa preludio equivalente a GoTrue v2.197.0.
+
+### Compuertas pendientes
+- Security review (Supabase, RLS, RPC, grants, `movimientos_stock`, idempotencia, concurrencia).
+- T3-01-R no cerrada (F7, F8, B/C, acceso remoto pendientes).
+- ADR-010 no completada: C1.1 y C1.2a implementadas; C1.2b, D-IDEM-0 y D-IDEM-13 pendientes.
+- Autorización humana para commit, merge y deploy (ninguna autorizada aún).
+
+### Estado exacto
+**Gate funcional local de Etapa 2: APTO.**
+**Cierre formal de Etapa 2: PENDIENTE** (requiere aprobación humana, security review y auditoría independiente).
+
+---
 ## 10/11/2026 — Preparación de la base de desarrollo para Etapa 3 (rama `chore/preparacion-etapa-3`, worktree `distribuidora-etapa-3`; COMMIT DOCUMENTAL `fc75514ca722631cac2a0d902b97f11b395b8c1c` sobre `2597155d4ec89a8768d0e9112b2f51f60ad99095`; SOLO DOCUMENTACIÓN Y PREPARACIÓN, SIN IMPLEMENTACIÓN DE FUNCIONALIDADES)
 
 **Objetivo de negocio entendido.** Preparar una base de desarrollo limpia y trazable para comenzar la Etapa 3 del BLUEPRINT, preservando íntegramente las evidencias, ramas y trabajos históricos. No se implementa funcionalidad de Etapa 3 ni se toca SQL, RPC, RLS, grants, migraciones ni código de frontend.
