@@ -5,7 +5,7 @@
 
 **Secciones de BLUEPRINT.md aplicables:** §4 (alcance Fase 1), §7 (reglas de negocio), §12 (pruebas obligatorias), §14 (plan de trabajo por etapas).
 
-**ADR aprobadas aplicables:** ADR-001 (APROBADA PARA VALIDACIÓN CONTROLADA; P8–P10 y P12–P17 pendientes), ADR-005 (fiambres por peso, no autoriza migración), ADR-006 (una línea por producto), ADR-007 (jornadas y carga de camiones, APROBADA el 29/10/2026; contrato técnico de algunas operaciones abierto por separado), ADR-010 (intenciones persistidas, aprobada normativamente; C1.1 y C1.2a implementadas, C1.2b pendiente).
+**ADR aprobadas aplicables:** ADR-001 (APROBADA PARA VALIDACIÓN CONTROLADA; P8–P10 y P12–P17 pendientes), ADR-005 (fiambres por peso, no autoriza migración), ADR-006 (una línea por producto), ADR-007 (jornadas y carga de camiones, APROBADA el 29/10/2026), ADR-010 (intenciones persistidas, aprobada normativamente; C1.1 y C1.2a implementadas, C1.2b pendiente).
 
 **Contexto de docs/PRD.md:** Fase 1 distribuidora de lácteos y fiambres; control de mercadería por camión, jornada y vendedor; roles dueño/encargado/vendedor-piloto; una sola empresa operativa.
 
@@ -98,7 +98,7 @@ Commit `476a84f8ae864b1b053fd46a26f5ee24031012a8`: `fix(rollback): ampliar barri
 
 **Etapa 2 no declarada cerrada:** sus compuertas pendientes no están satisfechas, por lo que no se anuncia cierre formal de Etapa 2.
 
-Sin `git commit`, push, merge, rebase ni deploy. Entrega: diff documental de `docs/progress-log.md` para aprobación humana.
+Commits documentales registrados: fc75514, 1a3257e y e1aaf1f. Sin push, merge ni deploy. Entrega: diff documental de `docs/progress-log.md` para aprobación humana.
 
 ### Frontend real activo y rutas demo retiradas (verificación de esta tarea)
 
@@ -162,7 +162,7 @@ Notas de la matriz: la RPC implementada no implica uso operativo; carga y descar
 
 | Afirmación inexacta (entrada documental previa) | Corrección aplicada | Evidencia |
 |---|---|---|
-| pgTAP 2637 PASS sobre el estado actual de origin/main | Corresponde a stack local descartable (`cv1g-cierre`, 28 migraciones), no a `origin/main` (25 migraciones vigentes hasta `20261110120000`); no vinculada a un hash | Entrada CV-1G (09/11/2026); `supabase test db`, Files=40; reportada, no ejecutada en esta tarea |
+| pgTAP 2637 PASS sobre el estado actual de origin/main | Corresponde a stack local descartable (`cv1g-cierre`, 28 migraciones), no a `origin/main` (28 migraciones vigentes hasta `20261111120200`); no vinculada a un hash | Entrada CV-1G (09/11/2026); `supabase test db`, Files=40; reportada, no ejecutada en esta tarea |
 | Playwright 172 tests ejecutados y pasando | 172 tests listados por `npx playwright test --list` (17 archivos); **no hay ejecución funcional ni reporte de `passed`**; no hay `playwright-report/` ni `test-results/` en el árbol | `apps/web/tests/` (16 spec + `auth/` + `historico-localstorage/`); directorios de reportes ausentes |
 | Vitest 2251 PASS como línea base verificada | Cifra informada, no re-verificada; varía entre entradas (2251, 2244, 2227, 1428) | Entradas previas del progress-log; ninguna ejecutada en esta tarea |
 | Commit `476a84f` retira masivamente 214 archivos / ~58.700 líneas vs `origin/main` | Efecto real: 2 archivos (+59/-10), `docs/progress-log.md` y `supabase/rollback/20261030120000_jornadas_esquema.rollback.sql`; **no es ancestro de `origin/main`** | `git show --stat 476a84f`; `git merge-base --is-ancestor 476a84f origin/main` → NO |
