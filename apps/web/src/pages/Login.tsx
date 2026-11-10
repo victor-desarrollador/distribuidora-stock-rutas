@@ -18,7 +18,7 @@ export default function Login() {
   if (sesion.estado === "autenticado") {
     return (
       <Navigate
-        to={inicioPorRol(sesion.perfil.rol)}
+        to={inicioPorRol()}
         replace
       />
     );

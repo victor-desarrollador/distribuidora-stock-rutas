@@ -1,7 +1,5 @@
 
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { ShoppingCart } from "lucide-react";
 
 import Sidebar from "./Sidebar";
 import { useAuth } from "../../auth/useAuth";
@@ -15,9 +13,6 @@ export default function AppLayout({ children }: Props) {
   const { usuario } = useAuth();
 
   const rolVisible = usuario ? nombreRol(usuario.rol) : "Sin sesión";
-
-  // Todos los roles vigentes acceden a Autoventa.
-  const puedeVender = usuario !== null;
 
   return (
     <div className="min-h-screen bg-slate-100 md:flex">
@@ -38,23 +33,11 @@ export default function AppLayout({ children }: Props) {
             </p>
 
             <p className="text-xs text-slate-500 md:hidden">
-              Stock y Autoventa
+              Stock
             </p>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {/* ACCESO RÁPIDO A VENTAS EN CELULAR */}
-            {puedeVender && (
-              <Link
-                to="/autoventa"
-                aria-label="Ir a Autoventa"
-                title="Ir a Autoventa"
-                className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700 md:hidden"
-              >
-                <ShoppingCart size={20} />
-              </Link>
-            )}
-
             {/* ROL DEL USUARIO CONECTADO */}
             <span className="rounded-full bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700 sm:text-sm">
               {rolVisible}

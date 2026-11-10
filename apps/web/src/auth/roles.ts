@@ -22,8 +22,8 @@ export function nombreRol(rol: RolUsuario): string {
 }
 
 // Pantalla inicial según el rol del perfil protegido.
-export function inicioPorRol(rol: RolUsuario): string {
-  return rol === "vendedor_piloto" ? "/autoventa" : "/";
+export function inicioPorRol(): string {
+  return "/";
 }
 
 // Conjuntos de acceso por ruta. Dueño y encargado reciben lo que tenía el

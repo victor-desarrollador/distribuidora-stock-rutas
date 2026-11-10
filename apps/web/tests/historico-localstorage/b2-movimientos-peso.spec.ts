@@ -4,7 +4,7 @@
 // (`unidad ↔ peso`) bloqueado (P-B2-3). Sólo claves `_demo_v5`.
 import { expect, test, type Page } from "@playwright/test";
 
-import { MENSAJE_CAMBIO_MIXTO_NO_HABILITADO } from "../src/domain/movimientos";
+import { MENSAJE_CAMBIO_MIXTO_NO_HABILITADO } from "../../src/domain/movimientos";
 
 const claves = {
   productos: "distribuidora_productos_demo_v5",

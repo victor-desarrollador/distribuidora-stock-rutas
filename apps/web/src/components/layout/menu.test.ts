@@ -9,20 +9,20 @@ const DEMO: ItemMenu = { nombre: "Jornadas (demo)", icono: (() => null) as ItemM
 describe("itemsMenuPorRol", () => {
   it("el vendedor/piloto ve «Mi jornada» y sólo sus rutas", () => {
     const items = itemsMenuPorRol("vendedor_piloto");
-    expect(rutas(items)).toEqual(["/clientes", "/jornadas", "/autoventa", "/movimientos", "/cuentas"]);
+    expect(rutas(items)).toEqual(["/clientes", "/jornadas"]);
     expect(items.find((i) => i.ruta === "/jornadas")?.nombre).toBe("Mi jornada");
   });
 
-  it("dueño y encargado ven «Jornadas»; el encargado no ve Configuración", () => {
+  it("dueño y encargado ven «Jornadas»; no existe ruta de Configuración", () => {
     const dueno = itemsMenuPorRol("dueno");
     const encargado = itemsMenuPorRol("encargado");
     expect(dueno.find((i) => i.ruta === "/jornadas")?.nombre).toBe("Jornadas");
     expect(encargado.find((i) => i.ruta === "/jornadas")?.nombre).toBe("Jornadas");
-    expect(rutas(dueno)).toContain("/configuracion-demo");
+    expect(rutas(dueno)).not.toContain("/configuracion-demo");
     expect(rutas(encargado)).not.toContain("/configuracion-demo");
   });
 
-  it("el acceso demo sólo se agrega a dueño y encargado, a continuación de Jornadas", () => {
+  it("el acceso demo sólo se agrega si se pasa como extra explícito", () => {
     for (const rol of ["dueno", "encargado"] as const) {
       const r = rutas(itemsMenuPorRol(rol, [DEMO]));
       expect(r.indexOf("/demo/jornadas")).toBe(r.indexOf("/jornadas") + 1);
@@ -37,7 +37,7 @@ describe("itemsMenuPorRol", () => {
   });
 
   it("el vendedor no obtiene ninguna ruta de gestión", () => {
-    const gestionSolo = ["/productos", "/stock", "/camiones", "/rendicion", "/retornos", "/configuracion-demo"];
+    const gestionSolo = ["/productos", "/stock", "/camiones"];
     const r = rutas(itemsMenuPorRol("vendedor_piloto", [DEMO]));
     for (const g of gestionSolo) expect(r).not.toContain(g);
   });

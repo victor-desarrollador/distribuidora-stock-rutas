@@ -66,7 +66,7 @@ for (const usuario of ['abc.', 'a..b', '.aabc']) {
 }
 
 test('ruta protegida sin sesión redirige a login', async ({ page }) => {
-  await page.goto('/rendicion')
+  await page.goto('/productos')
 
   await expect(page).toHaveURL('/login')
 })
@@ -88,30 +88,32 @@ test('la sesión se restaura al recargar y logout la elimina', async ({ page }) 
 test('vendedor/piloto no accede a rutas de dueño/encargado (su user_metadata dice dueño)', async ({ page }) => {
   await ingresar(page, CUENTAS.vendedor)
 
-  await expect(page).toHaveURL('/autoventa')
+  await expect(page).toHaveURL('/')
   await expect(page.getByText('Vendedor/Piloto').first()).toBeVisible()
 
   // B-02b.1 (Blueprint §9, ADR-007 §2.8): /jornadas ya es accesible al vendedor
-  // (sólo lee su jornada; la RLS decide las filas). La pantalla demo y las
-  // rutas de gestión siguen vedadas.
-  for (const ruta of ['/rendicion', '/productos', '/demo/jornadas']) {
+  // (sólo lee su jornada; la RLS decide las filas). Las rutas de gestión
+  // (/productos, /stock, /camiones) siguen vedadas al vendedor. Las rutas
+  // retiradas (/demo/jornadas, /autoventa, /movimientos, /rendicion,
+  // /retornos, /cuentas, /configuracion-demo) ya no existen en el router.
+  for (const ruta of ['/productos', '/stock', '/camiones']) {
     await page.goto(ruta)
     await expect(page.getByRole('heading', { name: 'Acceso no permitido' })).toBeVisible()
   }
 
   await page.goto('/jornadas')
   await expect(page.getByRole('heading', { name: 'Mi jornada' })).toBeVisible()
-
-  await page.goto('/configuracion-demo')
-  await expect(page.getByRole('heading', { name: 'Acceso no permitido' })).toBeVisible()
 })
 
-test('encargado no accede a la configuración exclusiva del dueño', async ({ page }) => {
+test('encargado accede a rutas de gestión (productos, stock, camiones)', async ({ page }) => {
   await ingresar(page, CUENTAS.encargado)
   await expect(page.getByText('Encargado de prueba')).toBeVisible()
 
-  await page.goto('/configuracion-demo')
-  await expect(page.getByRole('heading', { name: 'Acceso no permitido' })).toBeVisible()
+  for (const ruta of ['/productos', '/stock', '/camiones']) {
+    await page.goto(ruta)
+    await expect(page).not.toHaveURL('/login')
+    await expect(page.getByRole('heading', { name: 'Acceso no permitido' })).not.toBeVisible()
+  }
 })
 
 test('usuario con perfil inactivo queda bloqueado', async ({ page }) => {
@@ -120,7 +122,7 @@ test('usuario con perfil inactivo queda bloqueado', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Acceso bloqueado' })).toBeVisible()
   await expect(page.getByRole('alert')).toContainText('desactivada')
 
-  await page.goto('/autoventa')
+  await page.goto('/productos')
   await expect(page.getByRole('heading', { name: 'Acceso bloqueado' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Cerrar sesión' }).click()
