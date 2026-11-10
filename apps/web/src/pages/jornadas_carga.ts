@@ -223,8 +223,8 @@ export function definicionCarga(
     },
     comando: (d) => ({ tipo: "cargar", jornadaId: d.jornadaId, lineas: [...d.lineas] }),
     mensajeExito: MENSAJE_CARGA_OK,
-    async verificar(d): Promise<Verificacion> {
-      const estado = await verificarJornada({ id: d.jornadaId, fecha: d.fecha });
+    async verificar(d, actorEsperado?: string): Promise<Verificacion> {
+      const estado = await verificarJornada({ id: d.jornadaId, fecha: d.fecha }, actorEsperado);
       if (estado === undefined) {
         return { resultado: "sin_verificar", mensaje: MENSAJE_CARGA_SIN_VERIFICAR };
       }

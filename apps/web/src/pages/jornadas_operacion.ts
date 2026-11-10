@@ -106,6 +106,13 @@ export function crearArbitroJornadas(): ArbitroJornadas {
   };
 }
 
+/**
+ * `actorEsperado` (JWT-1): cuando la lectura está asociada a una intención,
+ * el actor cuya sesión debe firmar la petición de verificación. La lectura
+ * valida que la sesión vigente sea de ese actor antes de despachar y fija su
+ * JWT mediante .setHeader(). Cuando no hay actor esperado, se respeta el
+ * contrato de autorización existente de la lectura.
+ */
 /** Resultado de leer el estado real después de una respuesta dudosa. */
 export type Verificacion =
   // Evidencia suficiente de que ESTA intención se registró.
@@ -125,7 +132,12 @@ export interface DefinicionOperacion<E, D extends { jornadaId: string }> {
   preparar(jornada: Jornada, entrada: E): Preparacion<D>;
   comando(datos: D): ComandoJornada;
   mensajeExito: string;
-  verificar(datos: D): Promise<Verificacion>;
+  /**
+   * Verifica el efecto real de la operación en la base. `actorEsperado` es
+   * opcional: cuando se provee, la lectura de verificación fija el JWT de ese
+   * actor y valida que la sesión vigente sea la suya (JWT-1).
+   */
+  verificar(datos: D, actorEsperado?: string): Promise<Verificacion>;
   /** Rechazos definitivos que indican que la jornada cambió: se relee. */
   releerTrasRechazo(codigo: string | null): boolean;
 }
@@ -324,7 +336,7 @@ export function crearControladorOperacion<E, D extends { jornadaId: string }>(
       if (!activo) return pendienteDeVerificar(jornadaId);
       return verificacionConOtraSesion(jornadaId);
     }
-    const v = await definicion.verificar(i.datos);
+    const v = await definicion.verificar(i.datos, esperado ?? undefined);
     // Detenido durante la lectura: pudo leerse con otra sesión; no se usa.
     if (!activo) return pendienteDeVerificar(jornadaId);
     // Después de leer: si la identidad cambió durante la lectura, no se usa.

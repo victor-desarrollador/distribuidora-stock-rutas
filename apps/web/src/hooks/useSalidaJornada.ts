@@ -17,8 +17,8 @@ import {
 export function verificarConLectura(
   puerto: Pick<PuertoJornadas, "leerTodasLasJornadas">
 ): VerificarJornada {
-  return async ({ id, fecha }) => {
-    const r = await puerto.leerTodasLasJornadas({ fecha });
+  return async ({ id, fecha }, actorEsperado?) => {
+    const r = await puerto.leerTodasLasJornadas({ fecha, actorEsperado });
     if (!r.ok) return undefined;
     return r.datos.find((j) => j.id === id)?.estado ?? null;
   };

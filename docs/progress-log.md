@@ -1,4 +1,56 @@
 ---
+## 10/11/2026 — JWT-1: corrección definitiva de identidad por petición en lecturas de verificación de jornadas (rama `feat/jwt1-verificacion-jornadas` sobre `f1129d0`; SIN COMMIT; SECURITY REVIEW PENDIENTE)
+
+**Decisión humana (10/11/2026).** Intervención explícita posterior al cuarto ciclo FE-2F (`AGENTS.md` §2.3.5), limitada al problema demostrado de JWT en lecturas de verificación de jornadas. No constituye autorización para modificar otras partes de las correcciones previas. No es un quinto ciclo de FE-2F; es una tarea independiente de FE-2F.
+
+**Causa raíz confirmada.** `apps/web/src/lib/jornadas.ts` (líneas 559–572 originales): el wrapper central de lectura (`leerPaginaJornadas` / `leerTodasLasJornadas`) despacha la consulta sin fijar `Authorization` por petición, dependiendo del token vigente en el cliente singleton en el instante del fetch. Durante una carrera A→B→A, una lectura podía enviarse con el JWT de B. Los chequeos de usuario antes y después no cierran esa carrera, y los GET pueden reintentarse automáticamente, por lo que el JWT debe permanecer fijo también en reintentos.
+
+**Qué se hace (mínimo, sin tocar P13, sin nuevos RPC, sin esquema/RLS/grants/migraciones, sin dependencias nuevas, sin rutas demo ni Dashboard):**
+- `lib/jornadas.ts`: `OpcionesLecturaJornadas` acepta `actorEsperado`. Cuando se provee, `leerPaginaJornadas` obtiene identidad y token del mismo `getSession` por página (un solo snapshot, sin await de sesión entre validación y captura), valida que la sesión vigente sea de ese actor y que el `access_token` no esté vacío, y fija `Authorization: Bearer <token>` mediante `.setHeader()` incondicionalmente antes de despachar (sin caer nunca al token global del cliente). Si la sesión es de otro actor, es nula, `getSession` falla o el token está vacío, no se despacha (falla cerrado: error sin respuesta, intención conservada en desconocido). `getSession` se ejecuta por página: se garantiza el actor esperado y el mismo token dentro de cada petición/reintento, no necesariamente el mismo token literal entre páginas (un refresh legítimo de A puede cambiar el token entre páginas).
+- `jornadas_operacion.ts`: `verificar(datos, actorEsperado?)` propaga el actor esperado de la intención.
+- `jornadas_salida.ts`, `jornadas_correccion.ts`, `jornadas_carga.ts`: `verificar`/`BuscarJornada` aceptan `actorEsperado` y lo pasan a la lectura.
+- `jornadas_apertura.ts`: `informar` pasa `actorEsperado` a `leerTodasLasJornadas`.
+- Hooks `useSalidaJornada.ts` y `useCorreccionJornada.ts`: `verificarConLectura` / `buscarConLectura` propagan `actorEsperado`.
+- `hooks/useReasignacionJornada.ts`: `buscarEnFecha(puerto, actorEsperado)` propaga el actor fijado al crear la sesión de reasignación (usuario del contexto de autorización), no el usuario global vigente en el momento del fetch.
+- Lecturas ordinarias sin `actorEsperado` mantienen su contrato existente (sin JWT explícito).
+- `docs/progress-log.md`: esta entrada.
+- `lib/jornadas_lectura_jwt.test.ts`: pruebas T1–T6 (nuevo archivo, cliente fake en memoria que ejecuta realmente la lógica de lectura y captura `setHeader`).
+- `hooks/jwt1_reasignacion_actor.test.ts`: pruebas H-1 (nuevo archivo, reasignación con `actorEsperado`).
+
+**Pruebas nuevas (24 casos):**
+- T1–T6 (13 casos en `lib/jornadas_lectura_jwt.test.ts`): cliente fake en memoria que ejecuta realmente la lógica de `leerPaginaJornadas` y captura `setHeader`. T1 JWT de A; T2 sesión de B → cero consultas; T3 JWT de A capturado antes del despacho (títulos corregidos: no afirma "carrera A→B→A durante un fetch" ni "reintentos automáticos"); T4 sesión nula / `getSession` falla / token vacío → cero consultas, falla cerrado; T5 múltiples lecturas independientes → mismo JWT de A; T6 regresión (sin `actorEsperado`, fecha inválida).
+- H-1 (3 casos en `hooks/jwt1_reasignacion_actor.test.ts`): cliente fake en memoria para reasignación. A inicia reasignación con su actor; sesión de B al verificar intención de A → cero consultas con B, falla cerrado; sin `actorEsperado` → contrato previo sin pin.
+- R1–R6 (8 casos en `lib/jornadas_lectura_http.test.ts`): **cliente Supabase real** (`createClient` de `@supabase/supabase-js@2.117.3`) con `global.fetch` interceptado (sin red, storage en memoria, cero dependencias nuevas, sin credenciales reales). Ejerce el wrapper de producción `crearPuertoJornadas`. R1: captura JWT de A, cambia sesión a B antes del fetch → Authorization = A. R2: HTTP 503 → reintento conserva el mismo JWT de A. R3: sesión B con actor esperado A → cero peticiones. R4: sesión nula / `getSession` falla / token vacío → cero peticiones. R5: HTTP 401 → error sin éxito. R6: lectura ordinaria sin actor esperado → contrato previo intacto.
+
+**Verificación (`apps/web/`):**
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` (Vitest) | exit 0; 67 archivos, 2244 pruebas (antes 2220) |
+| `npm run build` | exit 0 (aviso de tamaño de chunk, preexistente) |
+| `git diff --check` | exit 0 |
+
+**Árbol Git (staged, SIN commit):** base `f1129d0`; 13 archivos en el índice (10 modificados, 3 nuevos: `lib/jornadas_lectura_http.test.ts`, `lib/jornadas_lectura_jwt.test.ts`, `hooks/jwt1_reasignacion_actor.test.ts`); sin cambios unstaged ni untracked. El hash del árbol (`git write-tree`) se recalcula tras cualquier edición de este log y no se declara como hash definitivo aquí, para evitar referencias autorreferenciales incorrectas.
+
+**Resolución de hallazgos security review (H-1 a H-4):**
+- H-1 (alto, reasignación): `buscarEnFecha` acepta y propaga `actorEsperado`; `useReasignacionJornada` lo fija desde el usuario del contexto de autorización. Test H-1 agregado (3 casos, títulos corregidos: no afirma cambio de sesión durante el fetch).
+- H-2 (medio, pruebas reales): `lib/jornadas_lectura_http.test.ts` agregado con cliente Supabase real (`createClient` de `@supabase/supabase-js@2.117.3`) y `global.fetch` interceptado (sin red, storage en memoria, cero dependencias nuevas, sin credenciales reales). Cubre R1–R6 (captura JWT de A con cambio a B antes del fetch; reintento HTTP 503 conserva el mismo JWT de A; sesión B con actor esperado A → cero peticiones; sesión nula / `getSession` falla / token vacío → cero peticiones; HTTP 401 → error sin éxito; lectura ordinaria sin actor esperado → contrato previo intacto). Las pruebas T1–T6 con cliente fake se mantienen como guarda de regresión.
+- H-3 (medio, token vacío): `lib/jornadas.ts` falla cerrado si `access_token` está vacío/ausente; `setHeader` incondicional cuando hay actor; sin fallback al token global. Pruebas negativas T4 + R4 agregadas.
+- H-4 (bajo, documentación): encabezado FE-2F restaurado; SHA y árbol corregidos; tipo de pruebas documentado (fake + cliente real HTTP); trazabilidad previa conservada; se eliminó la afirmación falsa de que el entorno no soporta `fetch` real.
+
+**Riesgos residuales:**
+1. Security review pendiente (toca Supabase, auth, RLS, RPC — superficie sensible de AGENTS.md §2.4). Previa a auditoría independiente y commit.
+2. Auditoría independiente del hash aún no ejecutada (Codex/OpenCode).
+3. Sin Playwright E2E ni pgTAP (sin base local autorizada en esta tarea). Pendientes para etapa autorizada.
+4. La garantía de actor esperado depende de que los llamadores pasen `actorEsperado` (salida, corrección, carga, apertura, reasignación lo hacen vía hooks); las lecturas ordinarias de pantalla de jornadas no lo usan y conservan su contrato.
+5. Evidencia HTTP versionada en el repo (pruebas R1–R6); antes solo existía fuera del repo (script de la security review).
+
+**Necesidad de security review:** SÍ (antes del commit). No declarar corregido A→B→A sin la prueba de que el JWT realmente se transmite (R1–R2 lo demuestran con cliente real + fetch interceptado; T1–T3 son guarda de regresión con fake).
+
+Sin `git commit`, push, merge ni deploy aún: pendiente autorización humana.
+
+---
 ## 09/11/2026 — FE-2F: cuarto ciclo EXCEPCIONAL — O-1, verificación atada a la identidad de la intención (rama `feat/fe2f-verificacion-identidad` sobre `b28aa0d`; SIN COMMIT; SECURITY REVIEW PENDIENTE; P13 SIGUE PENDIENTE)
 
 **Excepción registrada (decisión humana, 09/11/2026).** Se autorizó **excepcionalmente un cuarto ciclo** de corrección (`AGENTS.md` §2.3.5, máximo 3 ciclos), **exclusivamente para O-1** mediante la opción A. Razones: O-1 lo identificó la security review FE-2E del ciclo 3 (`auditoria-integral-vm/FE2E_SECURITY_REVIEW/INFORME_SECURITY_REVIEW_FE2E_CICLO3.md`, SHA-256 `4ba9730eb9462f54ad744959d3b3489b566a69cfb2e3a37a69fb6227bf9333c5`, verificado), que lo elevó a decisión humana en lugar de iniciar un ciclo automático. Es un riesgo de integridad (pérdida de la clave de una intención con resultado desconocido y posible duplicación por una intención nueva) y su corrección es acotada. **La excepción no autoriza otras correcciones ni modifica el límite de ciclos para tareas futuras.** Si aparece otro defecto, no se inicia un quinto ciclo: se pide intervención humana.

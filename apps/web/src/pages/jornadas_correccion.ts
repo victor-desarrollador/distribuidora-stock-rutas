@@ -64,7 +64,11 @@ export interface DatosCorreccion {
  * Busca la jornada en la base entre las fechas indicadas: la jornada, `null`
  * si no es visible en ninguna o `undefined` si alguna lectura falló.
  */
-export type BuscarJornada = (id: string, fechas: string[]) => Promise<Jornada | null | undefined>;
+export type BuscarJornada = (
+  id: string,
+  fechas: string[],
+  actorEsperado?: string
+) => Promise<Jornada | null | undefined>;
 
 export const MENSAJE_CORRECCION_OK = "Corrección registrada. La jornada se actualizó.";
 export const MENSAJE_CORRECCION_SIN_EFECTO =
@@ -156,9 +160,9 @@ export function definicionCorreccion(
       motivo: d.motivo,
     }),
     mensajeExito: MENSAJE_CORRECCION_OK,
-    async verificar(d): Promise<Verificacion> {
+    async verificar(d, actorEsperado?: string): Promise<Verificacion> {
       const fechas = d.original.fecha === d.fecha ? [d.fecha] : [d.original.fecha, d.fecha];
-      const j = await buscar(d.jornadaId, fechas);
+      const j = await buscar(d.jornadaId, fechas, actorEsperado);
       if (j === undefined) {
         return { resultado: "sin_verificar", mensaje: MENSAJE_CORRECCION_SIN_VERIFICAR };
       }

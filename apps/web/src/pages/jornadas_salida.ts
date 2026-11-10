@@ -33,10 +33,10 @@ export type PuertoSalida = PuertoOperacion;
  * Estado real de la jornada leído de la base: el estado, `null` si ya no es
  * visible (RLS) o `undefined` si la lectura falló.
  */
-export type VerificarJornada = (jornada: {
-  id: string;
-  fecha: string;
-}) => Promise<EstadoJornada | null | undefined>;
+export type VerificarJornada = (
+  jornada: { id: string; fecha: string },
+  actorEsperado?: string
+) => Promise<EstadoJornada | null | undefined>;
 
 export const MENSAJE_SALIDA_OK =
   "Salida confirmada. La jornada quedó en reparto.";
@@ -74,8 +74,8 @@ function definicionSalida(verificar: VerificarJornada): DefinicionOperacion<void
     preparar: (jornada) => ({ ok: true, datos: { jornadaId: jornada.id, fecha: jornada.fecha } }),
     comando: (d) => ({ tipo: "salir", jornadaId: d.jornadaId }),
     mensajeExito: MENSAJE_SALIDA_OK,
-    async verificar(d): Promise<Verificacion> {
-      const estado = await verificar({ id: d.jornadaId, fecha: d.fecha });
+    async verificar(d, actorEsperado?: string): Promise<Verificacion> {
+      const estado = await verificar({ id: d.jornadaId, fecha: d.fecha }, actorEsperado);
       if (estado !== undefined && estado !== null && ESTADOS_TRAS_SALIDA.has(estado)) {
         return { resultado: "registrada", mensaje: MENSAJE_SALIDA_YA_REGISTRADA };
       }

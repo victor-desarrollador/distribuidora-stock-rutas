@@ -369,7 +369,7 @@ export function crearControladorApertura(
     emitir({ fase: "verificando", datos: i.datos });
     let informacion: string;
     try {
-      const r = await lectura.leerTodasLasJornadas({ fecha: i.datos.fecha });
+      const r = await lectura.leerTodasLasJornadas({ fecha: i.datos.fecha, actorEsperado: i.actor ?? undefined });
       if (!r.ok) {
         informacion = MENSAJE_INFO_SIN_LECTURA;
       } else {

@@ -131,6 +131,16 @@ export interface PaginaJornadas {
 export interface OpcionesLecturaJornadas {
   fecha?: string;
   despues?: CursorJornadas;
+  /**
+   * FE-2F (JWT-1): actor cuya sesión debe firmar la petición de lectura.
+   * Cuando se provee, la lectura valida que la sesión vigente sea de ese
+   * actor y fija el JWT de esa sesión mediante .setHeader() antes de
+   * despachar. Si la sesión es de otro actor, es nula o getSession falla,
+   * no se despacha (falla cerrado). Se obtiene identidad y token del mismo
+   * snapshot de sesión: no hay un await de sesión entre la validación y la
+   * captura del token.
+   */
+  actorEsperado?: string;
 }
 
 export interface PuertoJornadas {
@@ -141,6 +151,7 @@ export interface PuertoJornadas {
   /** Todas las páginas o error: jamás un listado parcial. `intentos` = solicitudes. */
   leerTodasLasJornadas(filtro?: {
     fecha?: string;
+    actorEsperado?: string;
   }): Promise<ResultadoJornada<Jornada[]>>;
   ejecutar(
     comando: ComandoJornada,
@@ -554,7 +565,40 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
     if (fecha !== undefined && despues !== undefined && fecha !== despues.fecha) {
       return fallo({ ...errorLectura, mensaje: MENSAJE_DATOS_INVALIDOS }, 0);
     }
+    const actorEsperado = opciones?.actorEsperado;
     const pedidas = TAMANO_PAGINA_JORNADAS + 1;
+
+    // JWT por petición: validar actor y capturar el token del mismo snapshot
+    // de sesión, antes de construir o despachar la consulta. Un solo getSession
+    // provee identidad y token; no hay un await de sesión entre ambos.
+    let token: string | null = null;
+    if (actorEsperado !== undefined) {
+      let sesionA: {
+        data: { session: { user: { id: string }; access_token: string } | null } | null;
+        error: unknown;
+      } | undefined;
+      try {
+        sesionA = await cliente.auth.getSession();
+      } catch {
+        return fallo(
+          { ...errorLectura, mensaje: MENSAJE_RESULTADO_DESCONOCIDO, resultadoDesconocido: false },
+          0
+        );
+      }
+      const sessionA = sesionA?.data?.session ?? null;
+      const actor = sessionA?.user?.id ?? null;
+      const tok = sessionA?.access_token ?? null;
+      if (!sessionA || actor !== actorEsperado || !tok) {
+        // Falla cerrado: no hay sesión, la identidad no coincide o el token
+        // está ausente. No se despacha ni se deja caer al token global.
+        return fallo(
+          { ...errorLectura, mensaje: MENSAJE_RESULTADO_DESCONOCIDO, resultadoDesconocido: false },
+          0
+        );
+      }
+      token = tok;
+    }
+
     try {
       let consulta = cliente
         .from("jornadas")
@@ -566,6 +610,10 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
           `fecha.lt.${despues.fecha},and(fecha.eq.${despues.fecha},id.lt.${despues.id})`
         );
       }
+      // JWT por petición: cuando hay actorEsperado, token ya fue validado no
+      // nulo arriba; se fija incondicionalmente. Lecturas sin actorEsperado
+      // (token null) no firman: mantienen su contrato existente.
+      if (token) consulta.setHeader("Authorization", `Bearer ${token}`);
       const { data, error, count } = await consulta
         .order("fecha", { ascending: false })
         .order("id", { ascending: false })
@@ -617,6 +665,7 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
 
   async function leerTodasLasJornadas(filtro?: {
     fecha?: string;
+    actorEsperado?: string;
   }): Promise<ResultadoJornada<Jornada[]>> {
     const vistos = new Set<string>();
     const acumuladas: Jornada[] = [];
@@ -624,7 +673,11 @@ export function crearPuertoJornadas(cliente: SupabaseClient): PuertoJornadas {
     let solicitudes = 0;
 
     while (solicitudes < MAX_PAGINAS_JORNADAS) {
-      const r = await leerPaginaJornadas({ fecha: filtro?.fecha, despues });
+      const r = await leerPaginaJornadas({
+        fecha: filtro?.fecha,
+        despues,
+        actorEsperado: filtro?.actorEsperado,
+      });
       solicitudes += 1;
       // Error en cualquier página: se descarta lo leído (nada parcial).
       if (!r.ok) return { ok: false, error: r.error, intentos: solicitudes };

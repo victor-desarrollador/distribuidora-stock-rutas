@@ -27,11 +27,15 @@ import type { BuscarJornada } from "../pages/jornadas_correccion";
  * `null` si no es visible.
  */
 export function buscarEnFecha(
-  puerto: Pick<PuertoJornadas, "leerTodasLasJornadas">
+  puerto: Pick<PuertoJornadas, "leerTodasLasJornadas">,
+  actorEsperado?: string
 ): BuscarJornada {
-  return async (id, fechas) => {
+  return async (id, fechas, _actorEsperado?) => {
+    // Actor fijado al crear la sesión de reasignación (usuario del contexto
+    // de autorización), no el usuario global vigente en el momento del fetch.
+    const a = actorEsperado ?? _actorEsperado;
     for (const fecha of fechas) {
-      const r = await puerto.leerTodasLasJornadas({ fecha });
+      const r = await puerto.leerTodasLasJornadas({ fecha, actorEsperado: a });
       if (!r.ok) return undefined;
       const j = r.datos.find((x) => x.id === id);
       if (j) return j;
@@ -76,7 +80,7 @@ export function crearSesionReasignacion(
   };
   const controlador = crearControladorReasignacion(
     jornadas,
-    buscarEnFecha(jornadas),
+    buscarEnFecha(jornadas, usuarioId),
     releer,
     publicarFase,
     { arbitro: participacion.arbitro, generarClave: deps.generarClave, usuarioEsperado: usuarioId }

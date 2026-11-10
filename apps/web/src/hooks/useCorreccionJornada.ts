@@ -19,9 +19,9 @@ import type { ArbitroJornadas } from "../pages/jornadas_operacion";
 export function buscarConLectura(
   puerto: Pick<PuertoJornadas, "leerTodasLasJornadas">
 ): BuscarJornada {
-  return async (id, fechas) => {
+  return async (id, fechas, actorEsperado?) => {
     for (const fecha of fechas) {
-      const r = await puerto.leerTodasLasJornadas({ fecha });
+      const r = await puerto.leerTodasLasJornadas({ fecha, actorEsperado });
       if (!r.ok) return undefined;
       const j = r.datos.find((x) => x.id === id);
       if (j) return j;
